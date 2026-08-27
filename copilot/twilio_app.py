@@ -14,6 +14,7 @@ import websockets
 from aiohttp import WSMsgType, web
 from groq import Groq
 
+from .call_report import CallReportGenerator
 from .config import Settings
 from .retrieval import LocalKnowledgeBase
 
@@ -26,6 +27,7 @@ class TwilioCopilot:
     def __init__(self, settings: Settings):
         self.settings = settings
         self.groq = Groq(api_key=settings.groq_api_key)
+        self.call_reports = CallReportGenerator(self.groq, settings.llm_model)
         self.knowledge = LocalKnowledgeBase()
         self.dashboards: set[web.WebSocketResponse] = set()
 
@@ -218,7 +220,10 @@ class TwilioCopilot:
                         {"role": "system", "content": (
                             "You are a live sales copilot helping the salesperson answer the client. "
                             "Return at most three concise sentences with the recommended response only. "
-                            "Use supplied knowledge for factual claims and admit when a fact is unavailable."
+                            "Answer as if you are advising the salesperson, not the client. "
+                            "Use supplied knowledge whenever it matches the question. "
+                            "If the knowledge contains a relevant fact, do not say you have no information. "
+                            "Only admit that a fact is unavailable when the supplied knowledge truly does not contain it."
                         )},
                         *context[-self.settings.transcript_window:],
                         {"role": "user", "content": f"Client is asking: {question}\n\nKnowledge:\n{evidence or 'No matching local knowledge.'}"},

@@ -33,7 +33,13 @@ class FastTwilioCopilot(TwilioCopilot):
         packets = {"salesperson": 0, "client": 0}
         dropped = {"salesperson": 0, "client": 0}
         context: list[dict[str, str]] = []
-        state: dict[str, object] = {"generation_task": None, "last_generation": 0.0}
+        full_transcript: list[dict[str, object]] = []
+        call_started = monotonic()
+        state: dict[str, object] = {
+            "generation_task": None,
+            "last_generation": 0.0,
+            "last_client_question": "",
+        }
         await self.component("twilio", "connected", "Media WebSocket accepted")
         LOGGER.info("Twilio connected %s", call_id)
 
@@ -120,14 +126,21 @@ class FastTwilioCopilot(TwilioCopilot):
                                 "content": text,
                             })
                             del context[:-self.settings.transcript_window]
-                        if role == "client" and len(text) >= 8:
+                            full_transcript.append({
+                                "speaker": role,
+                                "text": text,
+                                "elapsed_seconds": monotonic() - call_started,
+                            })
+                        if role == "client" and len(text) >= 8 and (final or speech_final):
                             task = state.get("generation_task")
                             due = monotonic() - float(state["last_generation"]) >= 0.35
+                            duplicate = text == state["last_client_question"]
                             can_start = task is None or task.done()
-                            if speech_final and task and not task.done():
+                            if task and not task.done() and (speech_final or final):
                                 task.cancel()
                                 can_start = True
-                            if due and can_start:
+                            if not duplicate and (due or final) and can_start:
+                                state["last_client_question"] = text
                                 state["last_generation"] = monotonic()
                                 prompt_context = list(context)
                                 if final and prompt_context and prompt_context[-1]["content"] == text:
@@ -171,9 +184,19 @@ class FastTwilioCopilot(TwilioCopilot):
             generation_task = state.get("generation_task")
             if generation_task:
                 generation_task.cancel()
-                with suppress(asyncio.CancelledError):
+                with suppress(asyncio.CancelledError, Exception):
                     await generation_task
             await twilio.close()
+            try:
+                report = await self.call_reports.generate(
+                    call_id,
+                    full_transcript,
+                    monotonic() - call_started,
+                )
+                await self.broadcast({"type": "call_report", "call_id": call_id, "report": report})
+            except Exception as exc:
+                LOGGER.exception("call report failed %s", call_id)
+                await self.broadcast({"type": "error", "message": f"Call report failed: {exc}", "call_id": call_id})
             await self.broadcast({
                 "type": "call_end", "call_id": call_id,
                 "dropped_audio_chunks": dropped["salesperson"] + dropped["client"],

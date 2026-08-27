@@ -65,6 +65,23 @@ If Twilio never reaches `streaming`, check `TWILIO_STREAM_URL`. If one audio tra
 
 Place `.txt` or `.md` files in `knowledge/` before starting the server. Relevant passages and source filenames are included with suggestions.
 
+## Post-call JSON reports
+
+After Twilio sends the call `stop` event, the application sends a `call_report` event through the dashboard WebSocket and saves the same JSON object to `reports/<call_sid>.json`. The report is generated from the complete final speaker-tagged transcript, not only the latest live prompt context.
+
+The JSON contains these sections:
+
+1. `call_summary`
+2. `call_status`
+3. `outcome`
+4. `key_moments_log`
+5. `performance_metrics`
+6. `conversion_indicators`
+7. `agent_tone_delivery_feedback`
+8. `agent_sentiment_responsiveness`
+
+Prompt utilization and delivery scores are estimates unless the system has an exact teleprompt-to-speech comparison. Reports should be reviewed before being used for automated business decisions.
+
 ## Tests
 
 ```powershell

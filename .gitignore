@@ -32,6 +32,9 @@ Thumbs.db
 # Logs
 *.log
 
+# Generated post-call reports
+reports/
+
 # Build / distribution
 build/
 dist/
