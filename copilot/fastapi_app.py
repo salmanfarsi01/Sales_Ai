@@ -451,8 +451,11 @@ class FastAPICopilot:
             token = websocket.query_params.get("token")
             
             if not tenant_id:
-                await websocket.close(code=4000, reason="Missing required query parameter: tenant_id")
-                return
+                if self.settings.copilot_env == "production":
+                    await websocket.close(code=4000, reason="Missing required query parameter: tenant_id")
+                    return
+                else:
+                    tenant_id = self.settings.default_tenant_id
             
             # Authenticate the connection via signed JWT token
             if self.settings.jwt_secret:
@@ -494,8 +497,11 @@ class FastAPICopilot:
             call_sid_param = websocket.query_params.get("call_sid")
 
             if not tenant_id:
-                await websocket.close(code=4000, reason="Missing required parameter: tenant_id")
-                return
+                if self.settings.copilot_env == "production":
+                    await websocket.close(code=4000, reason="Missing required parameter: tenant_id")
+                    return
+                else:
+                    tenant_id = self.settings.default_tenant_id
 
             await websocket.accept()
             call_sid = call_sid_param or str(uuid.uuid4())

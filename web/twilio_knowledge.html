@@ -203,10 +203,7 @@
                 <h1>user sales</h1>
                 <div class="sub">Client questions → context recovery → PDF knowledge → streamed answer</div>
             </div>
-            <form class="upload" id="upload"><select id="knowledgeTarget" name="target" aria-label="Knowledge target">
-                    <option value="sales">Sales Index</option>
-                    <option value="admin">Admin Index</option>
-                </select><input id="pdf" name="file" type="file" accept="application/pdf,.pdf" required><button>Upload
+            <form class="upload" id="upload"><input id="pdf" name="file" type="file" accept="application/pdf,.pdf" required><button>Upload
                     PDF</button><span class="meta" id="uploadStatus"></span></form>
         </header>
         <div class="stages">
@@ -240,7 +237,6 @@
         const upload = document.querySelector('#upload');
         const pdf = document.querySelector('#pdf');
         const uploadStatus = document.querySelector('#uploadStatus');
-        const knowledgeTarget = document.querySelector('#knowledgeTarget');
 
         let current = null;
         let interim = {};
@@ -295,14 +291,14 @@
                 return;
             }
 
-            const target = knowledgeTarget.value || 'sales';
-            uploadStatus.textContent = `Uploading to ${target} index…`;
+            uploadStatus.textContent = 'Uploading...';
 
             const body = new FormData();
             body.append('file', file);
-            body.append('target', target);
+            body.append('target', 'sales');
+            body.append('tenant_id', 'default');
 
-            console.log('Uploading file', { name: file.name, size: file.size, target });
+            console.log('Uploading file', { name: file.name, size: file.size });
 
             try {
                 const response = await fetch('/knowledge/upload', { method: 'POST', body });
@@ -312,13 +308,42 @@
 
                 if (!response.ok) throw new Error(result.message || result);
 
-                uploadStatus.textContent = `${result.pages} pages · ${result.indexed_chunks} chunks · ${result.target} index`;
-                note(`Knowledge indexed to ${result.target} index: ${result.name}`);
+                const docId = result.doc_id;
+                note(`Upload accepted. Ingestion job started: ${docId}`);
+                pollIngestionStatus(docId);
             } catch (error) {
                 uploadStatus.textContent = 'Upload failed';
                 note(error.message, true);
             }
         };
+
+        function pollIngestionStatus(docId) {
+            const interval = setInterval(async () => {
+                try {
+                    const response = await fetch(`/knowledge/status/${docId}`);
+                    if (!response.ok) {
+                        throw new Error(`Failed to check status: ${response.statusText}`);
+                    }
+                    const job = await response.json();
+                    
+                    if (job.status === 'completed') {
+                        clearInterval(interval);
+                        uploadStatus.textContent = `Completed! ${job.pages} pages · ${job.chunks_total} chunks indexed`;
+                        note(`PDF successfully processed and indexed: ${job.filename}`);
+                    } else if (job.status === 'failed') {
+                        clearInterval(interval);
+                        uploadStatus.textContent = 'Processing failed';
+                        note(`Processing failed for ${job.filename}: ${job.error}`, true);
+                    } else {
+                        uploadStatus.textContent = `Processing: ${job.progress}% (${job.chunks_uploaded}/${job.chunks_total} chunks)`;
+                    }
+                } catch (error) {
+                    clearInterval(interval);
+                    uploadStatus.textContent = 'Error checking status';
+                    note(error.message, true);
+                }
+            }, 1000);
+        }
 
         function connect() {
             const ws = new WebSocket(`${location.protocol === 'https:' ? 'wss' : 'ws'}://${location.host}/events`);
@@ -327,31 +352,32 @@
 
             ws.onmessage = ({ data }) => {
                 const e = JSON.parse(data);
+                const d = e.data || {};
 
                 if (e.type === 'component') {
-                    stage(e.component, e.state, e.detail);
+                    stage(d.component, d.state, d.detail);
                 } else if (e.type === 'status') {
-                    note(e.message);
+                    note(d.message);
                 } else if (e.type === 'call_start') {
                     transcript.textContent = '';
-                    note(`Call started: ${e.call_id}`);
+                    note(`Call started: ${d.call_sid}`);
                 } else if (e.type === 'transcript') {
-                    turn(e.role, e.text, e.final);
+                    turn(d.role, d.text, d.final);
                 } else if (e.type === 'suggestion_start') {
-                    current = e.id;
+                    current = d.id;
                     answer.textContent = '';
-                    sources.textContent = e.sources.length ? 'Sources: ' + e.sources.join(', ') : 'Answering from general model knowledge';
-                    metrics.textContent = 'Question: ' + e.question;
-                } else if (e.type === 'suggestion_delta' && e.id === current) {
-                    answer.textContent += e.text;
-                } else if (e.type === 'suggestion_end' && e.id === current) {
-                    metrics.textContent += ` · TTFT ${e.ttft_ms ?? 'n/a'} ms · total ${e.total_ms} ms`;
+                    sources.textContent = d.sources.length ? 'Sources: ' + d.sources.join(', ') : 'Answering from general model knowledge';
+                    metrics.textContent = 'Question: ' + d.question;
+                } else if (e.type === 'suggestion_delta' && d.id === current) {
+                    answer.textContent += d.text;
+                } else if (e.type === 'suggestion_end' && d.id === current) {
+                    metrics.textContent += ` · TTFT ${d.ttft_ms ?? 'n/a'} ms · total ${d.total_ms} ms`;
                 } else if (e.type === 'knowledge_uploaded') {
-                    note(`PDF ready: ${e.name}, ${e.pages} pages`);
+                    note(`PDF ready: ${d.name}, ${d.pages} pages`);
                 } else if (e.type === 'call_end') {
-                    note(`Call ended; dropped audio ${e.dropped_audio_chunks}`);
+                    note(`Call ended; dropped audio ${d.dropped_audio_chunks}`);
                 } else if (e.type === 'error') {
-                    note(e.message, true);
+                    note(d.message, true);
                 }
             };
 
