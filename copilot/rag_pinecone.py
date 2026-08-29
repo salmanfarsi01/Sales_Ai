@@ -15,8 +15,6 @@ from .file_extraction import ExtractedContent, FileExtractor
 LOGGER = logging.getLogger("copilot.rag")
 
 # Pinecone configuration
-ADMIN_INDEX_NAME = "admin-kb"
-SUBSCRIBER_INDEX_NAME = "subscriber-kb"
 EMBEDDING_MODEL = "text-embedding-3-small"
 EMBEDDING_DIMENSION = 1536
 BATCH_SIZE = 100
@@ -41,21 +39,18 @@ class PineconeRAG:
         self,
         pinecone_api_key: str,
         openai_api_key: str,
-        environment: str = "us-east-1",
-        admin_mode: bool = False,
+        index_name: str = "subscriber-kb",
     ):
         """Initialize Pinecone RAG.
         
         Args:
             pinecone_api_key: Pinecone API key
             openai_api_key: OpenAI API key
-            environment: Pinecone environment
-            admin_mode: If True, use admin index; else use subscriber index
+            index_name: The single Pinecone index name to use
         """
         self.pc = Pinecone(api_key=pinecone_api_key)
         self.openai_client = openai.OpenAI(api_key=openai_api_key)
-        self.admin_mode = admin_mode
-        self.index_name = ADMIN_INDEX_NAME if admin_mode else SUBSCRIBER_INDEX_NAME
+        self.index_name = index_name
         self.index = self._get_or_create_index()
 
     def _get_or_create_index(self):
@@ -110,6 +105,8 @@ class PineconeRAG:
         tenant_id: str,
         file_content: Optional[bytes] = None,
         chunk_size: int = 1500,
+        scope: str = "sales",
+        owner_id: Optional[str] = None,
     ) -> dict[str, int]:
         """Upload and index file content.
         
@@ -118,6 +115,8 @@ class PineconeRAG:
             tenant_id: Tenant identifier (namespace)
             file_content: Binary file content (optional, reads from disk if not provided)
             chunk_size: Size of text chunks
+            scope: The scope of the document ("sales" or "admin")
+            owner_id: Optional owner identifier (individual user)
             
         Returns:
             Dict with upload stats (chunks_uploaded, total_size)
@@ -150,6 +149,8 @@ class PineconeRAG:
                     "tenant_id": tenant_id,
                     "chunk_index": chunk_idx,
                     "total_chunks": len(chunks),
+                    "scope": scope,
+                    "owner_id": owner_id or "",
                     **extracted.metadata,
                 }
             ))
@@ -177,6 +178,8 @@ class PineconeRAG:
         tenant_id: str,
         top_k: int = 5,
         min_score: float = 0.5,
+        scope: Optional[str] = None,
+        owner_id: Optional[str] = None,
     ) -> list[RAGChunk]:
         """Search for relevant chunks using vector similarity.
         
@@ -185,6 +188,8 @@ class PineconeRAG:
             tenant_id: Tenant identifier (namespace)
             top_k: Number of results to return
             min_score: Minimum similarity score (0-1)
+            scope: Optional metadata scope filter
+            owner_id: Optional metadata owner filter
             
         Returns:
             List of relevant RAG chunks
@@ -195,12 +200,19 @@ class PineconeRAG:
             LOGGER.error(f"Failed to embed query: {e}")
             return []
         
+        filter_dict = {}
+        if scope:
+            filter_dict["scope"] = {"$eq": scope}
+        if owner_id:
+            filter_dict["owner_id"] = {"$eq": owner_id}
+
         results = self.index.query(
             vector=query_embedding,
             top_k=top_k,
             namespace=tenant_id,
             include_metadata=True,
             include_values=False,
+            filter=filter_dict if filter_dict else None,
         )
         
         chunks = []

@@ -55,10 +55,8 @@ class CallReportTests(unittest.TestCase):
             report = asyncio.run(generator.generate(
                 "CA123", [{"speaker": "client", "text": "Hello", "elapsed_seconds": 0.1}], 1.2
             ))
-            saved = Path(directory, "CA123.json")
             self.assertEqual(report["call_id"], "CA123")
-            self.assertTrue(saved.exists())
-            self.assertEqual(json.loads(saved.read_text(encoding="utf-8"))["call_id"], "CA123")
+            self.assertEqual(report["call_summary"]["overview"], "A productive call")
 
 
 if __name__ == "__main__":

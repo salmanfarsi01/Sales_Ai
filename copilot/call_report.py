@@ -115,10 +115,4 @@ Complete transcript:
         report = complete_report(json.loads(_json_text(raw)))
         report["call_id"] = call_id
         report["generated_at"] = datetime.now(timezone.utc).isoformat()
-        self.directory.mkdir(parents=True, exist_ok=True)
-        await asyncio.to_thread(
-            (self.directory / f"{call_id}.json").write_text,
-            json.dumps(report, indent=2, ensure_ascii=True),
-            encoding="utf-8",
-        )
         return report

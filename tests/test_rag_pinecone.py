@@ -26,10 +26,9 @@ class TestPineconeRAG:
         rag = PineconeRAG(
             pinecone_api_key="test_key",
             openai_api_key="test_openai",
-            admin_mode=False,
+            index_name="subscriber-kb",
         )
         
-        assert rag.admin_mode is False
         assert rag.index_name == "subscriber-kb"
     
     def test_admin_mode_initialization(self, mock_pinecone, mock_openai):
@@ -37,10 +36,9 @@ class TestPineconeRAG:
         rag = PineconeRAG(
             pinecone_api_key="test_key",
             openai_api_key="test_openai",
-            admin_mode=True,
+            index_name="admin-kb",
         )
         
-        assert rag.admin_mode is True
         assert rag.index_name == "admin-kb"
     
     def test_generate_chunk_id(self, mock_pinecone, mock_openai):

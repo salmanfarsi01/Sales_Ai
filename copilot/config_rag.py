@@ -22,6 +22,7 @@ class RAGSettings:
     """RAG and vector database configuration."""
     pinecone_api_key: str
     openai_api_key: str
+    pinecone_index_name: str = "subscriber-kb"
     rag_enabled: bool = True
     admin_mode: bool = False
     chunk_size: int = 1500
@@ -56,13 +57,17 @@ class Settings:
     
     # Multi-tenant
     default_tenant_id: str = "default"
+    
+    # Laravel Webhook integration
+    laravel_webhook_url: str = ""
 
     @classmethod
     def from_env(cls) -> "Settings":
-        # Basic settings (required)
+        # Basic RAG settings
         rag_settings = RAGSettings(
             pinecone_api_key=_required("PINECONE_API_KEY"),
             openai_api_key=_required("OPENAI_API_KEY"),
+            pinecone_index_name=_optional("PINECONE_INDEX_NAME", "subscriber-kb"),
             rag_enabled=_optional("RAG_ENABLED", "true").lower() == "true",
             admin_mode=_optional("ADMIN_MODE", "false").lower() == "true",
             chunk_size=int(_optional("RAG_CHUNK_SIZE", "1500")),
@@ -82,4 +87,5 @@ class Settings:
             transcript_window=int(_optional("TRANSCRIPT_WINDOW", "12")),
             rag=rag_settings,
             default_tenant_id=_optional("DEFAULT_TENANT_ID", "default"),
+            laravel_webhook_url=_optional("LARAVEL_WEBHOOK_URL", ""),
         )

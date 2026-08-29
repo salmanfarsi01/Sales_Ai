@@ -24,7 +24,7 @@ class RAGAPIHandler:
         POST /api/rag/upload
         multipart/form-data:
           - file: binary file content
-          - tenant_id: string (optional, uses default if not provided)
+          - tenant_id: string (required)
         
         Returns:
             JSON response with upload status
@@ -40,16 +40,13 @@ class RAGAPIHandler:
                     file_name = field.filename
                     file_data = await field.read()
                 elif field.name == "tenant_id":
-                    tenant_id = (await field.read()).decode()
+                    tenant_id = (await field.read()).decode().strip()
             
-            if not file_data or not file_name:
+            if not file_data or not file_name or not tenant_id:
                 return web.json_response(
                     {"error": "Missing file or tenant_id"},
                     status=400
                 )
-            
-            if not tenant_id:
-                tenant_id = "default"
             
             result = self.rag.upload_knowledge(
                 file_path=file_name,
@@ -76,11 +73,11 @@ class RAGAPIHandler:
         """
         try:
             file_name = request.match_info.get("file_name")
-            tenant_id = request.query.get("tenant_id", "default")
+            tenant_id = request.query.get("tenant_id")
             
-            if not file_name:
+            if not file_name or not tenant_id:
                 return web.json_response(
-                    {"error": "Missing file_name"},
+                    {"error": "Missing file_name or tenant_id"},
                     status=400
                 )
             
@@ -107,7 +104,12 @@ class RAGAPIHandler:
             JSON response with file list
         """
         try:
-            tenant_id = request.query.get("tenant_id", "default")
+            tenant_id = request.query.get("tenant_id")
+            if not tenant_id:
+                return web.json_response(
+                    {"error": "Missing tenant_id"},
+                    status=400
+                )
             
             result = self.rag.list_knowledge_files(tenant_id)
             

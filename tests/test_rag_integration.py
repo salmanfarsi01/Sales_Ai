@@ -38,10 +38,9 @@ class TestCopilotRAGRetriever:
         retriever = CopilotRAGRetriever(
             pinecone_api_key="key",
             openai_api_key="key",
-            admin_mode=False,
+            pinecone_index_name="subscriber-kb",
         )
         
-        assert retriever.admin_mode is False
         assert retriever.rag is not None
     
     def test_get_context_formatting(self, mock_rag):

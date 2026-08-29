@@ -28,14 +28,13 @@ class CopilotRAGRetriever:
         self,
         pinecone_api_key: str,
         openai_api_key: str,
-        admin_mode: bool = False,
+        pinecone_index_name: str = "subscriber-kb",
     ):
         self.rag = PineconeRAG(
             pinecone_api_key=pinecone_api_key,
             openai_api_key=openai_api_key,
-            admin_mode=admin_mode,
+            index_name=pinecone_index_name,
         )
-        self.admin_mode = admin_mode
     
     def get_context(
         self,
@@ -43,6 +42,8 @@ class CopilotRAGRetriever:
         tenant_id: str,
         top_k: int = 3,
         min_score: float = 0.5,
+        scope: Optional[str] = None,
+        owner_id: Optional[str] = None,
     ) -> list[str]:
         """Get knowledge context for a query.
         
@@ -51,6 +52,8 @@ class CopilotRAGRetriever:
             tenant_id: Tenant namespace
             top_k: Number of chunks to retrieve
             min_score: Minimum vector similarity score
+            scope: Optional metadata scope filter
+            owner_id: Optional metadata owner filter
             
         Returns:
             List of relevant knowledge chunks as strings
@@ -61,6 +64,8 @@ class CopilotRAGRetriever:
                 tenant_id=tenant_id,
                 top_k=top_k,
                 min_score=min_score,
+                scope=scope,
+                owner_id=owner_id,
             )
             
             formatted_chunks = []
@@ -79,6 +84,8 @@ class CopilotRAGRetriever:
         file_path: str,
         tenant_id: str,
         file_content: Optional[bytes] = None,
+        scope: str = "sales",
+        owner_id: Optional[str] = None,
     ) -> dict:
         """Upload knowledge file for a tenant.
         
@@ -86,6 +93,8 @@ class CopilotRAGRetriever:
             file_path: Path to file (or just filename if using file_content)
             tenant_id: Tenant namespace
             file_content: Binary file content
+            scope: The scope of the document ("sales" or "admin")
+            owner_id: Optional owner identifier
             
         Returns:
             Upload status dict
@@ -95,6 +104,8 @@ class CopilotRAGRetriever:
                 file_path=file_path,
                 tenant_id=tenant_id,
                 file_content=file_content,
+                scope=scope,
+                owner_id=owner_id,
             )
             
             LOGGER.info(f"Uploaded {file_path} for tenant {tenant_id}: {result}")

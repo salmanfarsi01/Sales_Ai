@@ -49,12 +49,18 @@ class LocalKnowledgeBase:
     def _add(self, path: Path, text: str) -> None:
         self._chunks.append((str(path.as_posix()), text, tokens(text)))
 
-    def search(self, query: str, limit: int = 3) -> list[RetrievedChunk]:
+    def search(self, query: str, limit: int = 3, tenant_id: Optional[str] = None) -> list[RetrievedChunk]:
         query_tokens = tokens(query)
         if not query_tokens:
             return []
         results: list[RetrievedChunk] = []
         for source, text, document_tokens in self._chunks:
+            if tenant_id:
+                path_parts = Path(source).parts
+                # For Windows paths, source might be e.g. "knowledge/tenant_id/..."
+                # Let's check if the tenant_id folder matches
+                if len(path_parts) > 1 and path_parts[1] != tenant_id:
+                    continue
             overlap = query_tokens & document_tokens
             if not overlap:
                 continue
