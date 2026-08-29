@@ -582,11 +582,18 @@ class FastAPICopilot:
 
                     async def send_audio() -> None:
                         while True:
-                            chunk = await queues[role].get()
-                            if chunk is STOP:
-                                await deepgram.send(json.dumps({"type": "CloseStream"}))
-                                return
-                            await deepgram.send(chunk)
+                            try:
+                                chunk = await asyncio.wait_for(queues[role].get(), timeout=3.0)
+                                if chunk is STOP:
+                                    await deepgram.send(json.dumps({"type": "CloseStream"}))
+                                    return
+                                await deepgram.send(chunk)
+                            except asyncio.TimeoutError:
+                                try:
+                                    await deepgram.send(json.dumps({"type": "KeepAlive"}))
+                                except Exception as exc:
+                                    LOGGER.warning("Failed to send KeepAlive to Deepgram for %s: %s", role, exc)
+                                    return
 
                     async def receive_text() -> None:
                         async for raw in deepgram:
