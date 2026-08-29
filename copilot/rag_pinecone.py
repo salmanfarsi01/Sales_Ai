@@ -5,7 +5,7 @@ from __future__ import annotations
 import hashlib
 import logging
 from dataclasses import dataclass
-from typing import Optional
+from typing import Optional, Callable
 
 import openai
 from pinecone import Pinecone
@@ -107,6 +107,7 @@ class PineconeRAG:
         chunk_size: int = 1500,
         scope: str = "sales",
         owner_id: Optional[str] = None,
+        progress_callback: Optional[Callable[[int, int], None]] = None,
     ) -> dict[str, int]:
         """Upload and index file content.
         
@@ -117,6 +118,7 @@ class PineconeRAG:
             chunk_size: Size of text chunks
             scope: The scope of the document ("sales" or "admin")
             owner_id: Optional owner identifier (individual user)
+            progress_callback: Callback triggered with (chunks_uploaded, total_chunks)
             
         Returns:
             Dict with upload stats (chunks_uploaded, total_size)
@@ -165,6 +167,8 @@ class PineconeRAG:
             )
             batch_count += len(batch)
             LOGGER.info(f"Uploaded {batch_count}/{len(vectors_to_upsert)} chunks")
+            if progress_callback:
+                progress_callback(batch_count, len(vectors_to_upsert))
         
         return {
             "chunks_uploaded": len(vectors_to_upsert),

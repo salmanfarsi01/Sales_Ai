@@ -20,7 +20,7 @@ from typing import Optional, Any
 import httpx
 import websockets
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect, UploadFile, File, Form, HTTPException
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, JSONResponse
 from groq import Groq
 
 from .config_rag import Settings
@@ -52,6 +52,7 @@ class FastAPICopilot:
         self.knowledge = LocalKnowledgeBase()
         self.dashboards: dict[str, set[WebSocket]] = {}
         self._client_history: dict[str, list[str]] = {}
+        self.ingestion_jobs: dict[str, dict[str, Any]] = {}
 
         if settings.rag and settings.rag.rag_enabled:
             LOGGER.info("Initializing Pinecone RAG system (shared index: %s)", settings.rag.pinecone_index_name)
@@ -79,8 +80,15 @@ class FastAPICopilot:
             sockets.discard(socket)
 
     async def component(self, tenant_id: str, name: str, state: str, detail: str = "") -> None:
-        """Helper to broadcast component status."""
-        await self.broadcast(tenant_id, {"type": "component", "component": name, "state": state, "detail": detail})
+        """Helper to broadcast component status in standard event envelop format."""
+        await self.broadcast(tenant_id, {
+            "type": "component",
+            "data": {
+                "component": name,
+                "state": state,
+                "detail": detail
+            }
+        })
 
     async def send_to_laravel_webhook(self, event_type: str, data: dict[str, Any], tenant_id: str) -> None:
         """Post event payloads asynchronously to the Laravel webhook endpoint if configured."""
@@ -105,6 +113,116 @@ class FastAPICopilot:
         except Exception as exc:
             LOGGER.error("Failed to POST to Laravel webhook for event %s: %s", event_type, exc)
 
+    async def _process_ingestion_background(
+        self,
+        doc_id: str,
+        filename: str,
+        payload: bytes,
+        target: str,
+        tenant_id: str,
+        salesman_id: Optional[str]
+    ) -> None:
+        """Background worker to extract, index, and sync PDF upload progress."""
+        try:
+            job = self.ingestion_jobs[doc_id]
+            job["status"] = "processing"
+            job["progress"] = 10
+            
+            try:
+                resolved_target = resolve_target(target)
+            except ValueError as exc:
+                job["status"] = "failed"
+                job["progress"] = 100
+                job["error"] = str(exc)
+                return
+            
+            job["progress"] = 20
+            
+            try:
+                text, pages = await asyncio.to_thread(extract_pdf, payload)
+            except Exception as exc:
+                job["status"] = "failed"
+                job["progress"] = 100
+                job["error"] = f"Extraction failed: {exc}"
+                return
+            
+            job["progress"] = 40
+            job["pages"] = pages
+            job["characters"] = len(text)
+            
+            target_dir = KNOWLEDGE / tenant_id / resolved_target
+            target_dir.mkdir(parents=True, exist_ok=True)
+            name = f"{safe_stem(filename)}_{int(time())}"
+            pdf_path = target_dir / f"{name}.pdf"
+            extracted_path = target_dir / f"{name}.pdf.md"
+
+            await asyncio.to_thread(pdf_path.write_bytes, payload)
+            await asyncio.to_thread(
+                extracted_path.write_text,
+                f"# Source: {filename}\n\n{text}",
+                encoding="utf-8",
+            )
+            await asyncio.to_thread(self.knowledge.reload)
+            
+            job["progress"] = 50
+            
+            pinecone_key = os.getenv("PINECONE_API_KEY")
+            openai_key = os.getenv("OPENAI_API_KEY")
+            pinecone_success = False
+            
+            if pinecone_key and openai_key and self.rag_retriever:
+                job["progress"] = 60
+                
+                def progress_cb(uploaded: int, total: int):
+                    job["chunks_total"] = total
+                    job["chunks_uploaded"] = uploaded
+                    ratio = uploaded / max(1, total)
+                    job["progress"] = int(60 + 40 * ratio)
+                
+                try:
+                    await asyncio.to_thread(
+                        self.rag_retriever.upload_knowledge,
+                        file_path=str(pdf_path),
+                        tenant_id=tenant_id,
+                        file_content=payload,
+                        scope=resolved_target,
+                        owner_id=salesman_id,
+                        progress_callback=progress_cb,
+                    )
+                    pinecone_success = True
+                except Exception as exc:
+                    LOGGER.error("Failed to upload %s to Pinecone: %s", filename, exc)
+                    job["status"] = "failed"
+                    job["progress"] = 100
+                    job["error"] = f"Pinecone sync failed: {exc}"
+                    return
+            
+            job["progress"] = 100
+            job["status"] = "completed"
+            
+            # Broadcast the completed event to visual channel
+            event = {
+                "type": "knowledge_uploaded",
+                "data": {
+                    "doc_id": doc_id,
+                    "name": pdf_path.name,
+                    "target": resolved_target,
+                    "pages": pages,
+                    "characters": len(text),
+                    "indexed_chunks": len(self.knowledge._chunks),
+                    "pinecone_synced": pinecone_success,
+                }
+            }
+            await self.broadcast(tenant_id, event)
+            LOGGER.info("indexed PDF %s tenant=%s target=%s pages=%d characters=%d pinecone_synced=%s", pdf_path.name, tenant_id, resolved_target, pages, len(text), pinecone_success)
+            
+        except Exception as exc:
+            LOGGER.exception("Unhandled error in background ingestion task %s", doc_id)
+            if doc_id in self.ingestion_jobs:
+                self.ingestion_jobs[doc_id]["status"] = "failed"
+                self.ingestion_jobs[doc_id]["progress"] = 100
+                self.ingestion_jobs[doc_id]["error"] = str(exc)
+
     async def stream_suggestion(
         self,
         call_id: str,
@@ -115,7 +233,6 @@ class FastAPICopilot:
         owner_id: Optional[str] = None,
     ) -> None:
         """Retrieve context and stream Groq recommendation."""
-        # Context recovery logic
         from .context_recovery import recover_query
 
         prior_client_turns = [
@@ -125,13 +242,14 @@ class FastAPICopilot:
         if reconstructed != question.strip():
             await self.broadcast(tenant_id, {
                 "type": "status",
-                "message": f'Context recovered: "{question}" → "{reconstructed}"',
+                "data": {
+                    "message": f'Context recovered: "{question}" → "{reconstructed}"'
+                }
             })
 
         suggestion_id = str(uuid.uuid4())
         started = monotonic()
 
-        # Retrieve knowledge context (using RAG if configured, fallback to local)
         if self.rag_retriever:
             context_list = self.rag_retriever.get_context(
                 query=reconstructed,
@@ -142,7 +260,6 @@ class FastAPICopilot:
                 owner_id=owner_id,
             )
             evidence = "\n\n".join(context_list)
-            # Reconstruct list of sources for suggestion UI
             sources = []
             for item in context_list:
                 if "From " in item and ":\n" in item:
@@ -154,10 +271,12 @@ class FastAPICopilot:
 
         await self.broadcast(tenant_id, {
             "type": "suggestion_start",
-            "id": suggestion_id,
-            "call_id": call_id,
-            "question": reconstructed,
-            "sources": sources,
+            "data": {
+                "id": suggestion_id,
+                "call_id": call_id,
+                "question": reconstructed,
+                "sources": sources,
+            }
         })
 
         queue: asyncio.Queue[str | None | Exception] = asyncio.Queue()
@@ -205,15 +324,23 @@ class FastAPICopilot:
                 raise item
             if first_token_ms is None:
                 first_token_ms = int((monotonic() - started) * 1000)
-            await self.broadcast(tenant_id, {"type": "suggestion_delta", "id": suggestion_id, "text": item})
+            await self.broadcast(tenant_id, {
+                "type": "suggestion_delta",
+                "data": {
+                    "id": suggestion_id,
+                    "text": item
+                }
+            })
             full_suggestion += item
 
         # Stream suggestion completed event
         await self.broadcast(tenant_id, {
             "type": "suggestion_end",
-            "id": suggestion_id,
-            "ttft_ms": first_token_ms,
-            "total_ms": int((monotonic() - started) * 1000),
+            "data": {
+                "id": suggestion_id,
+                "ttft_ms": first_token_ms,
+                "total_ms": int((monotonic() - started) * 1000),
+            }
         })
 
         # Emit log suggestions record for delivery scoring
@@ -224,15 +351,38 @@ class FastAPICopilot:
         }
         await self.broadcast(tenant_id, {
             "type": "suggestion_log",
-            "call_sid": call_id,
-            "suggestion_text": full_suggestion,
-            "timestamp": int(time()),
+            "data": suggestion_log
         })
         asyncio.create_task(self.send_to_laravel_webhook("suggestion_logged", suggestion_log, tenant_id))
 
     def get_app(self) -> FastAPI:
         """Constructs and configures the FastAPI application router."""
         app = FastAPI(title="Twilio Sales Copilot", version="2.0.0")
+
+        # Standardized Error Handler for HTTPException
+        @app.exception_handler(HTTPException)
+        async def http_exception_handler(request, exc):
+            return JSONResponse(
+                status_code=exc.status_code,
+                content={
+                    "status": "error",
+                    "error_code": f"HTTP_{exc.status_code}",
+                    "message": exc.detail,
+                }
+            )
+
+        # Standardized Error Handler for General Server Exceptions
+        @app.exception_handler(Exception)
+        async def general_exception_handler(request, exc):
+            LOGGER.exception("Unhandled server error: %s", exc)
+            return JSONResponse(
+                status_code=500,
+                content={
+                    "status": "error",
+                    "error_code": "INTERNAL_SERVER_ERROR",
+                    "message": str(exc),
+                }
+            )
 
         @app.get("/")
         async def dashboard():
@@ -255,7 +405,12 @@ class FastAPICopilot:
 
             await websocket.accept()
             self.dashboards.setdefault(tenant_id, set()).add(websocket)
-            await websocket.send_json({"type": "status", "message": f"Dashboard connected for tenant {tenant_id}; waiting for call."})
+            await websocket.send_json({
+                "type": "status",
+                "data": {
+                    "message": f"Dashboard connected for tenant {tenant_id}; waiting for call."
+                }
+            })
             try:
                 while True:
                     await websocket.receive_text()
@@ -305,7 +460,12 @@ class FastAPICopilot:
                         elif kind == "start":
                             start = event.get("start", {})
                             call_id = call_sid or start.get("callSid", call_id)
-                            await self.broadcast(tenant_id, {"type": "call_start", "call_id": call_id})
+                            await self.broadcast(tenant_id, {
+                                "type": "call_start",
+                                "data": {
+                                    "call_id": call_id
+                                }
+                            })
                             await self.component(tenant_id, "twilio", "streaming", f"Call {call_id}")
                         elif kind == "media":
                             media = event.get("media", {})
@@ -369,10 +529,12 @@ class FastAPICopilot:
                             await self.component(tenant_id, f"stt_{role}", "transcribing", "Speech detected")
                             await self.broadcast(tenant_id, {
                                 "type": "transcript",
-                                "call_id": call_id,
-                                "role": role,
-                                "text": text,
-                                "final": final,
+                                "data": {
+                                    "call_id": call_id,
+                                    "role": role,
+                                    "text": text,
+                                    "final": final,
+                                }
                             })
                             if final:
                                 context.append({
@@ -456,7 +618,13 @@ class FastAPICopilot:
                 await asyncio.gather(*pending, return_exceptions=True)
             except Exception as exc:
                 LOGGER.exception("call pipeline failed %s", call_id)
-                await self.broadcast(tenant_id, {"type": "error", "message": str(exc), "call_id": call_id})
+                await self.broadcast(tenant_id, {
+                    "type": "error",
+                    "data": {
+                        "call_id": call_id,
+                        "message": str(exc),
+                    }
+                })
                 await self.component(tenant_id, "pipeline", "error", str(exc))
             finally:
                 generation_task = state.get("generation_task")
@@ -472,7 +640,13 @@ class FastAPICopilot:
                         full_transcript,
                         monotonic() - call_started,
                     )
-                    await self.broadcast(tenant_id, {"type": "call_report", "call_id": call_id, "report": report})
+                    await self.broadcast(tenant_id, {
+                        "type": "call_report",
+                        "data": {
+                            "call_id": call_id,
+                            "report": report
+                        }
+                    })
                     
                     # POST report payload directly to Laravel Webhook
                     report_data = {
@@ -482,12 +656,20 @@ class FastAPICopilot:
                     asyncio.create_task(self.send_to_laravel_webhook("call_report_generated", report_data, tenant_id))
                 except Exception as exc:
                     LOGGER.exception("call report failed %s", call_id)
-                    await self.broadcast(tenant_id, {"type": "error", "message": f"Call report failed: {exc}", "call_id": call_id})
+                    await self.broadcast(tenant_id, {
+                        "type": "error",
+                        "data": {
+                            "call_id": call_id,
+                            "message": f"Call report failed: {exc}",
+                        }
+                    })
                 
                 await self.broadcast(tenant_id, {
                     "type": "call_end",
-                    "call_id": call_id,
-                    "dropped_audio_chunks": dropped["salesperson"] + dropped["client"],
+                    "data": {
+                        "call_id": call_id,
+                        "dropped_audio_chunks": dropped["salesperson"] + dropped["client"],
+                    }
                 })
                 await self.component(
                     tenant_id, "twilio", "ended",
@@ -531,61 +713,46 @@ class FastAPICopilot:
             if not is_pdf_signature(payload):
                 raise HTTPException(status_code=400, detail="The uploaded file is not a valid PDF")
 
-            try:
-                resolved_target = resolve_target(target)
-            except ValueError as exc:
-                raise HTTPException(status_code=400, detail=str(exc))
-
-            try:
-                text, pages = await asyncio.to_thread(extract_pdf, payload)
-            except (ValueError, RuntimeError) as exc:
-                raise HTTPException(status_code=400, detail=str(exc))
-
-            target_dir = KNOWLEDGE / tenant_id / resolved_target
-            target_dir.mkdir(parents=True, exist_ok=True)
-            name = f"{safe_stem(file.filename)}_{int(time())}"
-            pdf_path = target_dir / f"{name}.pdf"
-            extracted_path = target_dir / f"{name}.pdf.md"
-
-            await asyncio.to_thread(pdf_path.write_bytes, payload)
-            await asyncio.to_thread(
-                extracted_path.write_text,
-                f"# Source: {file.filename}\n\n{text}",
-                encoding="utf-8",
-            )
-            await asyncio.to_thread(self.knowledge.reload)
-
-            # Upload to Pinecone if configured
-            pinecone_key = os.getenv("PINECONE_API_KEY")
-            openai_key = os.getenv("OPENAI_API_KEY")
-            pinecone_success = False
-            if pinecone_key and openai_key and self.rag_retriever:
-                try:
-                    await asyncio.to_thread(
-                        self.rag_retriever.upload_knowledge,
-                        file_path=str(pdf_path),
-                        tenant_id=tenant_id,
-                        file_content=payload,
-                        scope=resolved_target,
-                        owner_id=salesman_id,
-                    )
-                    LOGGER.info("Successfully uploaded %s to Pinecone (namespace: %s, scope: %s)", file.filename, tenant_id, resolved_target)
-                    pinecone_success = True
-                except Exception as exc:
-                    LOGGER.error("Failed to upload %s to Pinecone: %s", file.filename, exc)
-
-            event = {
-                "type": "knowledge_uploaded",
-                "name": pdf_path.name,
-                "target": resolved_target,
-                "pages": pages,
-                "characters": len(text),
-                "indexed_chunks": len(self.knowledge._chunks),
-                "pinecone_synced": pinecone_success,
+            doc_id = str(uuid.uuid4())
+            self.ingestion_jobs[doc_id] = {
+                "doc_id": doc_id,
+                "filename": file.filename,
+                "status": "pending",
+                "progress": 0,
+                "pages": 0,
+                "characters": 0,
+                "chunks_total": 0,
+                "chunks_uploaded": 0,
+                "error": None,
             }
-            await self.broadcast(tenant_id, event)
-            LOGGER.info("indexed PDF %s tenant=%s target=%s pages=%d characters=%d pinecone_synced=%s", pdf_path.name, tenant_id, resolved_target, pages, len(text), pinecone_success)
-            return event
+            
+            asyncio.create_task(
+                self._process_ingestion_background(
+                    doc_id=doc_id,
+                    filename=file.filename,
+                    payload=payload,
+                    target=target,
+                    tenant_id=tenant_id,
+                    salesman_id=salesman_id,
+                )
+            )
+            
+            return JSONResponse(
+                status_code=202,
+                content={
+                    "doc_id": doc_id,
+                    "status": "pending",
+                    "progress": 0,
+                    "message": "Ingestion job started in the background",
+                }
+            )
+
+        @app.get("/knowledge/status/{doc_id}")
+        async def check_ingestion_status(doc_id: str):
+            job = self.ingestion_jobs.get(doc_id)
+            if not job:
+                raise HTTPException(status_code=404, detail=f"Ingestion job not found for ID: {doc_id}")
+            return job
 
         # Register standard Pinecone RAG APIs if RAG is enabled
         if self.rag_api_handler:

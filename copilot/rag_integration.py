@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import logging
-from typing import Optional
+from typing import Optional, Callable
 
 from .rag_pinecone import PineconeRAG, RAGChunk
 
@@ -86,6 +86,7 @@ class CopilotRAGRetriever:
         file_content: Optional[bytes] = None,
         scope: str = "sales",
         owner_id: Optional[str] = None,
+        progress_callback: Optional[Callable[[int, int], None]] = None,
     ) -> dict:
         """Upload knowledge file for a tenant.
         
@@ -95,6 +96,7 @@ class CopilotRAGRetriever:
             file_content: Binary file content
             scope: The scope of the document ("sales" or "admin")
             owner_id: Optional owner identifier
+            progress_callback: Optional progress callback
             
         Returns:
             Upload status dict
@@ -106,6 +108,7 @@ class CopilotRAGRetriever:
                 file_content=file_content,
                 scope=scope,
                 owner_id=owner_id,
+                progress_callback=progress_callback,
             )
             
             LOGGER.info(f"Uploaded {file_path} for tenant {tenant_id}: {result}")
