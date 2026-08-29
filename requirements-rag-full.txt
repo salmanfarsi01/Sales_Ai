@@ -1,0 +1,52 @@
+"""
+Requirements file for RAG system with all optional dependencies.
+
+Core functionality included in this file:
+- Pinecone vector database client
+- OpenAI API (embeddings + LLM)
+- PDF extraction (PyMuPDF)
+- Document parsing (python-docx, openpyxl)
+- OCR for images (pytesseract + pillow)
+- Video/audio processing (moviepy, pydub)
+
+Usage:
+    pip install -r requirements-rag-full.txt
+"""
+
+# Existing dependencies (from requirements.txt)
+aiohttp==3.9.1
+websockets==12.0
+twilio==8.10.0
+groq==0.4.1
+python-dotenv==1.0.0
+
+# New RAG dependencies
+# Vector database
+pinecone-client==3.1.1
+
+# LLM & embeddings
+openai==1.5.0
+
+# File extraction - Documents
+PyMuPDF==1.23.8
+python-docx==0.8.11
+openpyxl==3.11.0
+
+# File extraction - Images
+pytesseract==0.3.10
+Pillow==10.1.0
+
+# File extraction - Video/Audio
+moviepy==1.0.3
+pydub==0.25.1
+
+# Optional: CSV support (built-in, but including for completeness)
+# csv (built-in Python module)
+
+# Development & testing
+pytest==7.4.3
+pytest-asyncio==0.23.2
+pytest-cov==4.1.0
+
+# Logging & debugging
+python-json-logger==2.0.7

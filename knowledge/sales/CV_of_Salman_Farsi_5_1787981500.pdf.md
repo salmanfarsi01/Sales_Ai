@@ -1,0 +1,78 @@
+# Source: CV_of_Salman_Farsi (5).pdf
+
+## Page 1
+
+SHEIKH MD SALMAN F ARSI
+Dhaka, Bangladesh
+Phone: +880 1986809848 Email: salmanf4545@gmail.com
+GitHub: github.com/salmanfarsi01 LinkedIn: linkedin.com/in/salman-farsi4545
+Professional Summary
+AI Enthusiast specializing in Retrieval-Augmented Generation (RAG), Large Language Models, and intel-
+ligent system design. Experienced in building AI-powered recommendation systems, multimodal chatbot
+platforms, and scalable deployment pipelines using Python, vector databases, FastAPI, and Docker. Strong
+background in Data Analysis including Exploratory Data Analysis (EDA), SQL, Power BI, and Advanced
+Excel for transforming raw data into actionable insights. Research-driven mindset with hands-on experience
+in Explainable AI and real-world AI implementation.
+Work Experience
+Join Venture AI July 2025 – Present AI Engineer
+• AI Scholarship Recommendation Platform [Live]: Engineered a production-ready, cross-lingual RAG rec-
+ommendation platform using Pinecone, OpenAI GPT models, and deep translator. Processed Swedish
+scholarship datasets and generated context-aware scholarship recommendations based on candidates’ aca-
+demic profiles, qualifications, and eligibility criteria.
+• SensesAI Multimodal RAG Chatbot [Live]: Developed an enterprise-grade multimodal AI platform capable
+of processing PDF, DOCX, image, video, text, and voice inputs. Integrated OpenAI and Pinecone APIs
+for retrieval and response generation, alongside an ElevenLabs voice agent for real-time voice-to-voice and
+text-based interactions.
+• Local AI Astrology Desktop Application: Developed an installable computer application for generating
+personalized astrology reports and supporting semantic document retrieval. Built the desktop interface
+using PyQt6 and integrated a locally deployed Qwen model with BAAI/bge-large-en-v1.5 embeddings,
+enabling offline AI inference and reducing reliance on external cloud services.
+• QLoRA Fine-Tuning of Qwen for Text-to-SQL [GitHub]: Fine-tuned the Qwen language model to con-
+vert natural-language questions and database schemas into SQL queries. Implemented QLoRA-based
+parameter-eﬀicient fine-tuning using Unsloth, Hugging Face Transformers, TRL, PEFT, and BitsAnd-
+Bytes, including dataset formatting, tokenization, training, and model evaluation.
+• Wine Quality End-to-End MLOps Pipeline [GitHub]: Designed an end-to-end machine-learning pipeline
+for wine-quality prediction using Python, Pandas, and scikit-learn. Exposed model inference through
+FastAPI, containerized the application with Docker, configured automated workflows, and implemented
+production-oriented deployment and monitoring practices.
+Research Projects
+• VMKLA-UNet: Explainable Hybrid Deep Learning Framework for Credit Risk Prediction (Springer,
+IC-AISE 2026)
+• Bangla Feminism Discourse in Social Media: ML, DL, and Transformer-Based Abusive Comment De-
+tection (IEEE, QPAIN 2026)
+• Fusion-Based Hybrid Meta-Learning: Enhancing Cardiovascular disease Prediction with AutoML and
+Explainable AI (IEEE, QPAIN 2025)
+• Next-Generation Retail Intelligence through Vision-Driven Product Recognition and Transaction Au-
+tomation (Springer, CVSSS2026)
+Technical Skills
+AI & ML: Machine Learning, Deep Learning, NLP, LLMs, RAG, Fine-Tuning (QLoRA/PEFT), XAI
+Programming: Python, SQL
+Frameworks & Libraries: PyTorch, TensorFlow, scikit-learn, FastAPI, Django, Flask, PyQt6
+Vector DBs & LLM Tooling: Pinecone, Qdrant, pgvector, ChromaDB, F AISS, OpenAI API, Gemini API,
+DeepSeek, Groq, Hugging Face, Ollama
+1
+
+## Page 2
+
+Deployment & MLOps: Docker, VPS, Git, CI/CD
+Data Tools: Power BI, Excel
+Education
+B.Sc. in Computer Science & Engineering 2021 – 2025
+Southeast University
+CGPA: 3.81
+Higher Secondary Certificate 2019
+BAF Shaheen College, Dhaka
+GPA: 4.33 (A)
+Secondary School Certificate 2017
+Monipur High School
+GPA: 5.00 (A+)
+Training & Certifications
+• Data Science & Machine Learning with Python & R – Data Solution 360 (2025)
+• Data Analyst Job Ready Program – Data Solution 360 (2024)
+References
+Shahriar Manzoor Md. Mijanur Rahman
+Associate Professor & Chairman Assistant Professor
+Dept. of CSE, Southeast University Dept. of CSE, Southeast University
+Email: smanzoor@seu.edu.bd Email: mijanur.rahman@seu.edu.bd
+Phone: +8801911354201
+2
