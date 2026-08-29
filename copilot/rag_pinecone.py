@@ -53,7 +53,7 @@ class PineconeRAG:
             admin_mode: If True, use admin index; else use subscriber index
         """
         self.pc = Pinecone(api_key=pinecone_api_key)
-        openai.api_key = openai_api_key
+        self.openai_client = openai.OpenAI(api_key=openai_api_key)
         self.admin_mode = admin_mode
         self.index_name = ADMIN_INDEX_NAME if admin_mode else SUBSCRIBER_INDEX_NAME
         self.index = self._get_or_create_index()
@@ -80,11 +80,11 @@ class PineconeRAG:
 
     def _get_embedding(self, text: str) -> list[float]:
         """Get OpenAI embedding for text."""
-        response = openai.Embedding.create(
+        response = self.openai_client.embeddings.create(
             model=EMBEDDING_MODEL,
             input=text
         )
-        return response["data"][0]["embedding"]
+        return response.data[0].embedding
 
     def _generate_chunk_id(self, tenant_id: str, file_name: str, chunk_index: int) -> str:
         """Generate unique chunk ID."""

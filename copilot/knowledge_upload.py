@@ -133,6 +133,31 @@ class KnowledgeTwilioCopilot(ContextAwareTwilioCopilot):
             encoding="utf-8",
         )
         await asyncio.to_thread(self.knowledge.reload)
+
+        # Upload to Pinecone if API keys are configured
+        pinecone_key = os.getenv("PINECONE_API_KEY")
+        openai_key = os.getenv("OPENAI_API_KEY")
+        pinecone_success = False
+        if pinecone_key and openai_key:
+            try:
+                from .rag_pinecone import PineconeRAG
+                admin_mode = (target == "admin")
+                rag = PineconeRAG(
+                    pinecone_api_key=pinecone_key,
+                    openai_api_key=openai_key,
+                    admin_mode=admin_mode,
+                )
+                await asyncio.to_thread(
+                    rag.upload_file,
+                    file_path=str(pdf_path),
+                    tenant_id=target,
+                    file_content=payload,
+                )
+                LOGGER.info("Successfully uploaded %s to Pinecone index %s (namespace: %s)", filename, rag.index_name, target)
+                pinecone_success = True
+            except Exception as exc:
+                LOGGER.error("Failed to upload %s to Pinecone: %s", filename, exc)
+
         event = {
             "type": "knowledge_uploaded",
             "name": pdf_path.name,
@@ -140,9 +165,10 @@ class KnowledgeTwilioCopilot(ContextAwareTwilioCopilot):
             "pages": pages,
             "characters": len(text),
             "indexed_chunks": len(self.knowledge._chunks),
+            "pinecone_synced": pinecone_success,
         }
         await self.broadcast(event)
-        LOGGER.info("indexed PDF %s target=%s pages=%d characters=%d", pdf_path.name, target, pages, len(text))
+        LOGGER.info("indexed PDF %s target=%s pages=%d characters=%d pinecone_synced=%s", pdf_path.name, target, pages, len(text), pinecone_success)
         return web.json_response(event)
 
 
