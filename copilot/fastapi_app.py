@@ -18,6 +18,7 @@ from time import monotonic, time
 from typing import Optional, Any
 
 import httpx
+import jwt
 import websockets
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect, UploadFile, File, Form, HTTPException
 from fastapi.responses import FileResponse, JSONResponse
@@ -50,7 +51,7 @@ class FastAPICopilot:
         self.groq = Groq(api_key=settings.groq_api_key)
         self.call_reports = CallReportGenerator(self.groq, settings.llm_model)
         self.knowledge = LocalKnowledgeBase()
-        self.dashboards: dict[str, set[WebSocket]] = {}
+        self.dashboards: dict[str, list[dict[str, Any]]] = {}
         self._client_history: dict[str, list[str]] = {}
         self.ingestion_jobs: dict[str, dict[str, Any]] = {}
 
@@ -67,19 +68,25 @@ class FastAPICopilot:
             self.rag_retriever = None
             self.rag_api_handler = None
 
-    async def broadcast(self, tenant_id: str, event: dict[str, object]) -> None:
-        """Broadcast events to all connected dashboards for a specific tenant."""
-        sockets = self.dashboards.get(tenant_id, set())
+    async def broadcast(self, tenant_id: str, event: dict[str, object], call_sid: Optional[str] = None) -> None:
+        """Broadcast events to connected dashboards filtered by tenant_id and call_sid."""
+        connections = self.dashboards.get(tenant_id, [])
         stale = []
-        for socket in list(sockets):
+        for conn in list(connections):
+            socket = conn["socket"]
+            conn_call_sid = conn["call_sid"]
+            # If client is subscribed to a specific call, filter out other calls.
+            if conn_call_sid and call_sid and conn_call_sid != call_sid:
+                continue
             try:
                 await socket.send_json(event)
             except Exception:
-                stale.append(socket)
-        for socket in stale:
-            sockets.discard(socket)
+                stale.append(conn)
+        for conn in stale:
+            if conn in connections:
+                connections.remove(conn)
 
-    async def component(self, tenant_id: str, name: str, state: str, detail: str = "") -> None:
+    async def component(self, tenant_id: str, name: str, state: str, detail: str = "", call_sid: Optional[str] = None) -> None:
         """Helper to broadcast component status in standard event envelop format."""
         await self.broadcast(tenant_id, {
             "type": "component",
@@ -88,7 +95,7 @@ class FastAPICopilot:
                 "state": state,
                 "detail": detail
             }
-        })
+        }, call_sid=call_sid)
 
     async def send_to_laravel_webhook(self, event_type: str, data: dict[str, Any], tenant_id: str) -> None:
         """Post event payloads asynchronously to the Laravel webhook endpoint if configured."""
@@ -112,6 +119,47 @@ class FastAPICopilot:
                     LOGGER.info("Successfully posted event %s to Laravel webhook for tenant %s", event_type, tenant_id)
         except Exception as exc:
             LOGGER.error("Failed to POST to Laravel webhook for event %s: %s", event_type, exc)
+
+    def verify_jwt_token(self, token: str, tenant_id: str, call_sid: Optional[str] = None) -> bool:
+        """Verify the JWT token from Laravel for WebSockets authorization."""
+        secret = self.settings.jwt_secret
+        if not secret:
+            LOGGER.warning("JWT_SECRET is not configured. WebSockets access authorization checks are bypassed.")
+            return True
+        try:
+            payload = jwt.decode(token, secret, algorithms=["HS256"])
+            
+            # Validate tenant matches
+            token_tenant = payload.get("tenant_id")
+            if token_tenant != tenant_id:
+                LOGGER.error("JWT tenant_id mismatch: token=%s, query=%s", token_tenant, tenant_id)
+                return False
+            
+            token_call = payload.get("call_sid")
+            token_role = payload.get("role", "salesperson")
+            
+            if call_sid:
+                # Salesperson is only authorized to monitor their specific call_sid
+                if token_role == "salesperson":
+                    if token_call != call_sid:
+                        LOGGER.error("JWT salesperson call_sid mismatch: token=%s, query=%s", token_call, call_sid)
+                        return False
+                # Supervisors are authorized to monitor any call within the tenant
+                elif token_role == "supervisor":
+                    pass
+            else:
+                # Requesting a supervisor global stream (monitoring all calls)
+                if token_role != "supervisor":
+                    LOGGER.error("JWT user role '%s' is not authorized to stream global events (supervisor role required)", token_role)
+                    return False
+            
+            return True
+        except jwt.ExpiredSignatureError:
+            LOGGER.error("JWT connection token has expired")
+            return False
+        except jwt.InvalidTokenError as exc:
+            LOGGER.error("JWT connection token verification failed: %s", exc)
+            return False
 
     async def _process_ingestion_background(
         self,
@@ -200,7 +248,7 @@ class FastAPICopilot:
             job["progress"] = 100
             job["status"] = "completed"
             
-            # Broadcast the completed event to visual channel
+            # Broadcast the completed event to visual channel (tenant-wide, no call_sid)
             event = {
                 "type": "knowledge_uploaded",
                 "data": {
@@ -225,7 +273,7 @@ class FastAPICopilot:
 
     async def stream_suggestion(
         self,
-        call_id: str,
+        call_sid: str,
         question: str,
         context: list[dict[str, str]],
         tenant_id: str,
@@ -245,7 +293,7 @@ class FastAPICopilot:
                 "data": {
                     "message": f'Context recovered: "{question}" → "{reconstructed}"'
                 }
-            })
+            }, call_sid=call_sid)
 
         suggestion_id = str(uuid.uuid4())
         started = monotonic()
@@ -273,11 +321,11 @@ class FastAPICopilot:
             "type": "suggestion_start",
             "data": {
                 "id": suggestion_id,
-                "call_id": call_id,
+                "call_sid": call_sid,
                 "question": reconstructed,
                 "sources": sources,
             }
-        })
+        }, call_sid=call_sid)
 
         queue: asyncio.Queue[str | None | Exception] = asyncio.Queue()
         loop = asyncio.get_running_loop()
@@ -330,7 +378,7 @@ class FastAPICopilot:
                     "id": suggestion_id,
                     "text": item
                 }
-            })
+            }, call_sid=call_sid)
             full_suggestion += item
 
         # Stream suggestion completed event
@@ -341,18 +389,18 @@ class FastAPICopilot:
                 "ttft_ms": first_token_ms,
                 "total_ms": int((monotonic() - started) * 1000),
             }
-        })
+        }, call_sid=call_sid)
 
         # Emit log suggestions record for delivery scoring
         suggestion_log = {
-            "call_sid": call_id,
+            "call_sid": call_sid,
             "suggestion_text": full_suggestion,
             "timestamp": int(time()),
         }
         await self.broadcast(tenant_id, {
             "type": "suggestion_log",
             "data": suggestion_log
-        })
+        }, call_sid=call_sid)
         asyncio.create_task(self.send_to_laravel_webhook("suggestion_logged", suggestion_log, tenant_id))
 
     def get_app(self) -> FastAPI:
@@ -393,22 +441,40 @@ class FastAPICopilot:
 
         @app.get("/health")
         async def health():
-            total_dashboards = sum(len(socks) for socks in self.dashboards.values())
+            total_dashboards = sum(len(conns) for conns in self.dashboards.values())
             return {"status": "ok", "dashboards": total_dashboards}
 
         @app.websocket("/events")
         async def dashboard_events(websocket: WebSocket):
             tenant_id = websocket.query_params.get("tenant_id")
+            call_sid = websocket.query_params.get("call_sid")
+            token = websocket.query_params.get("token")
+            
             if not tenant_id:
                 await websocket.close(code=4000, reason="Missing required query parameter: tenant_id")
                 return
+            
+            # Authenticate the connection via signed JWT token
+            if self.settings.jwt_secret:
+                if not token:
+                    await websocket.close(code=4001, reason="Missing WebSockets authorization token")
+                    return
+                if not self.verify_jwt_token(token, tenant_id, call_sid):
+                    await websocket.close(code=4003, reason="Unauthorized connection request")
+                    return
 
             await websocket.accept()
-            self.dashboards.setdefault(tenant_id, set()).add(websocket)
+            conn = {"socket": websocket, "call_sid": call_sid}
+            self.dashboards.setdefault(tenant_id, []).append(conn)
+            
+            scope_msg = f"for tenant {tenant_id}"
+            if call_sid:
+                scope_msg += f" and call {call_sid}"
+                
             await websocket.send_json({
                 "type": "status",
                 "data": {
-                    "message": f"Dashboard connected for tenant {tenant_id}; waiting for call."
+                    "message": f"Dashboard connected {scope_msg}; waiting for call."
                 }
             })
             try:
@@ -417,20 +483,22 @@ class FastAPICopilot:
             except WebSocketDisconnect:
                 pass
             finally:
-                self.dashboards.get(tenant_id, set()).discard(websocket)
+                conns = self.dashboards.get(tenant_id, [])
+                if conn in conns:
+                    conns.remove(conn)
 
         @app.websocket("/twilio")
         async def twilio_stream(websocket: WebSocket):
             tenant_id = websocket.query_params.get("tenant_id")
             salesman_id = websocket.query_params.get("salesman_id")
-            call_sid = websocket.query_params.get("call_sid")
+            call_sid_param = websocket.query_params.get("call_sid")
 
             if not tenant_id:
                 await websocket.close(code=4000, reason="Missing required parameter: tenant_id")
                 return
 
             await websocket.accept()
-            call_id = call_sid or str(uuid.uuid4())
+            call_sid = call_sid_param or str(uuid.uuid4())
             queue_size = max(256, self.settings.audio_queue_size)
             queues: dict[str, asyncio.Queue[bytes | object]] = {
                 "salesperson": asyncio.Queue(queue_size),
@@ -446,27 +514,27 @@ class FastAPICopilot:
                 "last_generation": 0.0,
                 "last_client_question": "",
             }
-            await self.component(tenant_id, "twilio", "connected", "Media WebSocket accepted")
-            LOGGER.info("Twilio connected. tenant_id=%s, call_id=%s", tenant_id, call_id)
+            await self.component(tenant_id, "twilio", "connected", "Media WebSocket accepted", call_sid=call_sid)
+            LOGGER.info("Twilio connected. tenant_id=%s, call_sid=%s", tenant_id, call_sid)
 
             async def receive_twilio() -> None:
-                nonlocal call_id
+                nonlocal call_sid
                 try:
                     async for message in websocket.iter_text():
                         event = json.loads(message)
                         kind = event.get("event")
                         if kind == "connected":
-                            await self.component(tenant_id, "twilio", "connected", "Twilio protocol connected")
+                            await self.component(tenant_id, "twilio", "connected", "Twilio protocol connected", call_sid=call_sid)
                         elif kind == "start":
                             start = event.get("start", {})
-                            call_id = call_sid or start.get("callSid", call_id)
+                            call_sid = call_sid_param or start.get("callSid", call_sid)
                             await self.broadcast(tenant_id, {
                                 "type": "call_start",
                                 "data": {
-                                    "call_id": call_id
+                                    "call_sid": call_sid
                                 }
-                            })
-                            await self.component(tenant_id, "twilio", "streaming", f"Call {call_id}")
+                            }, call_sid=call_sid)
+                            await self.component(tenant_id, "twilio", "streaming", f"Call {call_sid}", call_sid=call_sid)
                         elif kind == "media":
                             media = event.get("media", {})
                             track = media.get("track")
@@ -484,9 +552,10 @@ class FastAPICopilot:
                                     tenant_id,
                                     f"audio_{role}", "receiving",
                                     f"{packets[role]} packets · queue {queues[role].qsize()} · dropped {dropped[role]}",
+                                    call_sid=call_sid,
                                 )
                         elif kind == "stop":
-                            await self.component(tenant_id, "twilio", "stopping", "Twilio sent stop")
+                            await self.component(tenant_id, "twilio", "stopping", "Twilio sent stop", call_sid=call_sid)
                             await asyncio.gather(*(queue.put(STOP) for queue in queues.values()))
                             return
                 except WebSocketDisconnect:
@@ -501,9 +570,9 @@ class FastAPICopilot:
                     "&smart_format=true&model=nova-3"
                 )
                 headers = {"Authorization": f"Token {self.settings.deepgram_api_key}"}
-                await self.component(tenant_id, f"stt_{role}", "connecting", "Opening Deepgram stream")
+                await self.component(tenant_id, f"stt_{role}", "connecting", "Opening Deepgram stream", call_sid=call_sid)
                 async with websockets.connect(url, additional_headers=headers, open_timeout=10) as deepgram:
-                    await self.component(tenant_id, f"stt_{role}", "ready", "Deepgram connected")
+                    await self.component(tenant_id, f"stt_{role}", "ready", "Deepgram connected", call_sid=call_sid)
 
                     async def send_audio() -> None:
                         while True:
@@ -526,16 +595,16 @@ class FastAPICopilot:
                                 continue
                             final = bool(event.get("is_final"))
                             speech_final = bool(event.get("speech_final"))
-                            await self.component(tenant_id, f"stt_{role}", "transcribing", "Speech detected")
+                            await self.component(tenant_id, f"stt_{role}", "transcribing", "Speech detected", call_sid=call_sid)
                             await self.broadcast(tenant_id, {
                                 "type": "transcript",
                                 "data": {
-                                    "call_id": call_id,
+                                    "call_sid": call_sid,
                                     "role": role,
                                     "text": text,
                                     "final": final,
                                 }
-                            })
+                            }, call_sid=call_sid)
                             if final:
                                 context.append({
                                     "role": "assistant" if role == "salesperson" else "user",
@@ -551,12 +620,12 @@ class FastAPICopilot:
                                 # Context recovery for short queries
                                 if role == "client":
                                     client_text = text.strip()
-                                    client_history = self._client_history.setdefault(call_id, [])
+                                    client_history = self._client_history.setdefault(call_sid, [])
                                     if client_text and len(client_text) < 8:
                                         hist_context = [{"role": "user", "content": prior} for prior in client_history[-6:]]
                                         asyncio.create_task(
                                             self.stream_suggestion(
-                                                call_id, client_text, hist_context, tenant_id,
+                                                call_sid, client_text, hist_context, tenant_id,
                                                 scope="sales", owner_id=salesman_id
                                             )
                                         )
@@ -578,10 +647,10 @@ class FastAPICopilot:
                                     prompt_context = list(context)
                                     if final and prompt_context and prompt_context[-1]["content"] == text:
                                         prompt_context.pop()
-                                    await self.component(tenant_id, "llm", "generating", "Client speech triggered suggestion")
+                                    await self.component(tenant_id, "llm", "generating", "Client speech triggered suggestion", call_sid=call_sid)
                                     new_task = asyncio.create_task(
                                         self.stream_suggestion(
-                                            call_id, text, prompt_context, tenant_id,
+                                            call_sid, text, prompt_context, tenant_id,
                                             scope="sales", owner_id=salesman_id
                                         )
                                     )
@@ -591,7 +660,8 @@ class FastAPICopilot:
                                             self.component(
                                                 tenant_id, "llm",
                                                 "ready" if not completed.exception() else "error",
-                                                "Suggestion complete"
+                                                "Suggestion complete",
+                                                call_sid=call_sid
                                             )
                                         ) if not completed.cancelled() else None
                                     )
@@ -617,15 +687,15 @@ class FastAPICopilot:
                     task.cancel()
                 await asyncio.gather(*pending, return_exceptions=True)
             except Exception as exc:
-                LOGGER.exception("call pipeline failed %s", call_id)
+                LOGGER.exception("call pipeline failed %s", call_sid)
                 await self.broadcast(tenant_id, {
                     "type": "error",
                     "data": {
-                        "call_id": call_id,
+                        "call_sid": call_sid,
                         "message": str(exc),
                     }
-                })
-                await self.component(tenant_id, "pipeline", "error", str(exc))
+                }, call_sid=call_sid)
+                await self.component(tenant_id, "pipeline", "error", str(exc), call_sid=call_sid)
             finally:
                 generation_task = state.get("generation_task")
                 if generation_task:
@@ -636,44 +706,45 @@ class FastAPICopilot:
                     await websocket.close()
                 try:
                     report = await self.call_reports.generate(
-                        call_id,
+                        call_sid,
                         full_transcript,
                         monotonic() - call_started,
                     )
                     await self.broadcast(tenant_id, {
                         "type": "call_report",
                         "data": {
-                            "call_id": call_id,
+                            "call_sid": call_sid,
                             "report": report
                         }
-                    })
+                    }, call_sid=call_sid)
                     
                     # POST report payload directly to Laravel Webhook
                     report_data = {
-                        "call_sid": call_id,
+                        "call_sid": call_sid,
                         "report": report,
                     }
                     asyncio.create_task(self.send_to_laravel_webhook("call_report_generated", report_data, tenant_id))
                 except Exception as exc:
-                    LOGGER.exception("call report failed %s", call_id)
+                    LOGGER.exception("call report failed %s", call_sid)
                     await self.broadcast(tenant_id, {
                         "type": "error",
                         "data": {
-                            "call_id": call_id,
+                            "call_sid": call_sid,
                             "message": f"Call report failed: {exc}",
                         }
-                    })
+                    }, call_sid=call_sid)
                 
                 await self.broadcast(tenant_id, {
                     "type": "call_end",
                     "data": {
-                        "call_id": call_id,
+                        "call_sid": call_sid,
                         "dropped_audio_chunks": dropped["salesperson"] + dropped["client"],
                     }
-                })
+                }, call_sid=call_sid)
                 await self.component(
                     tenant_id, "twilio", "ended",
                     f"packets salesperson={packets['salesperson']}, client={packets['client']}; dropped={dropped}",
+                    call_sid=call_sid
                 )
 
         @app.get("/knowledge")

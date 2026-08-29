@@ -68,7 +68,7 @@ class CallReportGenerator:
 
     async def generate(
         self,
-        call_id: str,
+        call_sid: str,
         transcript: list[dict[str, Any]],
         duration_seconds: float,
     ) -> dict[str, Any]:
@@ -113,6 +113,6 @@ Complete transcript:
 
         raw = await asyncio.to_thread(request)
         report = complete_report(json.loads(_json_text(raw)))
-        report["call_id"] = call_id
+        report["call_sid"] = call_sid
         report["generated_at"] = datetime.now(timezone.utc).isoformat()
         return report

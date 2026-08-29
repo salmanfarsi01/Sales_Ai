@@ -60,6 +60,12 @@ class Settings:
     
     # Laravel Webhook integration
     laravel_webhook_url: str = ""
+    
+    # JWT authentication secret
+    jwt_secret: str = ""
+    
+    # Environment indicator
+    copilot_env: str = "development"
 
     @classmethod
     def from_env(cls) -> "Settings":
@@ -76,6 +82,12 @@ class Settings:
             min_score_threshold=float(_optional("RAG_MIN_SCORE", "0.5")),
         )
         
+        env = _optional("COPILOT_ENV", "development").lower()
+        jwt_sec = _optional("JWT_SECRET", "")
+        
+        if env == "production" and not jwt_sec:
+            raise RuntimeError("JWT_SECRET is required when COPILOT_ENV is set to 'production'")
+            
         return cls(
             deepgram_api_key=_required("DEEPGRAM_API_KEY"),
             groq_api_key=_required("GROQ_API_KEY"),
@@ -88,4 +100,6 @@ class Settings:
             rag=rag_settings,
             default_tenant_id=_optional("DEFAULT_TENANT_ID", "default"),
             laravel_webhook_url=_optional("LARAVEL_WEBHOOK_URL", ""),
+            jwt_secret=jwt_sec,
+            copilot_env=env,
         )
