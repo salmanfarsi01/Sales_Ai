@@ -1,4 +1,4 @@
-"""FastAPI-based Twilio Sales Copilot backend server.
+"""FastAPI-based user sales backend server.
 
 Handles Twilio call streaming, Deepgram STT, context recovery, Groq suggestion streaming,
 local PDF parsing, and Pinecone RAG integration.
@@ -44,7 +44,7 @@ STOP = object()
 
 
 class FastAPICopilot:
-    """Manages FastAPI router and lifecycle for the Twilio Sales Copilot."""
+    """Manages FastAPI router and lifecycle for user sales."""
 
     def __init__(self, settings: Settings):
         self.settings = settings
@@ -405,7 +405,7 @@ class FastAPICopilot:
 
     def get_app(self) -> FastAPI:
         """Constructs and configures the FastAPI application router."""
-        app = FastAPI(title="Twilio Sales Copilot", version="2.0.0")
+        app = FastAPI(title="user sales", version="2.0.0")
 
         # Standardized Error Handler for HTTPException
         @app.exception_handler(HTTPException)
