@@ -601,119 +601,133 @@ class FastAPICopilot:
                     "&smart_format=true&model=nova-3"
                 )
                 headers = {"Authorization": f"Token {self.settings.deepgram_api_key}"}
-                await self.component(tenant_id, f"stt_{role}", "connecting", "Opening Deepgram stream", call_sid=call_sid)
-                async with websockets.connect(url, additional_headers=headers, open_timeout=10) as deepgram:
-                    await self.component(tenant_id, f"stt_{role}", "ready", "Deepgram connected", call_sid=call_sid)
-
-                    async def send_audio() -> None:
-                        while True:
-                            try:
-                                chunk = await asyncio.wait_for(queues[role].get(), timeout=3.0)
-                                if chunk is STOP:
-                                    await deepgram.send(json.dumps({"type": "CloseStream"}))
-                                    return
-                                await deepgram.send(chunk)
-                            except asyncio.TimeoutError:
-                                try:
-                                    await deepgram.send(json.dumps({"type": "KeepAlive"}))
-                                except Exception as exc:
-                                    LOGGER.warning("Failed to send KeepAlive to Deepgram for %s: %s", role, exc)
-                                    return
-
-                    async def receive_text() -> None:
-                        async for raw in deepgram:
-                            event = json.loads(raw)
-                            event_type = event.get("type")
-                            if event_type == "Error":
-                                raise RuntimeError(event.get("description", "Deepgram error"))
-                            if event_type != "Results":
-                                continue
-                            stt_received_time = monotonic()
-                            text = event.get("channel", {}).get("alternatives", [{}])[0].get("transcript", "").strip()
-                            if not text:
-                                continue
-                            final = bool(event.get("is_final"))
-                            speech_final = bool(event.get("speech_final"))
-                            await self.component(tenant_id, f"stt_{role}", "transcribing", "Speech detected", call_sid=call_sid)
-                            await self.broadcast(tenant_id, {
-                                "type": "transcript",
-                                "data": {
-                                    "call_sid": call_sid,
-                                    "role": role,
-                                    "text": text,
-                                    "final": final,
-                                }
-                            }, call_sid=call_sid)
-                            if final:
-                                context.append({
-                                    "role": "assistant" if role == "salesperson" else "user",
-                                    "content": text,
-                                })
-                                del context[:-self.settings.transcript_window]
-                                full_transcript.append({
-                                    "speaker": role,
-                                    "text": text,
-                                    "elapsed_seconds": monotonic() - call_started,
-                                })
-
-                                # Context recovery for short queries
-                                if role == "client":
-                                    client_text = text.strip()
-                                    client_history = self._client_history.setdefault(call_sid, [])
-                                    if client_text and len(client_text) < 8:
-                                        hist_context = [{"role": "user", "content": prior} for prior in client_history[-6:]]
-                                        asyncio.create_task(
-                                            self.stream_suggestion(
-                                                call_sid, client_text, hist_context, tenant_id,
-                                                scope="sales", owner_id=salesman_id,
-                                                stt_received_time=stt_received_time
+                
+                max_retries = 3
+                for attempt in range(1, max_retries + 1):
+                    await self.component(
+                        tenant_id, f"stt_{role}", "connecting",
+                        f"Opening Deepgram stream (attempt {attempt}/{max_retries})",
+                        call_sid=call_sid
+                    )
+                    try:
+                        async with websockets.connect(url, additional_headers=headers, open_timeout=20) as deepgram:
+                            await self.component(tenant_id, f"stt_{role}", "ready", "Deepgram connected", call_sid=call_sid)
+        
+                            async def send_audio() -> None:
+                                while True:
+                                    try:
+                                        chunk = await asyncio.wait_for(queues[role].get(), timeout=3.0)
+                                        if chunk is STOP:
+                                            await deepgram.send(json.dumps({"type": "CloseStream"}))
+                                            return
+                                        await deepgram.send(chunk)
+                                    except asyncio.TimeoutError:
+                                        try:
+                                            await deepgram.send(json.dumps({"type": "KeepAlive"}))
+                                        except Exception as exc:
+                                            LOGGER.warning("Failed to send KeepAlive to Deepgram for %s: %s", role, exc)
+                                            return
+        
+                            async def receive_text() -> None:
+                                async for raw in deepgram:
+                                    event = json.loads(raw)
+                                    event_type = event.get("type")
+                                    if event_type == "Error":
+                                        raise RuntimeError(event.get("description", "Deepgram error"))
+                                    if event_type != "Results":
+                                        continue
+                                    stt_received_time = monotonic()
+                                    text = event.get("channel", {}).get("alternatives", [{}])[0].get("transcript", "").strip()
+                                    if not text:
+                                        continue
+                                    final = bool(event.get("is_final"))
+                                    speech_final = bool(event.get("speech_final"))
+                                    await self.component(tenant_id, f"stt_{role}", "transcribing", "Speech detected", call_sid=call_sid)
+                                    await self.broadcast(tenant_id, {
+                                        "type": "transcript",
+                                        "data": {
+                                            "call_sid": call_sid,
+                                            "role": role,
+                                            "text": text,
+                                            "final": final,
+                                        }
+                                    }, call_sid=call_sid)
+                                    if final:
+                                        context.append({
+                                            "role": "assistant" if role == "salesperson" else "user",
+                                            "content": text,
+                                        })
+                                        del context[:-self.settings.transcript_window]
+                                        full_transcript.append({
+                                            "speaker": role,
+                                            "text": text,
+                                            "elapsed_seconds": monotonic() - call_started,
+                                        })
+        
+                                        # Context recovery for short queries
+                                        if role == "client":
+                                            client_text = text.strip()
+                                            client_history = self._client_history.setdefault(call_sid, [])
+                                            if client_text and len(client_text) < 8:
+                                                hist_context = [{"role": "user", "content": prior} for prior in client_history[-6:]]
+                                                asyncio.create_task(
+                                                    self.stream_suggestion(
+                                                        call_sid, client_text, hist_context, tenant_id,
+                                                        scope="sales", owner_id=salesman_id,
+                                                        stt_received_time=stt_received_time
+                                                    )
+                                                )
+                                            if client_text:
+                                                client_history.append(client_text)
+                                                del client_history[:-12]
+        
+                                    if role == "client" and len(text) >= 8 and (final or speech_final):
+                                        task = state.get("generation_task")
+                                        due = monotonic() - float(state["last_generation"]) >= 0.35
+                                        duplicate = text == state["last_client_question"]
+                                        can_start = task is None or task.done()
+                                        if task and not task.done() and (speech_final or final):
+                                            task.cancel()
+                                            can_start = True
+                                        if not duplicate and (due or final) and can_start:
+                                            state["last_client_question"] = text
+                                            state["last_generation"] = monotonic()
+                                            prompt_context = list(context)
+                                            if final and prompt_context and prompt_context[-1]["content"] == text:
+                                                prompt_context.pop()
+                                            await self.component(tenant_id, "llm", "generating", "Client speech triggered suggestion", call_sid=call_sid)
+                                            new_task = asyncio.create_task(
+                                                self.stream_suggestion(
+                                                    call_sid, text, prompt_context, tenant_id,
+                                                    scope="sales", owner_id=salesman_id,
+                                                    stt_received_time=stt_received_time
+                                                )
                                             )
-                                        )
-                                    if client_text:
-                                        client_history.append(client_text)
-                                        del client_history[:-12]
-
-                            if role == "client" and len(text) >= 8 and (final or speech_final):
-                                task = state.get("generation_task")
-                                due = monotonic() - float(state["last_generation"]) >= 0.35
-                                duplicate = text == state["last_client_question"]
-                                can_start = task is None or task.done()
-                                if task and not task.done() and (speech_final or final):
-                                    task.cancel()
-                                    can_start = True
-                                if not duplicate and (due or final) and can_start:
-                                    state["last_client_question"] = text
-                                    state["last_generation"] = monotonic()
-                                    prompt_context = list(context)
-                                    if final and prompt_context and prompt_context[-1]["content"] == text:
-                                        prompt_context.pop()
-                                    await self.component(tenant_id, "llm", "generating", "Client speech triggered suggestion", call_sid=call_sid)
-                                    new_task = asyncio.create_task(
-                                        self.stream_suggestion(
-                                            call_sid, text, prompt_context, tenant_id,
-                                            scope="sales", owner_id=salesman_id,
-                                            stt_received_time=stt_received_time
-                                        )
-                                    )
-                                    state["generation_task"] = new_task
-                                    new_task.add_done_callback(
-                                        lambda completed: asyncio.create_task(
-                                            self.component(
-                                                tenant_id, "llm",
-                                                "ready" if not completed.exception() else "error",
-                                                "Suggestion complete",
-                                                call_sid=call_sid
+                                            state["generation_task"] = new_task
+                                            new_task.add_done_callback(
+                                                lambda completed: asyncio.create_task(
+                                                    self.component(
+                                                        tenant_id, "llm",
+                                                        "ready" if not completed.exception() else "error",
+                                                        "Suggestion complete",
+                                                        call_sid=call_sid
+                                                    )
+                                                ) if not completed.cancelled() else None
                                             )
-                                        ) if not completed.cancelled() else None
-                                    )
-
-                    tasks = {asyncio.create_task(send_audio()), asyncio.create_task(receive_text())}
-                    done, pending = await asyncio.wait(tasks, return_when=asyncio.FIRST_COMPLETED)
-                    for task in done:
-                        task.result()
-                    for task in pending:
-                        task.cancel()
-                    await asyncio.gather(*pending, return_exceptions=True)
+        
+                            tasks = {asyncio.create_task(send_audio()), asyncio.create_task(receive_text())}
+                            done, pending = await asyncio.wait(tasks, return_when=asyncio.FIRST_COMPLETED)
+                            for task in done:
+                                task.result()
+                            for task in pending:
+                                task.cancel()
+                            await asyncio.gather(*pending, return_exceptions=True)
+                            return # Success, exit retry loop!
+                    except Exception as exc:
+                        LOGGER.warning("Deepgram connection attempt %d failed for %s: %s", attempt, role, exc)
+                        if attempt == max_retries:
+                            raise exc
+                        await asyncio.sleep(1.0)
 
             tasks = {
                 asyncio.create_task(receive_twilio()),
