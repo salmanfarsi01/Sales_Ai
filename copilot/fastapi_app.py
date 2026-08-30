@@ -345,7 +345,7 @@ class FastAPICopilot:
                             "Answer as if you are advising the salesperson, not the client. "
                             "Use supplied knowledge whenever it matches the question. "
                             "If the knowledge contains a relevant fact, do not say you have no information. "
-                            "Only admit that a fact is unavailable when the supplied knowledge truly does not contain it."
+                            "If the supplied knowledge does not contain the answer or is empty, use your general knowledge to answer the client's query professionally and politely."
                         )},
                         *context[-self.settings.transcript_window:],
                         {
