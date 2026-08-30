@@ -34,6 +34,9 @@ def sample_report() -> dict[str, object]:
         "conversion_indicators": {},
         "agent_tone_delivery_feedback": {},
         "agent_sentiment_responsiveness": {},
+        "lead_stage": "In Conversation",
+        "lead_status": "Warm",
+        "lead_outcome": "Follow-Up Required",
     }
 
 

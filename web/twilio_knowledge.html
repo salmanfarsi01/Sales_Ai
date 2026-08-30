@@ -371,7 +371,12 @@
                 } else if (e.type === 'suggestion_delta' && d.id === current) {
                     answer.textContent += d.text;
                 } else if (e.type === 'suggestion_end' && d.id === current) {
-                    metrics.textContent += ` · TTFT ${d.ttft_ms ?? 'n/a'} ms · total ${d.total_ms} ms`;
+                    if (d.metrics) {
+                        const m = d.metrics;
+                        metrics.textContent += ` · Pinecone: ${m.retrieval_ms}ms · LLM TTFT: ${m.llm_ttft_ms}ms · Gen: ${m.llm_generation_ms}ms · Total pipeline: ${m.pipeline_latency_total_ms}ms`;
+                    } else {
+                        metrics.textContent += ` · TTFT ${d.ttft_ms ?? 'n/a'} ms · total ${d.total_ms} ms`;
+                    }
                 } else if (e.type === 'knowledge_uploaded') {
                     note(`PDF ready: ${d.name}, ${d.pages} pages`);
                 } else if (e.type === 'call_end') {

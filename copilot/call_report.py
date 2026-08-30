@@ -17,6 +17,9 @@ REPORT_KEYS = (
     "conversion_indicators",
     "agent_tone_delivery_feedback",
     "agent_sentiment_responsiveness",
+    "lead_stage",
+    "lead_status",
+    "lead_outcome",
 )
 
 
@@ -54,6 +57,9 @@ def complete_report(report: Any) -> dict[str, Any]:
         "conversion_indicators": {"status": "unknown", "evidence": "Not available", "strengths": [], "risks": []},
         "agent_tone_delivery_feedback": {"tone_alignment": "Not available", "energy_profile": "Not available", "strengths": [], "improvements": []},
         "agent_sentiment_responsiveness": {"sentiment_score": None, "adaptability_moments": [], "coaching_notes": "Not available"},
+        "lead_stage": "Unknown",
+        "lead_status": "Unknown",
+        "lead_outcome": "Unknown",
     }
     for key, default in defaults.items():
         report.setdefault(key, default)
@@ -87,6 +93,9 @@ The JSON must contain exactly these top-level sections:
 6. conversion_indicators: status, evidence, strengths, risks
 7. agent_tone_delivery_feedback: tone_alignment, energy_profile, strengths, improvements
 8. agent_sentiment_responsiveness: sentiment_score, adaptability_moments, coaching_notes
+9. lead_stage: Must be exactly one of: "New", "Attempted", "Contacted", "In Conversation", "Follow-Up", "Qualified", "Appointment Set", "Archived"
+10. lead_status: Must be exactly one of: "Hot", "Warm", "Cold", "Unknown"
+11. lead_outcome: Must be exactly one of: "Appointment Set", "Follow-Up Required", "Information Requested", "Not Interested", "Not a Fit", "No Answer", "Voicemail"
 
 Use only evidence from the transcript. If a value cannot be known exactly, estimate it and state
 that it is an estimate. Prompt utilization means how closely the salesperson followed the AI

@@ -283,9 +283,13 @@ class FastAPICopilot:
         tenant_id: str,
         scope: Optional[str] = None,
         owner_id: Optional[str] = None,
+        stt_received_time: Optional[float] = None,
     ) -> None:
-        """Retrieve context and stream Groq recommendation."""
+        """Retrieve context and stream Groq recommendation with detailed stage timings."""
         from .context_recovery import recover_query
+
+        if stt_received_time is None:
+            stt_received_time = monotonic()
 
         prior_client_turns = [
             message["content"] for message in context if message.get("role") == "user"
@@ -321,6 +325,8 @@ class FastAPICopilot:
             evidence = "\n\n".join(f"[{item.source}]\n{item.text}" for item in matched)
             sources = [item.source for item in matched]
 
+        retrieval_completed_time = monotonic()
+
         await self.broadcast(tenant_id, {
             "type": "suggestion_start",
             "data": {
@@ -341,8 +347,9 @@ class FastAPICopilot:
                     messages=[
                         {"role": "system", "content": (
                             "You are a live sales copilot helping the salesperson answer the client. "
-                            "Return at most three concise sentences with the recommended response only. "
-                            "Answer as if you are advising the salesperson, not the client. "
+                            "Return at most three concise, conversational sentences with the recommended response only. "
+                            "Answer directly in the first person as the salesperson (using 'I' or 'We'). Output ONLY the exact words the salesperson should repeat to the client. "
+                            "Do not include any meta-advice, conversational filler, or introductory phrases like 'You can say:', 'I recommend:', or 'Tell the client'."
                             "Use supplied knowledge whenever it matches the question. "
                             "If the knowledge contains a relevant fact, do not say you have no information. "
                             "If the supplied knowledge does not contain the answer or is empty, use your general knowledge to answer the client's query professionally and politely."
@@ -366,7 +373,7 @@ class FastAPICopilot:
                 loop.call_soon_threadsafe(queue.put_nowait, exc)
 
         asyncio.create_task(asyncio.to_thread(generate))
-        first_token_ms = None
+        first_token_time = None
         full_suggestion = ""
         while True:
             item = await queue.get()
@@ -374,8 +381,8 @@ class FastAPICopilot:
                 break
             if isinstance(item, Exception):
                 raise item
-            if first_token_ms is None:
-                first_token_ms = int((monotonic() - started) * 1000)
+            if first_token_time is None:
+                first_token_time = monotonic()
             await self.broadcast(tenant_id, {
                 "type": "suggestion_delta",
                 "data": {
@@ -385,13 +392,27 @@ class FastAPICopilot:
             }, call_sid=call_sid)
             full_suggestion += item
 
-        # Stream suggestion completed event
+        llm_completed_time = monotonic()
+
+        # Calculate granular performance metrics
+        stt_to_retrieval_start_ms = int((started - stt_received_time) * 1000)
+        retrieval_ms = int((retrieval_completed_time - started) * 1000)
+        llm_ttft_ms = int((first_token_time - retrieval_completed_time) * 1000) if first_token_time is not None else 0
+        llm_generation_ms = int((llm_completed_time - first_token_time) * 1000) if first_token_time is not None else 0
+        pipeline_latency_total_ms = int((llm_completed_time - stt_received_time) * 1000)
+
+        # Stream suggestion completed event with detailed metrics
         await self.broadcast(tenant_id, {
             "type": "suggestion_end",
             "data": {
                 "id": suggestion_id,
-                "ttft_ms": first_token_ms,
-                "total_ms": int((monotonic() - started) * 1000),
+                "metrics": {
+                    "stt_to_retrieval_start_ms": stt_to_retrieval_start_ms,
+                    "retrieval_ms": retrieval_ms,
+                    "llm_ttft_ms": llm_ttft_ms,
+                    "llm_generation_ms": llm_generation_ms,
+                    "pipeline_latency_total_ms": pipeline_latency_total_ms,
+                }
             }
         }, call_sid=call_sid)
 
@@ -607,6 +628,7 @@ class FastAPICopilot:
                                 raise RuntimeError(event.get("description", "Deepgram error"))
                             if event_type != "Results":
                                 continue
+                            stt_received_time = monotonic()
                             text = event.get("channel", {}).get("alternatives", [{}])[0].get("transcript", "").strip()
                             if not text:
                                 continue
@@ -643,7 +665,8 @@ class FastAPICopilot:
                                         asyncio.create_task(
                                             self.stream_suggestion(
                                                 call_sid, client_text, hist_context, tenant_id,
-                                                scope="sales", owner_id=salesman_id
+                                                scope="sales", owner_id=salesman_id,
+                                                stt_received_time=stt_received_time
                                             )
                                         )
                                     if client_text:
@@ -668,7 +691,8 @@ class FastAPICopilot:
                                     new_task = asyncio.create_task(
                                         self.stream_suggestion(
                                             call_sid, text, prompt_context, tenant_id,
-                                            scope="sales", owner_id=salesman_id
+                                            scope="sales", owner_id=salesman_id,
+                                            stt_received_time=stt_received_time
                                         )
                                     )
                                     state["generation_task"] = new_task

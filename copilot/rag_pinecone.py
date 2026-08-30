@@ -220,11 +220,18 @@ class PineconeRAG:
         )
         
         chunks = []
+        LOGGER.info("RAG search query: '%s' namespace: '%s'", query, tenant_id)
+        LOGGER.info("RAG search results (top_k=%d):", top_k)
         for match in results.get("matches", []):
+            metadata = match.get("metadata", {})
+            source = metadata.get("source", "unknown")
+            text_snippet = metadata.get("text", "").replace("\n", " ")[:100]
+            LOGGER.info("  [%s] Score: %.4f | Source: %s | Snippet: %s...", match["id"], match["score"], source, text_snippet)
+            
             if match["score"] < min_score:
+                LOGGER.info("     (Skipped: score %.4f below min_score %.4f)", match["score"], min_score)
                 continue
             
-            metadata = match.get("metadata", {})
             chunks.append(RAGChunk(
                 id=match["id"],
                 text=metadata.get("text", ""),

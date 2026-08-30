@@ -219,16 +219,17 @@ class TwilioCopilot:
                     messages=[
                         {"role": "system", "content": (
                             "You are a live sales copilot helping the salesperson answer the client. "
-                            "Return at most three concise sentences with the recommended response only. "
-                            "Answer as if you are advising the salesperson, not the client. "
+                            "Return at most three concise, conversational sentences with the recommended response only. "
+                            "Answer directly in the first person as the salesperson (using 'I' or 'We'). Output ONLY the exact words the salesperson should repeat to the client. "
+                            "Do not include any meta-advice, conversational filler, or introductory phrases like 'You can say:', 'I recommend:', or 'Tell the client'."
                             "Use supplied knowledge whenever it matches the question. "
                             "If the knowledge contains a relevant fact, do not say you have no information. "
-                            "Only admit that a fact is unavailable when the supplied knowledge truly does not contain it."
+                            "If the supplied knowledge does not contain the answer or is empty, use your general knowledge to answer the client's query professionally and politely."
                         )},
                         *context[-self.settings.transcript_window:],
                         {"role": "user", "content": f"Client is asking: {question}\n\nKnowledge:\n{evidence or 'No matching local knowledge.'}"},
                     ],
-                    temperature=0.2, max_completion_tokens=140, stream=True,
+                    temperature=0.2, max_completion_tokens=1024, stream=True,
                 )
                 for chunk in stream:
                     token = chunk.choices[0].delta.content
