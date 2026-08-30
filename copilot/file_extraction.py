@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import io
 import mimetypes
+import os
+import requests
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Optional
@@ -232,22 +234,53 @@ class FileExtractor:
 
     @staticmethod
     def _extract_image(file_path: Path, content: bytes) -> ExtractedContent:
-        """Extract text from images using OCR."""
+        """Extract text from images using OCR, with Groq Vision fallback."""
+        text = ""
+        # Try local Tesseract OCR first
         try:
             import pytesseract
             from PIL import Image
-        except ImportError:
-            raise ImportError("pytesseract and pillow required for image support: pip install pytesseract pillow")
-        
-        try:
             image = Image.open(io.BytesIO(content))
             text = pytesseract.image_to_string(image)
+        except Exception:
+            pass
             
-            if not text.strip():
-                text = "[Image processed but no text detected via OCR]"
-        except Exception as e:
-            raise ValueError(f"Failed to extract from image: {e}")
-        
+        if not text.strip():
+            # Fallback to Groq Vision
+            groq_key = os.getenv("GROQ_API_KEY")
+            if groq_key:
+                try:
+                    import base64
+                    from groq import Groq
+                    base64_image = base64.b64encode(content).decode('utf-8')
+                    suffix = file_path.suffix.lower()
+                    mime = "image/jpeg" if suffix in (".jpg", ".jpeg") else "image/png"
+                    client = Groq(api_key=groq_key)
+                    response = client.chat.completions.create(
+                        model="llama-3.2-11b-vision-preview",
+                        messages=[
+                            {
+                                "role": "user",
+                                "content": [
+                                    {"type": "text", "text": "Extract all text, numbers, lists, and visible information from this image. Output only the extracted text exactly as it appears. Do not summarize, format as markdown, or add conversational text."},
+                                    {
+                                        "type": "image_url",
+                                        "image_url": {
+                                            "url": f"data:{mime};base64,{base64_image}"
+                                        }
+                                    }
+                                ]
+                            }
+                        ],
+                        temperature=0.1,
+                        max_completion_tokens=2000
+                    )
+                    text = response.choices[0].message.content or ""
+                except Exception as vision_exc:
+                    text = f"[Image processing failed: {vision_exc}]"
+            else:
+                text = "[Image processed but no text detected via OCR. Set GROQ_API_KEY to enable cloud vision OCR.]"
+                
         return ExtractedContent(
             text=text,
             metadata={
@@ -259,58 +292,65 @@ class FileExtractor:
         )
 
     @staticmethod
-    def _extract_video(file_path: Path, content: bytes) -> ExtractedContent:
-        """Extract metadata and transcript from video files."""
-        try:
-            from moviepy.video.io.VideoFileClip import VideoFileClip
-        except ImportError:
-            raise ImportError("moviepy required for video support: pip install moviepy")
+    def _transcribe_audio_via_deepgram(content: bytes, suffix: str) -> str:
+        """Transcribe audio/video content using Deepgram pre-recorded API."""
+        deepgram_key = os.getenv("DEEPGRAM_API_KEY")
+        if not deepgram_key:
+            return "[Media file processed - Deepgram key not found in environment]"
+            
+        # Map mime type
+        if suffix == ".mp3":
+            mime = "audio/mpeg"
+        elif suffix == ".wav":
+            mime = "audio/wav"
+        elif suffix == ".mp4":
+            mime = "video/mp4"
+        elif suffix == ".m4a":
+            mime = "audio/mp4"
+        elif suffix in (".mov",):
+            mime = "video/quicktime"
+        elif suffix in (".webm",):
+            mime = "video/webm"
+        elif suffix == ".ogg":
+            mime = "audio/ogg"
+        else:
+            mime = "application/octet-stream"
+            
+        url = "https://api.deepgram.com/v1/listen?smart_format=true&model=nova-3"
+        headers = {
+            "Authorization": f"Token {deepgram_key}",
+            "Content-Type": mime
+        }
         
-        text_parts = []
-        metadata_dict = {}
-        
         try:
-            with open("_temp_video.tmp", "wb") as f:
-                f.write(content)
-            
-            clip = VideoFileClip("_temp_video.tmp")
-            metadata_dict = {
-                "duration": str(clip.duration),
-                "fps": str(clip.fps),
-                "size": f"{clip.w}x{clip.h}",
-            }
-            
-            if clip.audio is not None:
-                # Placeholder: In production, use speech-to-text service
-                text_parts.append("[Audio track present - requires speech-to-text transcription]")
-            
-            clip.close()
-            Path("_temp_video.tmp").unlink(missing_ok=True)
+            resp = requests.post(url, headers=headers, data=content, timeout=90.0)
+            if resp.status_code != 200:
+                return f"[Media transcription failed: HTTP {resp.status_code} - {resp.text}]"
+            result = resp.json()
+            return result.get("results", {}).get("channels", [{}])[0].get("alternatives", [{}])[0].get("transcript", "")
         except Exception as e:
-            Path("_temp_video.tmp").unlink(missing_ok=True)
-            raise ValueError(f"Failed to extract from video: {e}")
-        
+            return f"[Media transcription failed: {e}]"
+
+    @staticmethod
+    def _extract_video(file_path: Path, content: bytes) -> ExtractedContent:
+        """Extract transcript from video files using Deepgram API."""
+        text = FileExtractor._transcribe_audio_via_deepgram(content, file_path.suffix.lower())
         return ExtractedContent(
-            text="\n".join(text_parts) or "[Video file processed]",
+            text=text,
             metadata={
                 "file_name": file_path.name,
                 "file_type": "video",
-                **metadata_dict,
+                "format": file_path.suffix.lower().lstrip("."),
             },
             file_type="video"
         )
 
     @staticmethod
     def _extract_audio(file_path: Path, content: bytes) -> ExtractedContent:
-        """Extract transcript from audio files."""
-        try:
-            from pydub import AudioSegment
-        except ImportError:
-            raise ImportError("pydub required for audio support: pip install pydub")
-        
-        # Placeholder: In production, use speech-to-text service (Deepgram, Whisper, etc.)
+        """Extract transcript from audio files using Deepgram API."""
+        text = FileExtractor._transcribe_audio_via_deepgram(content, file_path.suffix.lower())
         return ExtractedContent(
-            text="[Audio file processed - requires speech-to-text transcription]",
+            text=text,
             metadata={
                 "file_name": file_path.name,
                 "file_type": "audio",

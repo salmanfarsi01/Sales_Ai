@@ -203,8 +203,8 @@
                 <h1>user sales</h1>
                 <div class="sub">Client questions → context recovery → PDF knowledge → streamed answer</div>
             </div>
-            <form class="upload" id="upload"><input id="pdf" name="file" type="file" accept="application/pdf,.pdf" required><button>Upload
-                    PDF</button><span class="meta" id="uploadStatus"></span></form>
+            <form class="upload" id="upload"><input id="pdf" name="file" type="file" accept=".pdf,.docx,.doc,.txt,.md,.csv,.xlsx,.xls,.png,.jpg,.jpeg,.mp4,.webm,.wav,.mp3" required><button>Upload
+                    File</button><span class="meta" id="uploadStatus"></span></form>
         </header>
         <div class="stages">
             <div class="stage" id="twilio"><b>Twilio</b><span>Waiting</span></div>
@@ -282,7 +282,7 @@
 
             const file = pdf.files[0];
             if (!file) {
-                uploadStatus.textContent = 'Please choose a PDF file';
+                uploadStatus.textContent = 'Please choose a file';
                 return;
             }
             if (file.size === 0) {

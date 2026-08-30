@@ -29,11 +29,11 @@ from .call_report import CallReportGenerator
 from .retrieval import LocalKnowledgeBase
 from .rag_integration import CopilotRAGRetriever
 from .rag_api import RAGAPIHandler
+from .file_extraction import FileExtractor
 from .knowledge_upload import (
     KNOWLEDGE,
     VALID_TARGETS,
     is_pdf_signature,
-    extract_pdf,
     resolve_target,
     safe_stem,
 )
@@ -187,7 +187,10 @@ class FastAPICopilot:
             job["progress"] = 20
             
             try:
-                text, pages = await asyncio.to_thread(extract_pdf, payload)
+                # Use multi-format FileExtractor
+                extracted = await asyncio.to_thread(FileExtractor.extract, filename, payload)
+                text = extracted.text
+                pages = int(extracted.metadata.get("pages", "1"))
             except Exception as exc:
                 job["status"] = "failed"
                 job["progress"] = 100
@@ -200,11 +203,12 @@ class FastAPICopilot:
             
             target_dir = KNOWLEDGE / tenant_id / resolved_target
             target_dir.mkdir(parents=True, exist_ok=True)
+            suffix = Path(filename).suffix.lower()
             name = f"{safe_stem(filename)}_{int(time())}"
-            pdf_path = target_dir / f"{name}.pdf"
-            extracted_path = target_dir / f"{name}.pdf.md"
+            dest_path = target_dir / f"{name}{suffix}"
+            extracted_path = target_dir / f"{name}{suffix}.md"
 
-            await asyncio.to_thread(pdf_path.write_bytes, payload)
+            await asyncio.to_thread(dest_path.write_bytes, payload)
             await asyncio.to_thread(
                 extracted_path.write_text,
                 f"# Source: {filename}\n\n{text}",
@@ -230,7 +234,7 @@ class FastAPICopilot:
                 try:
                     await asyncio.to_thread(
                         self.rag_retriever.upload_knowledge,
-                        file_path=str(pdf_path),
+                        file_path=str(dest_path),
                         tenant_id=tenant_id,
                         file_content=payload,
                         scope=resolved_target,
@@ -253,7 +257,7 @@ class FastAPICopilot:
                 "type": "knowledge_uploaded",
                 "data": {
                     "doc_id": doc_id,
-                    "name": pdf_path.name,
+                    "name": dest_path.name,
                     "target": resolved_target,
                     "pages": pages,
                     "characters": len(text),
@@ -262,7 +266,7 @@ class FastAPICopilot:
                 }
             }
             await self.broadcast(tenant_id, event)
-            LOGGER.info("indexed PDF %s tenant=%s target=%s pages=%d characters=%d pinecone_synced=%s", pdf_path.name, tenant_id, resolved_target, pages, len(text), pinecone_success)
+            LOGGER.info("indexed File %s tenant=%s target=%s pages=%d characters=%d pinecone_synced=%s", dest_path.name, tenant_id, resolved_target, pages, len(text), pinecone_success)
             
         except Exception as exc:
             LOGGER.exception("Unhandled error in background ingestion task %s", doc_id)
@@ -770,8 +774,9 @@ class FastAPICopilot:
                 target_dir = KNOWLEDGE / tenant_id / target
                 if not target_dir.exists():
                     continue
-                for path in sorted(target_dir.glob("*.pdf")):
-                    documents.append({"name": path.name, "bytes": path.stat().st_size, "target": target})
+                for path in sorted(target_dir.iterdir()):
+                    if path.is_file() and not path.name.endswith(".md"):
+                        documents.append({"name": path.name, "bytes": path.stat().st_size, "target": target})
             return {"documents": documents, "indexed_chunks": len(self.knowledge._chunks)}
 
         @app.post("/knowledge/upload")
@@ -785,16 +790,18 @@ class FastAPICopilot:
                 raise HTTPException(status_code=400, detail="tenant_id form parameter is required")
             
             if not file.filename:
-                raise HTTPException(status_code=400, detail="A PDF file is required")
+                raise HTTPException(status_code=400, detail="A file is required")
 
-            if Path(file.filename).suffix.casefold() != ".pdf":
-                raise HTTPException(status_code=400, detail="Only PDF files are accepted")
+            suffix = Path(file.filename).suffix.lower()
+            if suffix not in FileExtractor.SUPPORTED_FORMATS:
+                supported_str = ", ".join(FileExtractor.SUPPORTED_FORMATS.keys())
+                raise HTTPException(status_code=400, detail=f"Unsupported file format '{suffix}'. Supported formats: {supported_str}")
 
             payload = await file.read()
             if len(payload) == 0:
-                raise HTTPException(status_code=400, detail="Selected file is empty. Please choose a valid PDF file.")
+                raise HTTPException(status_code=400, detail="Selected file is empty.")
 
-            if not is_pdf_signature(payload):
+            if suffix == ".pdf" and not is_pdf_signature(payload):
                 raise HTTPException(status_code=400, detail="The uploaded file is not a valid PDF")
 
             doc_id = str(uuid.uuid4())
