@@ -354,7 +354,7 @@ class FastAPICopilot:
                         },
                     ],
                     temperature=0.2,
-                    max_completion_tokens=140,
+                    max_completion_tokens=1024,
                     stream=True,
                 )
                 for chunk in stream:
