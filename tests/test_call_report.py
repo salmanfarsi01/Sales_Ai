@@ -60,6 +60,14 @@ class CallReportTests(unittest.TestCase):
             ))
             self.assertEqual(report["call_sid"], "CA123")
             self.assertEqual(report["call_summary"]["overview"], "A productive call")
+            
+            # Assert file was written to disk
+            report_file = Path(directory) / "CA123.json"
+            self.assertTrue(report_file.exists())
+            with open(report_file, "r", encoding="utf-8") as f:
+                saved_data = json.load(f)
+            self.assertEqual(saved_data["call_sid"], "CA123")
+            self.assertEqual(saved_data["call_summary"]["overview"], "A productive call")
 
 
 if __name__ == "__main__":

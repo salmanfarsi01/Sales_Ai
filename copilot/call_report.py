@@ -124,4 +124,10 @@ Complete transcript:
         report = complete_report(json.loads(_json_text(raw)))
         report["call_sid"] = call_sid
         report["generated_at"] = datetime.now(timezone.utc).isoformat()
+
+        # Save the JSON report to the configured directory
+        self.directory.mkdir(parents=True, exist_ok=True)
+        report_file = self.directory / f"{call_sid}.json"
+        report_file.write_text(json.dumps(report, indent=2), encoding="utf-8")
+
         return report

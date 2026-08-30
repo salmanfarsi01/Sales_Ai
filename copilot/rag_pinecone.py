@@ -70,6 +70,14 @@ class PineconeRAG:
                     }
                 }
             )
+            import time
+            LOGGER.info("Waiting for Pinecone index to become ready...")
+            while True:
+                desc = self.pc.describe_index(self.index_name)
+                if desc.status.get('ready') or desc.status.get('state') == 'Ready':
+                    LOGGER.info(f"Pinecone index {self.index_name} is ready.")
+                    break
+                time.sleep(2)
         
         return self.pc.Index(self.index_name)
 

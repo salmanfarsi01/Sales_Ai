@@ -306,7 +306,16 @@ class FastAPICopilot:
         suggestion_id = str(uuid.uuid4())
         started = monotonic()
 
-        if self.rag_retriever:
+        # Check if the query is a simple greeting or filler
+        words = [w.strip("?,.!") for w in reconstructed.lower().split()]
+        greetings = {"hello", "hi", "hey", "test", "ok", "okay", "yes", "no", "bye", "goodbye"}
+        is_greeting = all(w in greetings for w in words)
+
+        if is_greeting or len(words) <= 1:
+            # Bypass RAG lookup for simple greetings and conversational filler
+            evidence = ""
+            sources = []
+        elif self.rag_retriever:
             context_list = self.rag_retriever.get_context(
                 query=reconstructed,
                 tenant_id=tenant_id,
