@@ -17,6 +17,9 @@ Provides an 8-round sales voice calibration system:
 from __future__ import annotations
 
 import asyncio
+import difflib
+import hashlib
+import io
 import json
 import logging
 import math
@@ -25,6 +28,7 @@ import random
 import re
 import time
 import uuid
+import wave
 from contextlib import suppress
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
@@ -36,7 +40,7 @@ from fastapi import APIRouter, FastAPI, File, Form, HTTPException, UploadFile
 from fastapi.responses import FileResponse, JSONResponse, Response
 from groq import Groq
 from openai import OpenAI
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, ValidationError
 
 from dotenv import load_dotenv
 
@@ -46,6 +50,64 @@ LOGGER = logging.getLogger("copilot.calibration")
 STATIC_DIR = Path(__file__).resolve().parent.parent / "web"
 AUDIO_CACHE_DIR = Path(__file__).resolve().parent.parent / "calibration_audio"
 AUDIO_CACHE_DIR.mkdir(parents=True, exist_ok=True)
+
+
+def get_audio_duration_seconds(
+    audio_bytes: Optional[bytes],
+    mime_type: str = "audio/webm",
+    fallback_seconds: float = 0.0,
+) -> float:
+    """Extract audio duration server-side when WAV or complete EBML header is present;
+    otherwise validates client-supplied timer against physical byte-rate bounds (800-45,000 B/s) as an outlier filter.
+    """
+    if not audio_bytes or len(audio_bytes) < 100:
+        return max(round(fallback_seconds, 2), 0.0) if fallback_seconds > 0 else 0.0
+
+    # 1. RIFF / WAV exact frame header parsing
+    if audio_bytes[:4] == b"RIFF" and audio_bytes[8:12] == b"WAVE":
+        try:
+            with wave.open(io.BytesIO(audio_bytes), "rb") as wf:
+                frames = wf.getnframes()
+                rate = wf.getframerate()
+                if rate > 0:
+                    return round(frames / float(rate), 2)
+        except Exception:
+            pass
+
+    # 2. WebM / Matroska EBML Duration element parser (0x4489)
+    try:
+        idx = audio_bytes.find(b"\x44\x89")
+        if idx != -1 and idx + 7 <= len(audio_bytes):
+            import struct
+            len_byte = audio_bytes[idx + 2]
+            if len_byte == 0x84 and idx + 7 <= len(audio_bytes):
+                val = struct.unpack(">f", audio_bytes[idx + 3 : idx + 7])[0]
+                if 0.1 <= val <= 3600:
+                    return round(val, 2)
+                elif val > 3600:
+                    return round(val / 1000.0, 2)
+            elif len_byte == 0x88 and idx + 11 <= len(audio_bytes):
+                val = struct.unpack(">d", audio_bytes[idx + 3 : idx + 11])[0]
+                if 0.1 <= val <= 3600:
+                    return round(val, 2)
+                elif val > 3600:
+                    return round(val / 1000.0, 2)
+    except Exception:
+        pass
+
+    # 3. If client provided high-resolution timer duration, validate against byte sanity (1,000 - 45,000 B/s)
+    bytes_len = len(audio_bytes)
+    if fallback_seconds >= 0.5:
+        effective_bps = bytes_len / fallback_seconds
+        if 800 <= effective_bps <= 45000:
+            return round(fallback_seconds, 2)
+
+    # 4. WebM/Opus stream estimation (~48 kbps = 6,000 bytes/sec)
+    estimated_sec = bytes_len / 6000.0
+    if 0.5 <= estimated_sec <= 120.0:
+        return round(estimated_sec, 2)
+
+    return max(round(fallback_seconds, 2), 0.0) if fallback_seconds > 0 else 5.0
 
 # Curated ElevenLabs Voice Pool & Sales Personas
 VOICE_PERSONAS = [
@@ -151,7 +213,7 @@ class CalibrationSummaryReport(BaseModel):
 # ==========================================
 
 class ElevenLabsTTSClient:
-    """Handles on-demand ElevenLabs TTS synthesis with fallback to OpenAI TTS."""
+    """Handles on-demand ElevenLabs TTS synthesis with hash-based caching and fallback to OpenAI TTS."""
 
     def __init__(
         self,
@@ -160,17 +222,39 @@ class ElevenLabsTTSClient:
     ):
         self.elevenlabs_api_key = elevenlabs_api_key or os.getenv("ELEVENLABS_API_KEY")
         self.openai_api_key = openai_api_key or os.getenv("OPENAI_API_KEY")
-        self.openai_client = OpenAI(api_key=self.openai_api_key) if self.openai_api_key else None
+        self.openai_client = OpenAI(api_key=self.openai_api_key, timeout=15.0) if self.openai_api_key else None
 
     async def generate_speech(self, text: str, voice_id: str = "21m00Tcm4TlvDq8ikWAM") -> tuple[bytes, str]:
-        """Synthesize speech audio for the dynamic question text.
+        """Synthesize speech audio for the dynamic question text with hash-based local caching.
 
         Returns (audio_bytes, format_mime).
         """
-        # Try ElevenLabs first if API key is provided
+        clean_text = text.strip()
+
+        # 1. Check local hash-based cache in AUDIO_CACHE_DIR (including full voice parameter footprint)
+        model_id = "eleven_multilingual_v2"
+        stability = 0.55
+        similarity_boost = 0.8
+        style = 0.15
+        use_speaker_boost = True
+
+        cache_key = hashlib.sha256(
+            f"{model_id}:{voice_id}:{stability}:{similarity_boost}:{style}:{use_speaker_boost}:{clean_text}".encode("utf-8")
+        ).hexdigest()
+        cache_path = AUDIO_CACHE_DIR / f"tts_{cache_key}.mp3"
+
+        if cache_path.exists() and cache_path.stat().st_size > 200:
+            try:
+                LOGGER.info("TTS Cache hit: %s (voice: %s)", cache_path.name, voice_id)
+                audio_bytes = await asyncio.to_thread(cache_path.read_bytes)
+                return audio_bytes, "audio/mpeg"
+            except Exception as exc:
+                LOGGER.warning("TTS Cache read error: %s", exc)
+
+        # 2. Try ElevenLabs first if API key is provided
         if self.elevenlabs_api_key:
             try:
-                LOGGER.info("Generating ElevenLabs speech on-demand for: %s...", text[:40])
+                LOGGER.info("Generating ElevenLabs speech on-demand for: %s...", clean_text[:40])
                 url = f"https://api.elevenlabs.io/v1/text-to-speech/{voice_id}"
                 headers = {
                     "xi-api-key": self.elevenlabs_api_key,
@@ -178,19 +262,21 @@ class ElevenLabsTTSClient:
                     "Accept": "audio/mpeg",
                 }
                 payload = {
-                    "text": text,
-                    "model_id": "eleven_multilingual_v2",
+                    "text": clean_text,
+                    "model_id": model_id,
                     "voice_settings": {
-                        "stability": 0.55,
-                        "similarity_boost": 0.8,
-                        "style": 0.15,
-                        "use_speaker_boost": True,
+                        "stability": stability,
+                        "similarity_boost": similarity_boost,
+                        "style": style,
+                        "use_speaker_boost": use_speaker_boost,
                     },
                 }
-                async with httpx.AsyncClient(timeout=30.0) as client:
+                async with httpx.AsyncClient(timeout=15.0) as client:
                     response = await client.post(url, headers=headers, json=payload)
-                    if response.status_code == 200:
-                        return response.content, "audio/mpeg"
+                    if response.status_code == 200 and len(response.content) > 200:
+                        audio_bytes = response.content
+                        await asyncio.to_thread(cache_path.write_bytes, audio_bytes)
+                        return audio_bytes, "audio/mpeg"
                     else:
                         LOGGER.warning(
                             "ElevenLabs API returned %d: %s. Falling back to alternative TTS.",
@@ -198,9 +284,9 @@ class ElevenLabsTTSClient:
                             response.text,
                         )
             except Exception as exc:
-                LOGGER.exception("ElevenLabs synthesis error: %s", exc)
+                LOGGER.warning("ElevenLabs synthesis error: %s", exc)
 
-        # Fallback to OpenAI TTS if available
+        # 3. Fallback to OpenAI TTS if available
         if self.openai_client:
             try:
                 LOGGER.info("Generating OpenAI TTS speech fallback...")
@@ -215,22 +301,31 @@ class ElevenLabsTTSClient:
                     "pNInz6obpgDQGcFmaJgB": "alloy",
                 }
                 selected_voice = voice_map.get(voice_id, "alloy")
+                openai_cache_key = hashlib.sha256(f"openai:tts-1:{selected_voice}:{clean_text}".encode("utf-8")).hexdigest()
+                openai_cache_path = AUDIO_CACHE_DIR / f"tts_{openai_cache_key}.mp3"
+
+                if openai_cache_path.exists() and openai_cache_path.stat().st_size > 200:
+                    audio_bytes = await asyncio.to_thread(openai_cache_path.read_bytes)
+                    return audio_bytes, "audio/mpeg"
 
                 def _synth():
                     res = self.openai_client.audio.speech.create(
                         model="tts-1",
                         voice=selected_voice,
-                        input=text,
+                        input=clean_text,
+                        timeout=15.0,
                     )
                     return res.content
 
                 audio_bytes = await asyncio.to_thread(_synth)
-                return audio_bytes, "audio/mpeg"
+                if len(audio_bytes) > 200:
+                    await asyncio.to_thread(openai_cache_path.write_bytes, audio_bytes)
+                    return audio_bytes, "audio/mpeg"
             except Exception as exc:
-                LOGGER.exception("OpenAI TTS error: %s", exc)
+                LOGGER.warning("OpenAI TTS error: %s", exc)
 
-        # Lightweight synthetic tone placeholder if no external audio key
-        return self._generate_synthetic_placeholder(text), "audio/wav"
+        # 4. Lightweight synthetic tone placeholder if no external audio key
+        return self._generate_synthetic_placeholder(clean_text), "audio/wav"
 
     def _generate_synthetic_placeholder(self, text: str) -> bytes:
         """Create a valid RIFF WAV audio placeholder."""
@@ -276,7 +371,7 @@ class ElevenLabsTTSClient:
 # ==========================================
 
 class SpeechToTextEngine:
-    """Transcribes user speech using Deepgram or Groq Whisper."""
+    """Transcribes user speech using Deepgram or Groq Whisper (with non-blocking in-memory audio)."""
 
     def __init__(
         self,
@@ -285,7 +380,7 @@ class SpeechToTextEngine:
     ):
         self.deepgram_api_key = deepgram_api_key or os.getenv("DEEPGRAM_API_KEY")
         self.groq_api_key = groq_api_key or os.getenv("GROQ_API_KEY")
-        self.groq_client = Groq(api_key=self.groq_api_key) if self.groq_api_key else None
+        self.groq_client = Groq(api_key=self.groq_api_key, timeout=15.0) if self.groq_api_key else None
 
     async def transcribe(self, audio_bytes: bytes, mime_type: str = "audio/webm") -> str:
         """Transcribe user audio to text."""
@@ -298,7 +393,7 @@ class SpeechToTextEngine:
                     "Authorization": f"Token {self.deepgram_api_key}",
                     "Content-Type": mime_type,
                 }
-                async with httpx.AsyncClient(timeout=30.0) as client:
+                async with httpx.AsyncClient(timeout=15.0) as client:
                     resp = await client.post(url, headers=headers, content=audio_bytes)
                     if resp.status_code == 200:
                         data = resp.json()
@@ -313,27 +408,24 @@ class SpeechToTextEngine:
             except Exception as exc:
                 LOGGER.warning("Deepgram STT failed: %s. Trying Groq Whisper.", exc)
 
-        # 2. Groq Whisper fallback
+        # 2. Groq Whisper fallback (In-Memory, No Blocking Disk I/O on Event Loop)
         if self.groq_client:
             try:
-                LOGGER.info("Transcribing audio via Groq Whisper...")
+                LOGGER.info("Transcribing audio via Groq Whisper (in-memory)...")
                 ext = "webm" if "webm" in mime_type else "wav"
-                temp_file = AUDIO_CACHE_DIR / f"temp_upload_{uuid.uuid4().hex[:8]}.{ext}"
-                temp_file.write_bytes(audio_bytes)
+                filename = f"audio.{ext}"
 
                 def _whisper():
-                    with open(temp_file, "rb") as f:
-                        transcription = self.groq_client.audio.transcriptions.create(
-                            file=(temp_file.name, f.read()),
-                            model="whisper-large-v3-turbo",
-                            language="en",
-                        )
+                    transcription = self.groq_client.audio.transcriptions.create(
+                        file=(filename, io.BytesIO(audio_bytes).read()),
+                        model="whisper-large-v3-turbo",
+                        language="en",
+                        timeout=15.0,
+                    )
                     return transcription.text
 
                 res = await asyncio.to_thread(_whisper)
-                with suppress(Exception):
-                    temp_file.unlink()
-                if res.strip():
+                if res and res.strip():
                     return res.strip()
             except Exception as exc:
                 LOGGER.warning("Groq Whisper failed: %s", exc)
@@ -362,13 +454,68 @@ class CalibrationService:
         self.deepgram_api_key = deepgram_api_key or os.getenv("DEEPGRAM_API_KEY")
         self.llm_model = llm_model or os.getenv("GROQ_MODEL", "openai/gpt-oss-20b")
 
-        self.groq_client = Groq(api_key=self.groq_api_key) if self.groq_api_key else None
-        self.openai_client = OpenAI(api_key=self.openai_api_key) if self.openai_api_key else None
+        self.groq_client = Groq(api_key=self.groq_api_key, timeout=15.0) if self.groq_api_key else None
+        self.openai_client = OpenAI(api_key=self.openai_api_key, timeout=15.0) if self.openai_api_key else None
         self.tts = ElevenLabsTTSClient(self.elevenlabs_api_key, self.openai_api_key)
         self.stt = SpeechToTextEngine(self.deepgram_api_key, self.groq_api_key)
 
         self.sessions: dict[str, dict[str, Any]] = {}
         self.audio_store: dict[str, tuple[bytes, str]] = {}
+
+    async def _call_llm_json(
+        self,
+        system: str,
+        prompt: str,
+        temperature: float = 0.7,
+        timeout: float = 15.0,
+    ) -> dict[str, Any]:
+        """Unified internal helper: try Groq -> try OpenAI with timeout, to_thread, and clean JSON extraction."""
+        if not self.groq_client and not self.openai_client:
+            return {}
+
+        # 1. Try Groq
+        if self.groq_client:
+            try:
+                def _call_groq():
+                    res = self.groq_client.chat.completions.create(
+                        model=self.llm_model,
+                        messages=[
+                            {"role": "system", "content": system},
+                            {"role": "user", "content": prompt},
+                        ],
+                        temperature=temperature,
+                        response_format={"type": "json_object"},
+                        timeout=timeout,
+                    )
+                    return res.choices[0].message.content or "{}"
+
+                raw = await asyncio.to_thread(_call_groq)
+                return json.loads(_clean_json_text(raw))
+            except Exception as exc:
+                LOGGER.warning("Groq LLM JSON call failed (%s). Attempting OpenAI fallback.", exc)
+
+        # 2. Fallback to OpenAI
+        if self.openai_client:
+            try:
+                def _call_openai():
+                    res = self.openai_client.chat.completions.create(
+                        model="gpt-4o-mini",
+                        messages=[
+                            {"role": "system", "content": system},
+                            {"role": "user", "content": prompt},
+                        ],
+                        temperature=temperature,
+                        response_format={"type": "json_object"},
+                        timeout=timeout,
+                    )
+                    return res.choices[0].message.content or "{}"
+
+                raw = await asyncio.to_thread(_call_openai)
+                return json.loads(_clean_json_text(raw))
+            except Exception as exc:
+                LOGGER.warning("OpenAI LLM JSON call failed: %s", exc)
+
+        return {}
 
     async def create_dynamic_session(self, user_id: str = "sales_rep_1", industry: Optional[str] = None) -> dict[str, Any]:
         """Generate a completely dynamic 8-round calibration session plan."""
@@ -436,43 +583,15 @@ Respond ONLY with valid JSON with keys "question_text" and "teleprompt_text":
         question_text = f"In terms of {stage.lower()}, how does your solution address {focus.lower()}?"
         teleprompt_text = f"We provide a proven enterprise solution tailored for {industry} that delivers fast measurable results with dedicated engineering support."
 
-        if self.groq_client or self.openai_client:
-            try:
-                if self.groq_client:
-                    def _call_groq():
-                        res = self.groq_client.chat.completions.create(
-                            model=self.llm_model,
-                            messages=[
-                                {"role": "system", "content": "You are an enterprise sales simulator returning valid JSON."},
-                                {"role": "user", "content": dynamic_prompt},
-                            ],
-                            temperature=0.8,
-                            response_format={"type": "json_object"},
-                        )
-                        return res.choices[0].message.content or "{}"
-                    raw = await asyncio.to_thread(_call_groq)
-                elif self.openai_client:
-                    def _call_openai():
-                        res = self.openai_client.chat.completions.create(
-                            model="gpt-4o-mini",
-                            messages=[
-                                {"role": "system", "content": "You are an enterprise sales simulator returning valid JSON."},
-                                {"role": "user", "content": dynamic_prompt},
-                            ],
-                            temperature=0.8,
-                            response_format={"type": "json_object"},
-                        )
-                        return res.choices[0].message.content or "{}"
-                    raw = await asyncio.to_thread(_call_openai)
-                else:
-                    raw = "{}"
-
-                parsed = json.loads(_clean_json_text(raw))
-                if parsed.get("question_text") and parsed.get("teleprompt_text"):
-                    question_text = parsed["question_text"].strip()
-                    teleprompt_text = parsed["teleprompt_text"].strip()
-            except Exception as exc:
-                LOGGER.warning("Groq dynamic generation error for round %d: %s", round_num, exc)
+        parsed = await self._call_llm_json(
+            system="You are an enterprise sales simulator returning valid JSON.",
+            prompt=dynamic_prompt,
+            temperature=0.8,
+            timeout=15.0,
+        )
+        if parsed.get("question_text") and parsed.get("teleprompt_text"):
+            question_text = parsed["question_text"].strip()
+            teleprompt_text = parsed["teleprompt_text"].strip()
 
         # Synthesize ElevenLabs voice on-demand for this specific dynamic question
         voice_id = persona["voice_id"]
@@ -519,7 +638,11 @@ Respond ONLY with valid JSON with keys "question_text" and "teleprompt_text":
         round_data = session["rounds"][round_num]
         teleprompt = round_data["teleprompt_text"]
 
-        # 1. Transcribe speech if audio is provided
+        # 1. Derive duration server-side from received audio_bytes rather than trusting client form
+        server_duration = get_audio_duration_seconds(audio_bytes, mime_type, fallback_seconds=duration_seconds)
+        final_duration = server_duration if server_duration > 0 else duration_seconds
+
+        # 2. Transcribe speech if audio is provided
         if transcript_override is not None:
             user_transcript = transcript_override.strip()
         elif audio_bytes and len(audio_bytes) > 100:
@@ -527,18 +650,18 @@ Respond ONLY with valid JSON with keys "question_text" and "teleprompt_text":
         else:
             user_transcript = ""
 
-        # 2. Compute AI Performance Evaluation via LLM
+        # 3. Compute AI Performance Evaluation
         evaluation = await self._run_llm_evaluation(
             round_num=round_num,
             stage=round_data["stage"],
             target_teleprompt=teleprompt,
             user_transcript=user_transcript,
-            duration_seconds=duration_seconds,
+            duration_seconds=final_duration,
         )
 
         round_data["evaluation"] = evaluation
         round_data["completed"] = True
-        round_data["duration_seconds"] = duration_seconds
+        round_data["duration_seconds"] = final_duration
 
         # Advance session round
         if round_num < 8:
@@ -558,34 +681,27 @@ Respond ONLY with valid JSON with keys "question_text" and "teleprompt_text":
         user_transcript: str,
         duration_seconds: float,
     ) -> dict[str, Any]:
-        """Perform strict, objective AI evaluation comparing teleprompt vs user speech. Gives 0 for silence or irrelevant text."""
-        import difflib
-        import re
-
+        """Perform strict, objective AI evaluation with blind LLM rubric, Pydantic validation, and heuristic fallback."""
         user_transcript_clean = user_transcript.strip() if user_transcript else ""
 
         # Check for empty / silence -> Strictly 0 score
         if not user_transcript_clean:
-            return {
-                "round_number": round_num,
-                "stage": stage,
-                "overall_score": 0,
-                "score_breakdown": {
-                    "word_choice": 0,
-                    "pacing": 0,
-                    "sentiment": 0,
-                    "tone_emphasis": 0,
-                    "pause_filters": 0,
-                    "energy_inflection": 0,
-                },
-                "transcribed_text": "[No speech detected]",
-                "target_teleprompt": target_teleprompt,
-                "feedback": "No speech detected. You received 0% because you did not speak or repeat the teleprompt script.",
-                "strengths": [],
-                "improvements": ["Speak clearly into your microphone and repeat the teleprompt script aloud."],
-                "detected_fillers": [],
-                "wpm": 0,
-            }
+            zero_breakdown = RoundScoreBreakdown(
+                word_choice=0, pacing=0, sentiment=0, tone_emphasis=0, pause_filters=0, energy_inflection=0
+            )
+            return RoundEvaluation(
+                round_number=round_num,
+                stage=stage,
+                overall_score=0,
+                score_breakdown=zero_breakdown,
+                transcribed_text="[No speech detected]",
+                target_teleprompt=target_teleprompt,
+                feedback="No speech detected. You received 0% because you did not speak or repeat the teleprompt script.",
+                strengths=[],
+                improvements=["Speak clearly into your microphone and repeat the teleprompt script aloud."],
+                detected_fillers=[],
+                wpm=0,
+            ).model_dump()
 
         # Detect filler words
         filler_patterns = [
@@ -609,21 +725,22 @@ Respond ONLY with valid JSON with keys "question_text" and "teleprompt_text":
         user_words = user_clean.split()
 
         if not user_words:
-            return {
-                "round_number": round_num,
-                "stage": stage,
-                "overall_score": 0,
-                "score_breakdown": {
-                    "word_choice": 0, "pacing": 0, "sentiment": 0, "tone_emphasis": 0, "pause_filters": 0, "energy_inflection": 0
-                },
-                "transcribed_text": user_transcript,
-                "target_teleprompt": target_teleprompt,
-                "feedback": "No audible words detected. Teleprompt was not repeated.",
-                "strengths": [],
-                "improvements": ["Repeat the full teleprompt script on screen."],
-                "detected_fillers": [],
-                "wpm": 0,
-            }
+            zero_breakdown = RoundScoreBreakdown(
+                word_choice=0, pacing=0, sentiment=0, tone_emphasis=0, pause_filters=0, energy_inflection=0
+            )
+            return RoundEvaluation(
+                round_number=round_num,
+                stage=stage,
+                overall_score=0,
+                score_breakdown=zero_breakdown,
+                transcribed_text=user_transcript_clean,
+                target_teleprompt=target_teleprompt,
+                feedback="No audible words detected. Teleprompt was not repeated.",
+                strengths=[],
+                improvements=["Repeat the full teleprompt script on screen."],
+                detected_fillers=[],
+                wpm=0,
+            ).model_dump()
 
         # Similarity metrics
         seq_ratio = difflib.SequenceMatcher(None, target_clean, user_clean).ratio()
@@ -640,33 +757,28 @@ Respond ONLY with valid JSON with keys "question_text" and "teleprompt_text":
 
         # Check for completely irrelevant / disconnected speech -> Strictly 0 score
         if coverage_ratio < 0.25 or seq_ratio < 0.30:
-            return {
-                "round_number": round_num,
-                "stage": stage,
-                "overall_score": 0,
-                "score_breakdown": {
-                    "word_choice": 0,
-                    "pacing": 0,
-                    "sentiment": 0,
-                    "tone_emphasis": 0,
-                    "pause_filters": 0,
-                    "energy_inflection": 0,
-                },
-                "transcribed_text": user_transcript,
-                "target_teleprompt": target_teleprompt,
-                "feedback": "Irrelevant response. What you said does not match the teleprompt script, resulting in a score of 0%.",
-                "strengths": [],
-                "improvements": ["Make sure to read and repeat the exact teleprompt response displayed on screen."],
-                "detected_fillers": detected_fillers,
-                "wpm": int((len(user_words) / max(duration_seconds, 1.0)) * 60) if duration_seconds > 0 else 0,
-            }
+            zero_breakdown = RoundScoreBreakdown(
+                word_choice=0, pacing=0, sentiment=0, tone_emphasis=0, pause_filters=0, energy_inflection=0
+            )
+            return RoundEvaluation(
+                round_number=round_num,
+                stage=stage,
+                overall_score=0,
+                score_breakdown=zero_breakdown,
+                transcribed_text=user_transcript_clean,
+                target_teleprompt=target_teleprompt,
+                feedback="Irrelevant response. What you said does not match the teleprompt script, resulting in a score of 0%.",
+                strengths=[],
+                improvements=["Make sure to read and repeat the exact teleprompt response displayed on screen."],
+                detected_fillers=detected_fillers,
+                wpm=int((len(user_words) / max(duration_seconds, 1.0)) * 60) if duration_seconds > 0 else 0,
+            ).model_dump()
 
-        # Strict Word Choice based on similarity and length completeness
+        # Heuristic calculation for fallback & bounds
         raw_word_score = (seq_ratio * 0.6 + coverage_ratio * 0.4) * 100
         length_penalty = min(1.0, len(user_words) / max(len(target_words), 1))
         strict_word_choice = max(0, min(100, int(round(raw_word_score * length_penalty))))
 
-        # Strict Pacing (Words Per Minute relative to content)
         wpm = int((len(user_words) / max(duration_seconds, 1.0)) * 60) if duration_seconds > 0 else 135
         if 125 <= wpm <= 155:
             strict_pacing = min(95, int(round(strict_word_choice * 1.05)))
@@ -677,11 +789,8 @@ Respond ONLY with valid JSON with keys "question_text" and "teleprompt_text":
         else:
             strict_pacing = min(25, int(round(strict_word_choice * 0.35)))
 
-        # Strict Pause / Filters (deduct 15 points per filler)
         filler_deduction = len(detected_fillers) * 15
         strict_pause_filters = max(0, min(100, strict_word_choice - filler_deduction if strict_word_choice < 85 else 100 - filler_deduction))
-
-        # Tone & Sentiment & Energy
         strict_tone = max(0, min(100, int(round(strict_word_choice * 0.95))))
         strict_sentiment = max(0, min(100, int(round(strict_word_choice * 0.95))))
         strict_energy = max(0, min(100, int(round(strict_word_choice * 0.90))))
@@ -695,6 +804,29 @@ Respond ONLY with valid JSON with keys "question_text" and "teleprompt_text":
             (strict_sentiment * 0.05)
         ))
 
+        fallback_breakdown = RoundScoreBreakdown(
+            word_choice=strict_word_choice,
+            pacing=strict_pacing,
+            sentiment=strict_sentiment,
+            tone_emphasis=strict_tone,
+            pause_filters=strict_pause_filters,
+            energy_inflection=strict_energy,
+        )
+        fallback_eval = RoundEvaluation(
+            round_number=round_num,
+            stage=stage,
+            overall_score=strict_overall,
+            score_breakdown=fallback_breakdown,
+            transcribed_text=user_transcript_clean,
+            target_teleprompt=target_teleprompt,
+            feedback="Direct similarity analysis: Ensure high fidelity to teleprompt value metrics and steady delivery.",
+            strengths=["Accurate core phrasing" if strict_word_choice > 70 else "Clear initial tone"],
+            improvements=["Improve pacing cadence" if strict_pacing < 75 else "Maintain crisp sentence endings without fillers"],
+            detected_fillers=detected_fillers,
+            wpm=wpm,
+        )
+
+        # Blind Rubric prompt for LLM (no pre-filled heuristic numbers to avoid anchoring)
         eval_prompt = f"""You are a strict, demanding B2B Executive Sales Performance Coach evaluating a salesperson's voice delivery.
 Sales Stage: {stage} (Round {round_num} of 8)
 
@@ -702,117 +834,75 @@ Required Teleprompt:
 "{target_teleprompt}"
 
 User Spoken Transcript:
-"{user_transcript}"
+"{user_transcript_clean}"
 
 Spoken Duration: {duration_seconds:.2f} seconds | WPM: {wpm} | Detected Fillers: {detected_fillers}
 
-STRICT GRADING RULES:
-- Word Choice (0-100): Score 85+ ONLY if almost every key word, metric, and benefit from the teleprompt was accurately delivered. If the rep skipped or butchered key terms, score 30-65.
-- Pacing (0-100): Optimal enterprise rate is 130-150 WPM. If rushed (>170 WPM) or sluggish (<110 WPM), penalize strictly.
-- Sentiment (0-100): Solution-oriented, calm executive authority. Penalize defensive or timid delivery.
-- Tone/Emphasis (0-100): Did they stress ROI metrics and clear value? Penalize casual or monotone speech.
-- Pause/Filters (0-100): Each filler word ('um', 'uh', 'like') must deduct 10-15 points.
-- Energy/Inflection (0-100): Natural pitch modulation and conviction. Penalize flat delivery.
-- Overall Score (0-100): Strict composite score. Reps must earn 80+ only through sharp, fluent execution.
+STRICT EVALUATION RUBRIC (Score each dimension independently between 0 and 100):
+- "word_choice" (0-100): Award 85+ ONLY if virtually all key value metrics and specific phrasing from the teleprompt were accurately delivered. Deduct heavily for omitted facts, distortions, or partial speech.
+- "pacing" (0-100): Optimal enterprise rate is 130-150 WPM. Penalize rushed (>170 WPM) or dragging (<110 WPM) delivery.
+- "sentiment" (0-100): Professional composure, positive executive warmth, and consultative confidence.
+- "tone_emphasis" (0-100): Strategic emphasis on ROI, SLAs, and technical guarantees. Penalize flat or casual tone.
+- "pause_filters" (0-100): Clean articulation without filler hesitations. Each detected filler ({detected_fillers}) must reduce score by 10-15 points.
+- "energy_inflection" (0-100): Vocal dynamics, cadence variance, and authoritative conviction.
+- "overall_score" (0-100): Composite reflection of all 6 dimensions. Only crisp, near-flawless delivery should score 80+.
 
-Return strictly valid JSON:
+Return strictly valid JSON in this exact structure:
 {{
-  "overall_score": {strict_overall},
+  "overall_score": <integer 0-100>,
   "score_breakdown": {{
-    "word_choice": {strict_word_choice},
-    "pacing": {strict_pacing},
-    "sentiment": {strict_sentiment},
-    "tone_emphasis": {strict_tone},
-    "pause_filters": {strict_pause_filters},
-    "energy_inflection": {strict_energy}
+    "word_choice": <integer 0-100>,
+    "pacing": <integer 0-100>,
+    "sentiment": <integer 0-100>,
+    "tone_emphasis": <integer 0-100>,
+    "pause_filters": <integer 0-100>,
+    "energy_inflection": <integer 0-100>
   }},
-  "feedback": "Concise 1-2 sentence coaching feedback noting exact delivery strengths or critical shortcomings.",
-  "strengths": ["1-2 specific strengths demonstrated"],
-  "improvements": ["1-2 specific actionable coaching directives to improve delivery"],
+  "feedback": "<1-2 sentence constructive coaching feedback noting exact strengths or shortcomings>",
+  "strengths": ["<1-2 specific strengths demonstrated>"],
+  "improvements": ["<1-2 specific actionable coaching directives>"],
   "detected_fillers": {json.dumps(detected_fillers)}
 }}
 """
 
-        fallback_eval = {
-            "round_number": round_num,
-            "stage": stage,
-            "overall_score": strict_overall,
-            "score_breakdown": {
-                "word_choice": strict_word_choice,
-                "pacing": strict_pacing,
-                "sentiment": strict_sentiment,
-                "tone_emphasis": strict_tone,
-                "pause_filters": strict_pause_filters,
-                "energy_inflection": strict_energy,
-            },
-            "transcribed_text": user_transcript,
-            "target_teleprompt": target_teleprompt,
-            "feedback": "Strict analysis: Ensure high fidelity to teleprompt value metrics and eliminate all filler hesitations.",
-            "strengths": ["Accurate core phrasing" if strict_word_choice > 70 else "Clear initial tone"],
-            "improvements": ["Improve pacing cadence" if strict_pacing < 75 else "Maintain crisp sentence endings without fillers"],
-            "detected_fillers": detected_fillers,
-            "wpm": wpm,
-        }
+        llm_data = await self._call_llm_json(
+            system="You are an elite enterprise sales speech evaluation coach returning strictly valid JSON.",
+            prompt=eval_prompt,
+            temperature=0.2,
+            timeout=15.0,
+        )
 
-        if not self.groq_client and not self.openai_client:
-            return fallback_eval
+        if not llm_data:
+            return fallback_eval.model_dump()
 
+        # Validate with Pydantic
         try:
-            if self.groq_client:
-                def _call():
-                    res = self.groq_client.chat.completions.create(
-                        model=self.llm_model,
-                        messages=[
-                            {"role": "system", "content": "You are a sales speech evaluation coach returning strictly valid JSON."},
-                            {"role": "user", "content": eval_prompt},
-                        ],
-                        temperature=0.2,
-                        response_format={"type": "json_object"},
-                    )
-                    return res.choices[0].message.content or "{}"
-                raw_json = await asyncio.to_thread(_call)
-            elif self.openai_client:
-                def _call():
-                    res = self.openai_client.chat.completions.create(
-                        model="gpt-4o-mini",
-                        messages=[
-                            {"role": "system", "content": "You are a sales speech evaluation coach returning strictly valid JSON."},
-                            {"role": "user", "content": eval_prompt},
-                        ],
-                        temperature=0.2,
-                        response_format={"type": "json_object"},
-                    )
-                    return res.choices[0].message.content or "{}"
-                raw_json = await asyncio.to_thread(_call)
-            else:
-                raw_json = "{}"
-
-            data = json.loads(_clean_json_text(raw_json))
-            breakdown = data.get("score_breakdown", {})
-
-            return {
-                "round_number": round_num,
-                "stage": stage,
-                "overall_score": int(data.get("overall_score", strict_overall)),
-                "score_breakdown": {
-                    "word_choice": int(breakdown.get("word_choice", strict_word_choice)),
-                    "pacing": int(breakdown.get("pacing", strict_pacing)),
-                    "sentiment": int(breakdown.get("sentiment", strict_sentiment)),
-                    "tone_emphasis": int(breakdown.get("tone_emphasis", strict_tone)),
-                    "pause_filters": int(breakdown.get("pause_filters", strict_pause_filters)),
-                    "energy_inflection": int(breakdown.get("energy_inflection", strict_energy)),
-                },
-                "transcribed_text": user_transcript,
-                "target_teleprompt": target_teleprompt,
-                "feedback": data.get("feedback", "Excellent delivery!"),
-                "strengths": data.get("strengths", ["Clear tone"]),
-                "improvements": data.get("improvements", ["Keep conversational flow"]),
-                "detected_fillers": data.get("detected_fillers", []),
-                "wpm": int((len(user_words) / max(duration_seconds, 1.0)) * 60) if duration_seconds > 0 else 140,
-            }
-        except Exception as exc:
-            LOGGER.warning("LLM evaluation error, using fallback evaluation: %s", exc)
-            return fallback_eval
+            raw_breakdown = llm_data.get("score_breakdown", {})
+            validated_breakdown = RoundScoreBreakdown(
+                word_choice=int(raw_breakdown.get("word_choice", strict_word_choice)),
+                pacing=int(raw_breakdown.get("pacing", strict_pacing)),
+                sentiment=int(raw_breakdown.get("sentiment", strict_sentiment)),
+                tone_emphasis=int(raw_breakdown.get("tone_emphasis", strict_tone)),
+                pause_filters=int(raw_breakdown.get("pause_filters", strict_pause_filters)),
+                energy_inflection=int(raw_breakdown.get("energy_inflection", strict_energy)),
+            )
+            validated_eval = RoundEvaluation(
+                round_number=round_num,
+                stage=stage,
+                overall_score=int(llm_data.get("overall_score", strict_overall)),
+                score_breakdown=validated_breakdown,
+                transcribed_text=user_transcript_clean,
+                target_teleprompt=target_teleprompt,
+                feedback=str(llm_data.get("feedback", "Good delivery with accurate reproduction of key value points.")),
+                strengths=list(llm_data.get("strengths", ["Accurate core phrasing"])),
+                improvements=list(llm_data.get("improvements", ["Maintain consistent cadence"])),
+                detected_fillers=list(llm_data.get("detected_fillers", detected_fillers)),
+                wpm=wpm,
+            )
+            return validated_eval.model_dump()
+        except Exception as val_err:
+            LOGGER.warning("Pydantic validation failed on LLM response (%s), using validated fallback.", val_err)
+            return fallback_eval.model_dump()
 
     def _compute_summary_report(self, session: dict[str, Any]) -> dict[str, Any]:
         """Compute final 8-round composite calibration report matching the user's screenshot."""
