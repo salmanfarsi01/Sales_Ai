@@ -1,0 +1,1636 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>AI Voice Calibration Studio</title>
+  <meta name="description" content="8-Round AI Voice Calibration Studio for evaluating salesperson speech pacing, tone, delivery, and teleprompt alignment.">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+  
+  <style>
+    :root {
+      --primary: #0d9488;
+      --primary-dark: #0f766e;
+      --primary-light: #ccfbf1;
+      --primary-glow: rgba(13, 148, 136, 0.15);
+      --slate-900: #0f172a;
+      --slate-800: #1e293b;
+      --slate-700: #334155;
+      --slate-600: #475569;
+      --slate-500: #64748b;
+      --slate-400: #94a3b8;
+      --slate-300: #cbd5e1;
+      --slate-200: #e2e8f0;
+      --slate-100: #f1f5f9;
+      --slate-50: #f8fafc;
+      --white: #ffffff;
+      --success: #10b981;
+      --success-light: #d1fae5;
+      --card-radius: 18px;
+      --shadow-sm: 0 1px 2px 0 rgba(0, 0, 0, 0.05);
+      --shadow-md: 0 4px 6px -1px rgba(0, 0, 0, 0.07), 0 2px 4px -1px rgba(0, 0, 0, 0.04);
+      --shadow-lg: 0 10px 15px -3px rgba(0, 0, 0, 0.08), 0 4px 6px -2px rgba(0, 0, 0, 0.04);
+      --shadow-hover: 0 12px 24px -4px rgba(13, 148, 136, 0.12);
+    }
+
+    * {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+    }
+
+    body {
+      font-family: 'Plus Jakarta Sans', 'Inter', sans-serif;
+      background: #f4f7f9;
+      color: var(--slate-800);
+      line-height: 1.5;
+      min-height: 100vh;
+      display: flex;
+      flex-direction: column;
+      -webkit-font-smoothing: antialiased;
+    }
+
+    /* Top Navbar */
+    .header-nav {
+      background: var(--white);
+      border-bottom: 1px solid var(--slate-200);
+      padding: 16px 32px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      position: sticky;
+      top: 0;
+      z-index: 100;
+    }
+
+    .brand {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      text-decoration: none;
+      color: var(--slate-900);
+      font-weight: 700;
+      font-size: 1.15rem;
+    }
+
+    .brand-icon {
+      width: 38px;
+      height: 38px;
+      border-radius: 10px;
+      background: linear-gradient(135deg, var(--primary), #065f46);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      color: var(--white);
+      font-size: 1.2rem;
+    }
+
+    .nav-badge {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      background: var(--primary-light);
+      color: var(--primary-dark);
+      padding: 6px 14px;
+      border-radius: 9999px;
+      font-size: 0.82rem;
+      font-weight: 600;
+    }
+
+    .nav-badge::before {
+      content: "";
+      width: 7px;
+      height: 7px;
+      border-radius: 50%;
+      background: var(--primary);
+      display: inline-block;
+      box-shadow: 0 0 0 3px rgba(13, 148, 136, 0.25);
+    }
+
+    /* Main Container */
+    .container {
+      max-width: 1140px;
+      width: 100%;
+      margin: 0 auto;
+      padding: 32px 24px 64px 24px;
+      flex: 1;
+    }
+
+    /* Page Header */
+    .page-title-row {
+      margin-bottom: 24px;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+    }
+
+    .page-title {
+      font-size: 1.75rem;
+      font-weight: 800;
+      color: var(--slate-900);
+      letter-spacing: -0.02em;
+    }
+
+    .subtitle {
+      color: var(--slate-500);
+      font-size: 0.95rem;
+      margin-top: 4px;
+    }
+
+    /* Cards */
+    .card {
+      background: var(--white);
+      border: 1px solid var(--slate-200);
+      border-radius: var(--card-radius);
+      padding: 28px;
+      box-shadow: var(--shadow-sm);
+      transition: all 0.25s ease;
+    }
+
+    .card:hover {
+      box-shadow: var(--shadow-md);
+    }
+
+    /* Section 1: Calibration Results Layout (Screenshot replication) */
+    .results-grid-top {
+      display: grid;
+      grid-template-columns: 1.15fr 1fr;
+      gap: 24px;
+      margin-bottom: 24px;
+    }
+
+    /* Score Gauge Card */
+    .score-gauge-card {
+      display: flex;
+      align-items: center;
+      gap: 28px;
+      background: var(--white);
+    }
+
+    .gauge-wrapper {
+      position: relative;
+      width: 140px;
+      height: 140px;
+      flex-shrink: 0;
+    }
+
+    .gauge-svg {
+      transform: rotate(-90deg);
+      width: 140px;
+      height: 140px;
+    }
+
+    .gauge-bg {
+      fill: none;
+      stroke: #e6f4f2;
+      stroke-width: 11;
+    }
+
+    .gauge-fill {
+      fill: none;
+      stroke: var(--primary);
+      stroke-width: 11;
+      stroke-linecap: round;
+      stroke-dasharray: 377;
+      stroke-dashoffset: 60;
+      transition: stroke-dashoffset 1.5s cubic-bezier(0.4, 0, 0.2, 1);
+    }
+
+    .gauge-content {
+      position: absolute;
+      top: 50%;
+      left: 50%;
+      transform: translate(-50%, -50%);
+      text-align: center;
+    }
+
+    .gauge-label {
+      font-size: 0.75rem;
+      color: var(--slate-500);
+      font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: 0.04em;
+    }
+
+    .gauge-value {
+      font-size: 2.1rem;
+      font-weight: 800;
+      color: var(--slate-900);
+      line-height: 1.1;
+    }
+
+    .score-details h3 {
+      font-size: 1.35rem;
+      font-weight: 800;
+      color: var(--slate-900);
+      margin-bottom: 4px;
+    }
+
+    .score-details p {
+      color: var(--slate-500);
+      font-size: 0.88rem;
+      margin-bottom: 18px;
+      line-height: 1.4;
+    }
+
+    .stat-list {
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+    }
+
+    .stat-item {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      font-size: 0.88rem;
+      border-bottom: 1px dashed var(--slate-200);
+      padding-bottom: 6px;
+    }
+
+    .stat-item:last-child {
+      border-bottom: none;
+      padding-bottom: 0;
+    }
+
+    .stat-left {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      font-weight: 700;
+      color: var(--slate-900);
+    }
+
+    .stat-icon {
+      color: var(--primary);
+      font-size: 1rem;
+    }
+
+    .stat-right {
+      color: var(--slate-400);
+      font-size: 0.82rem;
+      font-weight: 500;
+    }
+
+    /* What this means card */
+    .info-card {
+      display: flex;
+      flex-direction: column;
+      justify-content: space-between;
+    }
+
+    .card-header-icon {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      margin-bottom: 18px;
+    }
+
+    .icon-badge {
+      width: 36px;
+      height: 36px;
+      border-radius: 10px;
+      background: #e6f9f5;
+      color: var(--primary);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 1.1rem;
+    }
+
+    .card-header-icon h3 {
+      font-size: 1.15rem;
+      font-weight: 700;
+      color: var(--slate-900);
+    }
+
+    .info-bullets {
+      list-style: none;
+      display: flex;
+      flex-direction: column;
+      gap: 12px;
+      margin-bottom: 20px;
+    }
+
+    .info-bullets li {
+      display: flex;
+      align-items: flex-start;
+      gap: 10px;
+      font-size: 0.88rem;
+      color: var(--slate-600);
+      line-height: 1.45;
+    }
+
+    .check-icon {
+      width: 18px;
+      height: 18px;
+      border-radius: 50%;
+      background: #e6f9f5;
+      color: var(--primary);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 0.75rem;
+      flex-shrink: 0;
+      margin-top: 2px;
+      font-weight: bold;
+    }
+
+    .btn-outline {
+      align-self: flex-start;
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      background: var(--white);
+      color: var(--primary);
+      border: 1.5px solid var(--primary);
+      padding: 9px 20px;
+      border-radius: 10px;
+      font-weight: 600;
+      font-size: 0.88rem;
+      cursor: pointer;
+      transition: all 0.2s ease;
+      text-decoration: none;
+    }
+
+    .btn-outline:hover {
+      background: var(--primary-light);
+      transform: translateY(-1px);
+    }
+
+    /* Middle Card: Round Performance Stepper */
+    .stepper-card {
+      margin-bottom: 24px;
+    }
+
+    .card-title {
+      font-size: 1.15rem;
+      font-weight: 800;
+      color: var(--slate-900);
+      margin-bottom: 24px;
+    }
+
+    .stepper-track-container {
+      position: relative;
+      padding: 12px 16px;
+    }
+
+    .stepper-line {
+      position: absolute;
+      top: 28px;
+      left: 48px;
+      right: 48px;
+      height: 3px;
+      background: var(--primary);
+      z-index: 1;
+    }
+
+    .stepper-steps {
+      display: flex;
+      justify-content: space-between;
+      position: relative;
+      z-index: 2;
+    }
+
+    .step-node {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      text-align: center;
+      cursor: pointer;
+    }
+
+    .step-circle {
+      width: 34px;
+      height: 34px;
+      border-radius: 50%;
+      background: var(--primary);
+      color: var(--white);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 0.9rem;
+      font-weight: 700;
+      box-shadow: 0 0 0 4px var(--white);
+      transition: transform 0.2s ease;
+    }
+
+    .step-node:hover .step-circle {
+      transform: scale(1.1);
+    }
+
+    .step-label {
+      margin-top: 10px;
+      font-size: 0.85rem;
+      font-weight: 700;
+      color: var(--slate-800);
+    }
+
+    .step-score {
+      font-size: 0.85rem;
+      font-weight: 700;
+      color: var(--primary);
+      margin-top: 2px;
+    }
+
+    /* Bottom Grid: Score Breakdown & What's Next */
+    .results-grid-bottom {
+      display: grid;
+      grid-template-columns: 1.35fr 1fr;
+      gap: 24px;
+    }
+
+    .breakdown-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      column-gap: 32px;
+      row-gap: 20px;
+    }
+
+    .metric-row {
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
+    }
+
+    .metric-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      font-size: 0.86rem;
+      font-weight: 600;
+      color: var(--slate-700);
+    }
+
+    .metric-title {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+
+    .metric-val {
+      color: var(--primary);
+      font-weight: 700;
+    }
+
+    .progress-bar-bg {
+      height: 8px;
+      background: #e6f4f2;
+      border-radius: 9999px;
+      overflow: hidden;
+      position: relative;
+    }
+
+    .progress-bar-fill {
+      height: 100%;
+      background: var(--primary);
+      border-radius: 9999px;
+      transition: width 1.2s cubic-bezier(0.4, 0, 0.2, 1);
+    }
+
+    .whats-next-list {
+      list-style: none;
+      display: flex;
+      flex-direction: column;
+      gap: 16px;
+      margin-bottom: 24px;
+    }
+
+    .whats-next-item {
+      display: flex;
+      align-items: flex-start;
+      gap: 12px;
+      font-size: 0.88rem;
+      color: var(--slate-600);
+      line-height: 1.4;
+    }
+
+    .whats-next-icon {
+      font-size: 1.15rem;
+      color: var(--primary);
+      margin-top: 1px;
+    }
+
+    /* ========================================================
+       Active Calibration Studio (Interactive 8-Round Flow)
+       ======================================================== */
+    .studio-view {
+      display: none;
+    }
+
+    .studio-active {
+      display: block;
+    }
+
+    .results-active {
+      display: block;
+    }
+
+    .hidden {
+      display: none !important;
+    }
+
+    .round-progress-card {
+      margin-bottom: 24px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 20px 28px;
+    }
+
+    .round-pill {
+      background: var(--primary-light);
+      color: var(--primary-dark);
+      font-weight: 800;
+      font-size: 0.9rem;
+      padding: 6px 16px;
+      border-radius: 9999px;
+    }
+
+    .studio-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 24px;
+      margin-bottom: 24px;
+    }
+
+    .scenario-box {
+      border-left: 4px solid var(--primary);
+      padding-left: 16px;
+      margin: 16px 0;
+      color: var(--slate-700);
+      font-size: 0.95rem;
+      line-height: 1.6;
+    }
+
+    .teleprompt-box {
+      background: #f0fdfa;
+      border: 1.5px solid #a7f3d0;
+      border-radius: 12px;
+      padding: 20px;
+      font-size: 1.12rem;
+      font-weight: 600;
+      color: #064e3b;
+      line-height: 1.6;
+      margin: 16px 0;
+      box-shadow: inset 0 2px 4px rgba(0, 0, 0, 0.02);
+    }
+
+    .teleprompt-label {
+      font-size: 0.75rem;
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+      color: var(--primary-dark);
+      font-weight: 700;
+      margin-bottom: 6px;
+      display: flex;
+      align-items: center;
+      gap: 6px;
+    }
+
+    /* Audio Player Controls */
+    .audio-player-widget {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      background: var(--slate-100);
+      border-radius: 12px;
+      padding: 12px 18px;
+      margin-top: 14px;
+    }
+
+    .btn-circle {
+      width: 42px;
+      height: 42px;
+      border-radius: 50%;
+      background: var(--primary);
+      color: var(--white);
+      border: none;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 1.1rem;
+      cursor: pointer;
+      transition: all 0.2s ease;
+      box-shadow: var(--shadow-sm);
+    }
+
+    .btn-circle:hover {
+      background: var(--primary-dark);
+      transform: scale(1.05);
+    }
+
+    /* Visualizer & Mic Recording */
+    .recorder-card {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      text-align: center;
+      padding: 32px;
+    }
+
+    .visualizer-canvas {
+      width: 100%;
+      height: 80px;
+      background: #091a18;
+      border-radius: 12px;
+      margin: 20px 0;
+    }
+
+    .mic-button {
+      width: 72px;
+      height: 72px;
+      border-radius: 50%;
+      background: linear-gradient(135deg, var(--primary), #0f766e);
+      color: var(--white);
+      border: 4px solid var(--white);
+      box-shadow: 0 0 0 4px var(--primary-glow), var(--shadow-md);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 1.8rem;
+      cursor: pointer;
+      transition: all 0.25s ease;
+      outline: none;
+    }
+
+    .mic-button.recording {
+      background: #ef4444;
+      box-shadow: 0 0 0 6px rgba(239, 68, 68, 0.35);
+      animation: pulse-mic 1.5s infinite;
+    }
+
+    @keyframes pulse-mic {
+      0% { transform: scale(1); box-shadow: 0 0 0 4px rgba(239, 68, 68, 0.4); }
+      50% { transform: scale(1.08); box-shadow: 0 0 0 12px rgba(239, 68, 68, 0.1); }
+      100% { transform: scale(1); box-shadow: 0 0 0 4px rgba(239, 68, 68, 0.4); }
+    }
+
+    .timer-badge {
+      font-family: monospace;
+      font-size: 1.1rem;
+      font-weight: 700;
+      color: var(--slate-700);
+      margin-top: 14px;
+      background: var(--slate-100);
+      padding: 4px 14px;
+      border-radius: 8px;
+    }
+
+    .btn-primary {
+      background: var(--primary);
+      color: var(--white);
+      border: none;
+      padding: 12px 28px;
+      border-radius: 12px;
+      font-weight: 700;
+      font-size: 0.95rem;
+      cursor: pointer;
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      transition: all 0.2s ease;
+      box-shadow: var(--shadow-sm);
+    }
+
+    .btn-primary:hover {
+      background: var(--primary-dark);
+      box-shadow: var(--shadow-hover);
+      transform: translateY(-1px);
+    }
+
+    .btn-secondary {
+      background: var(--slate-100);
+      color: var(--slate-700);
+      border: 1px solid var(--slate-300);
+      padding: 10px 22px;
+      border-radius: 10px;
+      font-weight: 600;
+      font-size: 0.9rem;
+      cursor: pointer;
+      transition: all 0.2s ease;
+    }
+
+    .btn-secondary:hover {
+      background: var(--slate-200);
+    }
+
+    /* Modal Feedback */
+    .modal-overlay {
+      position: fixed;
+      top: 0;
+      left: 0;
+      right: 0;
+      bottom: 0;
+      background: rgba(15, 23, 42, 0.6);
+      backdrop-filter: blur(4px);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      z-index: 1000;
+      opacity: 0;
+      pointer-events: none;
+      transition: opacity 0.3s ease;
+    }
+
+    .modal-overlay.active {
+      opacity: 1;
+      pointer-events: auto;
+    }
+
+    .modal-content {
+      background: var(--white);
+      border-radius: 20px;
+      max-width: 580px;
+      width: 90%;
+      padding: 32px;
+      box-shadow: var(--shadow-lg);
+      transform: scale(0.95);
+      transition: transform 0.3s ease;
+    }
+
+    .modal-overlay.active .modal-content {
+      transform: scale(1);
+    }
+
+    /* Loading Spinner */
+    .loader-overlay {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      padding: 40px;
+    }
+
+    .spinner {
+      width: 44px;
+      height: 44px;
+      border: 4px solid #e2e8f0;
+      border-top: 4px solid var(--primary);
+      border-radius: 50%;
+      animation: spin 0.8s linear infinite;
+      margin-bottom: 16px;
+    }
+
+    @keyframes spin {
+      0% { transform: rotate(0deg); }
+      100% { transform: rotate(360deg); }
+    }
+
+    /* Responsive */
+    @media (max-width: 900px) {
+      .results-grid-top,
+      .results-grid-bottom,
+      .studio-grid {
+        grid-template-columns: 1fr;
+      }
+      .breakdown-grid {
+        grid-template-columns: 1fr;
+      }
+    }
+  </style>
+</head>
+<body>
+
+  <!-- Top Navigation -->
+  <header class="header-nav">
+    <a href="#" class="brand">
+      <div class="brand-icon">🎙️</div>
+      <span>Sales AI Studio</span>
+    </a>
+    <div style="display: flex; align-items: center; gap: 16px;">
+      <span class="nav-badge" id="navStatus">Ready for Calibration</span>
+      <a href="/" class="btn-secondary" style="text-decoration: none; padding: 6px 14px; font-size: 0.82rem;">Dashboard</a>
+    </div>
+  </header>
+
+  <main class="container">
+    
+    <!-- ========================================================
+         VIEW 1: Active Interactive Calibration Studio
+         ======================================================== -->
+    <div id="studioView" class="studio-view studio-active">
+      
+      <div class="page-title-row">
+        <div>
+          <h1 class="page-title">Voice Calibration Studio</h1>
+          <p class="subtitle">Complete 8 quick business rounds. Listen to the prospect voice, then read the AI teleprompt aloud.</p>
+        </div>
+        <button id="btnStartSession" class="btn-primary" onclick="initiateCalibration()">
+          <span>⚡ Start 8-Round Calibration</span>
+        </button>
+      </div>
+
+      <!-- Live Round Progress Bar -->
+      <div class="card round-progress-card">
+        <div style="display: flex; align-items: center; gap: 14px;">
+          <span class="round-pill" id="studioRoundBadge">Round 1 of 8</span>
+          <div>
+            <h3 id="studioStageName" style="font-size: 1.1rem; font-weight: 700; color: var(--slate-900);">Discovery & Onboarding</h3>
+            <p id="studioScenarioType" style="font-size: 0.82rem; color: var(--slate-500);">Scenario: Implementation Timeline & Value</p>
+          </div>
+        </div>
+        <div style="text-align: right;">
+          <span id="sessionTimerText" style="font-family: monospace; font-size: 0.9rem; color: var(--slate-500); font-weight: 600;">Time: 00:00</span>
+        </div>
+      </div>
+
+      <!-- Studio Grid: AI Scenario Question & Teleprompt -->
+      <div class="studio-grid">
+        
+        <!-- Left: Prospect Question & Voice -->
+        <div class="card">
+          <div class="card-header-icon">
+            <div class="icon-badge">🗣️</div>
+            <div>
+              <h3>AI Prospect Question</h3>
+              <p style="font-size: 0.8rem; color: var(--slate-400);">Generated on-demand with ElevenLabs Voice</p>
+            </div>
+          </div>
+          
+          <div class="scenario-box" id="studioQuestionText">
+            "How long does your typical onboarding take, and will my team have a dedicated specialist to help us configure everything during the first month?"
+          </div>
+
+          <!-- Audio Player Widget -->
+          <div class="audio-player-widget">
+            <button id="btnPlayAiVoice" class="btn-circle" onclick="playCurrentScenarioAudio()">▶</button>
+            <div style="flex: 1;">
+              <div style="font-size: 0.85rem; font-weight: 700; color: var(--slate-800);" id="voicePersonaLabel">ElevenLabs Voice: Rachel</div>
+              <div style="font-size: 0.75rem; color: var(--slate-500);" id="audioStatusLabel">Click play to listen to prospect</div>
+            </div>
+            <audio id="scenarioAudioElement" style="display: none;"></audio>
+          </div>
+        </div>
+
+        <!-- Right: Teleprompt Script To Repeat -->
+        <div class="card">
+          <div class="card-header-icon">
+            <div class="icon-badge">📝</div>
+            <div>
+              <h3>Your AI Teleprompt Script</h3>
+              <p style="font-size: 0.8rem; color: var(--slate-400);">Speak with clear pacing, confidence, and natural inflection</p>
+            </div>
+          </div>
+
+          <div class="teleprompt-label">
+            <span>✨ Live Delivery Teleprompt</span>
+          </div>
+
+          <div class="teleprompt-box" id="studioTelepromptText">
+            "Our standard onboarding takes less than two weeks, and you'll have a dedicated customer success manager walking your team through every single step."
+          </div>
+
+          <div style="display: flex; justify-content: space-between; align-items: center; font-size: 0.82rem; color: var(--slate-500);">
+            <span>Target word count: ~25 words</span>
+            <span>Recommended cadence: 135-150 WPM</span>
+          </div>
+        </div>
+
+      </div>
+
+      <!-- Bottom: Recording Studio -->
+      <div class="card recorder-card">
+        <h3 style="font-size: 1.25rem; font-weight: 800; color: var(--slate-900); margin-bottom: 4px;">Record Your Speech Delivery</h3>
+        <p style="color: var(--slate-500); font-size: 0.9rem; max-width: 500px;">
+          Press the microphone, read the teleprompt clearly, and click stop when finished to receive your instant AI evaluation.
+        </p>
+
+        <!-- Live Waveform Canvas -->
+        <canvas id="visualizerCanvas" class="visualizer-canvas"></canvas>
+
+        <!-- Mic Button -->
+        <div style="display: flex; flex-direction: column; align-items: center; gap: 8px;">
+          <button id="btnMicRecord" class="mic-button" onclick="toggleRecording()">
+            <span id="micIcon">🎙️</span>
+          </button>
+          <div id="recordingTimer" class="timer-badge">00:00s</div>
+          <p id="micStatusHint" style="font-size: 0.85rem; color: var(--slate-500); font-weight: 600;">Click microphone to record</p>
+        </div>
+
+        <!-- Action Buttons -->
+        <div style="display: flex; gap: 12px; margin-top: 24px;">
+          <button id="btnSubmitEval" class="btn-primary" onclick="submitForEvaluation()" style="display: none;">
+            <span>✨ Evaluate Round Performance</span>
+          </button>
+          <button id="btnReRecord" class="btn-secondary" onclick="resetCurrentRecording()" style="display: none;">
+            <span>🔄 Re-record</span>
+          </button>
+        </div>
+
+        <!-- Fallback Manual Text Input for non-mic environments -->
+        <details style="margin-top: 20px; font-size: 0.82rem; color: var(--slate-500); text-align: left; width: 100%; max-width: 500px;">
+          <summary style="cursor: pointer;">Manual / Text Input Fallback</summary>
+          <div style="margin-top: 8px; display: flex; gap: 8px;">
+            <input type="text" id="manualTranscriptInput" placeholder="Paste or type speech transcript..." style="flex: 1; padding: 8px 12px; border: 1px solid var(--slate-300); border-radius: 8px; font-size: 0.85rem;">
+            <button class="btn-secondary" onclick="submitManualTranscript()">Submit Text</button>
+          </div>
+        </details>
+      </div>
+
+    </div>
+
+
+    <!-- ========================================================
+         VIEW 2: Calibration Results Dashboard (Exact Screenshot 1:1 Match)
+         ======================================================== -->
+    <div id="resultsView" class="hidden">
+      
+      <div class="page-title-row">
+        <div>
+          <h1 class="page-title">Calibration results</h1>
+        </div>
+      </div>
+
+      <!-- Top Row: Score Gauge & What this means -->
+      <div class="results-grid-top">
+        
+        <!-- Left: Donut Score Gauge & Meta -->
+        <div class="card score-gauge-card">
+          <div class="gauge-wrapper">
+            <svg class="gauge-svg" viewBox="0 0 140 140">
+              <circle class="gauge-bg" cx="70" cy="70" r="60"></circle>
+              <circle id="gaugeCircleFill" class="gauge-fill" cx="70" cy="70" r="60"></circle>
+            </svg>
+            <div class="gauge-content">
+              <div class="gauge-label">Overall Score</div>
+              <div class="gauge-value" id="resOverallScoreVal">86%</div>
+            </div>
+          </div>
+
+          <div class="score-details" style="flex: 1;">
+            <h3 id="resHeading">Great job!</h3>
+            <p id="resStatusMsg">Your calibration is complete and your AI coach is ready to guide you on calls.</p>
+            
+            <div class="stat-list">
+              <div class="stat-item">
+                <div class="stat-left">
+                  <span class="stat-icon">🎯</span>
+                  <span id="resRoundsCompleted">8</span>
+                </div>
+                <div class="stat-right">Rounds completed</div>
+              </div>
+
+              <div class="stat-item">
+                <div class="stat-left">
+                  <span class="stat-icon">⏱️</span>
+                  <span id="resTotalTime">8m 24s</span>
+                </div>
+                <div class="stat-right">Total time</div>
+              </div>
+
+              <div class="stat-item">
+                <div class="stat-left">
+                  <span class="stat-icon">📅</span>
+                  <span id="resCompletedOn">May 16, 2025</span>
+                </div>
+                <div class="stat-right">Completed on</div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Right: What this means -->
+        <div class="card info-card">
+          <div>
+            <div class="card-header-icon">
+              <div class="icon-badge">✨</div>
+              <h3>What this means</h3>
+            </div>
+
+            <ul class="info-bullets" id="whatThisMeansList">
+              <li>
+                <div class="check-icon">✓</div>
+                <span>Your responses have been analyzed for pace, tone, and delivery.</span>
+              </li>
+              <li>
+                <div class="check-icon">✓</div>
+                <span>AI prompts will be personalized to your natural style.</span>
+              </li>
+              <li>
+                <div class="check-icon">✓</div>
+                <span>You'll receive more accurate, real-time guidance on every call.</span>
+              </li>
+              <li>
+                <div class="check-icon">✓</div>
+                <span>You can recalibrate anytime if you want to fine tune your experience.</span>
+              </li>
+            </ul>
+          </div>
+
+          <button class="btn-outline" onclick="restartCalibration()">
+            <span>🔄 Recalibrate</span>
+          </button>
+        </div>
+
+      </div>
+
+      <!-- Middle Card: Round Performance Stepper -->
+      <div class="card stepper-card">
+        <h3 class="card-title">Round performance</h3>
+        
+        <div class="stepper-track-container">
+          <div class="stepper-line" id="stepperLine"></div>
+          <div class="stepper-steps" id="roundStepperSteps">
+            <!-- Dynamically populated 8 rounds -->
+          </div>
+        </div>
+      </div>
+
+      <!-- Bottom Row: Score Breakdown & What's Next -->
+      <div class="results-grid-bottom">
+        
+        <!-- Score Breakdown with 6 metrics -->
+        <div class="card">
+          <h3 class="card-title">Score breakdown</h3>
+          
+          <div class="breakdown-grid">
+            
+            <!-- Column 1 -->
+            <div style="display: flex; flex-direction: column; gap: 18px;">
+              <div class="metric-row">
+                <div class="metric-header">
+                  <span class="metric-title">💬 Word choice</span>
+                  <span class="metric-val" id="metricWordChoiceVal">80%</span>
+                </div>
+                <div class="progress-bar-bg">
+                  <div class="progress-bar-fill" id="metricWordChoiceBar" style="width: 80%;"></div>
+                </div>
+              </div>
+
+              <div class="metric-row">
+                <div class="metric-header">
+                  <span class="metric-title">⏱️ Pacing</span>
+                  <span class="metric-val" id="metricPacingVal">84%</span>
+                </div>
+                <div class="progress-bar-bg">
+                  <div class="progress-bar-fill" id="metricPacingBar" style="width: 84%;"></div>
+                </div>
+              </div>
+
+              <div class="metric-row">
+                <div class="metric-header">
+                  <span class="metric-title">😊 Sentiment</span>
+                  <span class="metric-val" id="metricSentimentVal">82%</span>
+                </div>
+                <div class="progress-bar-bg">
+                  <div class="progress-bar-fill" id="metricSentimentBar" style="width: 82%;"></div>
+                </div>
+              </div>
+            </div>
+
+            <!-- Column 2 -->
+            <div style="display: flex; flex-direction: column; gap: 18px;">
+              <div class="metric-row">
+                <div class="metric-header">
+                  <span class="metric-title">🎧 Tone/Emphasis</span>
+                  <span class="metric-val" id="metricToneVal">86%</span>
+                </div>
+                <div class="progress-bar-bg">
+                  <div class="progress-bar-fill" id="metricToneBar" style="width: 86%;"></div>
+                </div>
+              </div>
+
+              <div class="metric-row">
+                <div class="metric-header">
+                  <span class="metric-title">⏸️ Pause/Filters</span>
+                  <span class="metric-val" id="metricPauseVal">83%</span>
+                </div>
+                <div class="progress-bar-bg">
+                  <div class="progress-bar-fill" id="metricPauseBar" style="width: 83%;"></div>
+                </div>
+              </div>
+
+              <div class="metric-row">
+                <div class="metric-header">
+                  <span class="metric-title">⚡ Energy/Inflection</span>
+                  <span class="metric-val" id="metricEnergyVal">85%</span>
+                </div>
+                <div class="progress-bar-bg">
+                  <div class="progress-bar-fill" id="metricEnergyBar" style="width: 85%;"></div>
+                </div>
+              </div>
+            </div>
+
+          </div>
+        </div>
+
+        <!-- What's next? Card -->
+        <div class="card info-card">
+          <div>
+            <div class="card-header-icon">
+              <div class="icon-badge">🚀</div>
+              <h3>What's next?</h3>
+            </div>
+
+            <ul class="whats-next-list">
+              <li class="whats-next-item">
+                <span class="whats-next-icon">📞</span>
+                <span>You can now make calls with real-time AI guidance.</span>
+              </li>
+              <li class="whats-next-item">
+                <span class="whats-next-icon">📊</span>
+                <span>Your prompts will adapt to your style automatically.</span>
+              </li>
+              <li class="whats-next-item">
+                <span class="whats-next-icon">🔄</span>
+                <span>Recalibrate anytime to fine tune your experience.</span>
+              </li>
+            </ul>
+          </div>
+
+          <a href="/" class="btn-outline" style="text-align: center; justify-content: center; width: 100%;">
+            <span>Go to Dashboard</span>
+          </a>
+        </div>
+
+      </div>
+
+    </div>
+
+  </main>
+
+
+  <!-- ========================================================
+       MODAL: Round Evaluation Feedback Popup
+       ======================================================== -->
+  <div id="evalModal" class="modal-overlay">
+    <div class="modal-content">
+      <div style="text-align: center; margin-bottom: 20px;">
+        <div style="font-size: 2.2rem; margin-bottom: 6px;">🎉</div>
+        <h2 style="font-size: 1.4rem; font-weight: 800; color: var(--slate-900);" id="modalRoundTitle">Round 1 Evaluation</h2>
+        <div style="font-size: 2.4rem; font-weight: 800; color: var(--primary); margin: 8px 0;" id="modalScoreVal">88%</div>
+        <p style="color: var(--slate-600); font-size: 0.9rem;" id="modalFeedbackText">Great pace and confident delivery.</p>
+      </div>
+
+      <div style="background: var(--slate-50); border-radius: 12px; padding: 16px; margin-bottom: 24px;">
+        <div style="font-size: 0.82rem; font-weight: 700; color: var(--slate-700); margin-bottom: 8px;">Key Strengths & Coaching:</div>
+        <ul id="modalStrengthsList" style="font-size: 0.85rem; color: var(--slate-600); padding-left: 20px; line-height: 1.5;">
+          <li>Clear articulation of value proposition</li>
+          <li>Steady speaking rate (142 WPM)</li>
+        </ul>
+      </div>
+
+      <div style="display: flex; justify-content: flex-end; gap: 12px;">
+        <button id="modalBtnNext" class="btn-primary" onclick="advanceToNextRound()" style="width: 100%; justify-content: center;">
+          <span>Continue to Round 2 →</span>
+        </button>
+      </div>
+    </div>
+  </div>
+
+
+  <!-- ========================================================
+       JavaScript Engine
+       ======================================================== -->
+  <script>
+    // State
+    let currentSessionId = null;
+    let currentRoundNumber = 1;
+    let currentRoundData = null;
+    let sessionStartTime = null;
+    let timerInterval = null;
+
+    // MediaRecorder & Web Audio
+    let mediaRecorder = null;
+    let audioChunks = [];
+    let audioBlob = null;
+    let isRecording = false;
+    let recordStartTime = 0;
+    let recordTimerInterval = null;
+    let audioContext = null;
+    let analyser = null;
+    let animFrameId = null;
+
+    // Initialize Page
+    document.addEventListener("DOMContentLoaded", () => {
+      initVisualizer();
+      initiateCalibration();
+    });
+
+    // 1. Start or Reset Calibration Session
+    async function initiateCalibration() {
+      try {
+        setNavStatus("Initializing session...");
+        const res = await fetch("/api/calibration/start", { method: "POST" });
+        const data = await res.json();
+        
+        currentSessionId = data.session.session_id;
+        currentRoundNumber = 1;
+        currentRoundData = data.current_round_data;
+        
+        sessionStartTime = Date.now();
+        startSessionTimer();
+        
+        renderStudioRound(currentRoundData);
+        setNavStatus(`Calibrating • Round 1 of 8`);
+      } catch (err) {
+        console.error("Failed to start session:", err);
+        setNavStatus("Offline Mode Active");
+      }
+    }
+
+    function setNavStatus(msg) {
+      document.getElementById("navStatus").textContent = msg;
+    }
+
+    function startSessionTimer() {
+      if (timerInterval) clearInterval(timerInterval);
+      timerInterval = setInterval(() => {
+        if (!sessionStartTime) return;
+        const elapsed = Math.floor((Date.now() - sessionStartTime) / 1000);
+        const mins = Math.floor(elapsed / 60);
+        const secs = elapsed % 60;
+        document.getElementById("sessionTimerText").textContent = `Time: ${mins.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`;
+      }, 1000);
+    }
+
+    // 2. Render Active Round in Studio
+    function renderStudioRound(roundData) {
+      currentRoundData = roundData;
+      currentRoundNumber = roundData.round_number;
+
+      document.getElementById("studioRoundBadge").textContent = `Round ${roundData.round_number} of 8`;
+      document.getElementById("studioStageName").textContent = roundData.stage || "Discovery";
+      
+      const scenarioText = roundData.scenario_type || 'B2B Enterprise Scenario';
+      const personaInfo = roundData.persona_name ? `${roundData.persona_name} (${roundData.persona_title})` : 'Prospect Executive';
+      document.getElementById("studioScenarioType").textContent = `${scenarioText} • ${personaInfo}`;
+      
+      document.getElementById("studioQuestionText").textContent = `"${roundData.question_text}"`;
+      document.getElementById("studioTelepromptText").textContent = `"${roundData.teleprompt_text}"`;
+
+      const voicePersonaMap = {
+        "21m00Tcm4TlvDq8ikWAM": "Rachel (Calm & Professional)",
+        "AZnzlk1XvdvUeBnXmlld": "Domi (Energetic & Direct)",
+        "EXAVITQu4vr4xnSDxMaL": "Bella (Warm & Consultative)",
+        "ErXwobaYiN019PkySvjV": "Antoni (Clear & Confident)",
+        "MF3mGyEYCl7XYWbV9V6O": "Elli (Pleasant Enterprise Lead)",
+        "TxGEqnHWrfWFTfGW9XjX": "Josh (Senior Decision Maker)",
+        "VR6AewLTigWG4xSOukaG": "Arnold (Analytical Executive)",
+        "pNInz6obpgDQGcFmaJgB": "Adam (Crisp Tech Founder)"
+      };
+
+      const voiceDisplay = roundData.voice_name ? `ElevenLabs: ${roundData.voice_name}` : (voicePersonaMap[roundData.voice_id] || "ElevenLabs AI Voice");
+      document.getElementById("voicePersonaLabel").textContent = `${voiceDisplay} • Speaking as ${roundData.persona_name || 'Prospect'}`;
+      document.getElementById("audioStatusLabel").textContent = "Click play to listen to prospect voice";
+
+      // Setup audio element
+      const audioEl = document.getElementById("scenarioAudioElement");
+      if (roundData.audio_url) {
+        audioEl.src = roundData.audio_url;
+      }
+
+      resetCurrentRecording();
+    }
+
+    // 3. Audio Playback
+    function playCurrentScenarioAudio() {
+      const audioEl = document.getElementById("scenarioAudioElement");
+      const btn = document.getElementById("btnPlayAiVoice");
+      
+      if (audioEl.paused) {
+        audioEl.play().then(() => {
+          btn.textContent = "⏸";
+          document.getElementById("audioStatusLabel").textContent = "Playing prospect voice...";
+        }).catch(err => {
+          console.warn("Audio play blocked, synthesizing speech tone", err);
+          simulateAudioPlayback();
+        });
+      } else {
+        audioEl.pause();
+        btn.textContent = "▶";
+        document.getElementById("audioStatusLabel").textContent = "Paused";
+      }
+
+      audioEl.onended = () => {
+        btn.textContent = "▶";
+        document.getElementById("audioStatusLabel").textContent = "Completed. Now repeat the teleprompt script!";
+      };
+    }
+
+    function simulateAudioPlayback() {
+      const btn = document.getElementById("btnPlayAiVoice");
+      btn.textContent = "🔊";
+      setTimeout(() => {
+        btn.textContent = "▶";
+        document.getElementById("audioStatusLabel").textContent = "Scenario heard. Now repeat the teleprompt script!";
+      }, 3000);
+    }
+
+    // 4. Microphone Recording & Web Audio
+    async function toggleRecording() {
+      if (isRecording) {
+        stopRecording();
+      } else {
+        await startRecording();
+      }
+    }
+
+    async function startRecording() {
+      try {
+        const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+        audioChunks = [];
+        
+        mediaRecorder = new MediaRecorder(stream);
+        mediaRecorder.ondataavailable = (e) => {
+          if (e.data.size > 0) audioChunks.push(e.data);
+        };
+        
+        mediaRecorder.onstop = () => {
+          audioBlob = new Blob(audioChunks, { type: 'audio/webm' });
+          document.getElementById("btnSubmitEval").style.display = "inline-flex";
+          document.getElementById("btnReRecord").style.display = "inline-flex";
+          document.getElementById("micStatusHint").textContent = "Recording ready! Click evaluate to proceed.";
+        };
+
+        mediaRecorder.start();
+        isRecording = true;
+        recordStartTime = Date.now();
+        
+        document.getElementById("btnMicRecord").classList.add("recording");
+        document.getElementById("micIcon").textContent = "⏹";
+        document.getElementById("micStatusHint").textContent = "Recording... Read teleprompt aloud!";
+        
+        // Start live visualizer
+        connectAudioStreamToVisualizer(stream);
+
+        recordTimerInterval = setInterval(() => {
+          const sec = Math.floor((Date.now() - recordStartTime) / 1000);
+          document.getElementById("recordingTimer").textContent = `${sec.toString().padStart(2, '0')}:00s`;
+        }, 1000);
+
+      } catch (err) {
+        console.warn("Microphone access not granted or unavailable:", err);
+        document.getElementById("micStatusHint").textContent = "Microphone unavailable. Use text submit below or mock recording.";
+        simulateMockRecording();
+      }
+    }
+
+    function stopRecording() {
+      if (mediaRecorder && mediaRecorder.state !== "inactive") {
+        mediaRecorder.stop();
+        mediaRecorder.stream.getTracks().forEach(t => t.stop());
+      }
+      isRecording = false;
+      clearInterval(recordTimerInterval);
+      document.getElementById("btnMicRecord").classList.remove("recording");
+      document.getElementById("micIcon").textContent = "🎙️";
+    }
+
+    function simulateMockRecording() {
+      isRecording = true;
+      document.getElementById("btnMicRecord").classList.add("recording");
+      document.getElementById("micIcon").textContent = "⏹";
+      document.getElementById("micStatusHint").textContent = "Simulating voice input...";
+      
+      setTimeout(() => {
+        isRecording = false;
+        document.getElementById("btnMicRecord").classList.remove("recording");
+        document.getElementById("micIcon").textContent = "🎙️";
+        document.getElementById("btnSubmitEval").style.display = "inline-flex";
+        document.getElementById("btnReRecord").style.display = "inline-flex";
+        document.getElementById("micStatusHint").textContent = "Simulated recording ready for evaluation!";
+      }, 3500);
+    }
+
+    function resetCurrentRecording() {
+      stopRecording();
+      audioBlob = null;
+      audioChunks = [];
+      document.getElementById("recordingTimer").textContent = "00:00s";
+      document.getElementById("btnSubmitEval").style.display = "none";
+      document.getElementById("btnReRecord").style.display = "none";
+      document.getElementById("micStatusHint").textContent = "Click microphone to record";
+    }
+
+    // 5. Submit Evaluation
+    async function submitForEvaluation() {
+      setNavStatus("AI Evaluating speech...");
+      const formData = new FormData();
+      formData.append("session_id", currentSessionId);
+      formData.append("round_number", currentRoundNumber);
+      
+      const durationSec = Math.max((Date.now() - recordStartTime) / 1000, 4.0);
+      formData.append("duration_seconds", durationSec.toFixed(2));
+
+      if (audioBlob) {
+        formData.append("audio_file", audioBlob, `round_${currentRoundNumber}.webm`);
+      } else {
+        // Use teleprompt as text override fallback
+        formData.append("transcript_override", currentRoundData.teleprompt_text);
+      }
+
+      try {
+        const res = await fetch("/api/calibration/round/evaluate", {
+          method: "POST",
+          body: formData
+        });
+        const data = await res.json();
+        
+        handleEvaluationResult(data);
+      } catch (err) {
+        console.error("Evaluation error:", err);
+      }
+    }
+
+    function submitManualTranscript() {
+      const text = document.getElementById("manualTranscriptInput").value.trim();
+      if (!text) return;
+
+      const formData = new FormData();
+      formData.append("session_id", currentSessionId);
+      formData.append("round_number", currentRoundNumber);
+      formData.append("duration_seconds", "6.5");
+      formData.append("transcript_override", text);
+
+      fetch("/api/calibration/round/evaluate", { method: "POST", body: formData })
+        .then(r => r.json())
+        .then(data => handleEvaluationResult(data))
+        .catch(console.error);
+    }
+
+    function handleEvaluationResult(data) {
+      const roundEval = data.round_data.evaluation;
+      
+      // Populate Modal
+      document.getElementById("modalRoundTitle").textContent = `Round ${currentRoundNumber} Evaluation`;
+      document.getElementById("modalScoreVal").textContent = `${roundEval.overall_score}%`;
+      document.getElementById("modalFeedbackText").textContent = roundEval.feedback;
+      
+      const listEl = document.getElementById("modalStrengthsList");
+      listEl.innerHTML = "";
+      (roundEval.strengths || ["Crisp delivery"]).forEach(s => {
+        const li = document.createElement("li");
+        li.textContent = s;
+        listEl.appendChild(li);
+      });
+
+      if (data.is_session_completed) {
+        document.getElementById("modalBtnNext").textContent = "🏆 View Final Calibration Results";
+        document.getElementById("modalBtnNext").onclick = () => {
+          closeModal();
+          showResultsDashboard(data.summary_report);
+        };
+      } else {
+        document.getElementById("modalBtnNext").textContent = `Continue to Round ${currentRoundNumber + 1} →`;
+        document.getElementById("modalBtnNext").onclick = () => {
+          closeModal();
+          loadRound(currentRoundNumber + 1);
+        };
+      }
+
+      openModal();
+    }
+
+    function openModal() {
+      document.getElementById("evalModal").classList.add("active");
+    }
+
+    function closeModal() {
+      document.getElementById("evalModal").classList.remove("active");
+    }
+
+    async function loadRound(nextRoundNum) {
+      setNavStatus(`Generating Round ${nextRoundNum}...`);
+      const form = new FormData();
+      form.append("session_id", currentSessionId);
+      form.append("round_number", nextRoundNum);
+
+      const res = await fetch("/api/calibration/round/generate", {
+        method: "POST",
+        body: form
+      });
+      const data = await res.json();
+      renderStudioRound(data.round_data);
+      setNavStatus(`Calibrating • Round ${nextRoundNum} of 8`);
+    }
+
+    // 6. Final Calibration Results Display (1:1 Screenshot Match)
+    function showResultsDashboard(report) {
+      clearInterval(timerInterval);
+      document.getElementById("studioView").classList.remove("studio-active");
+      document.getElementById("resultsView").classList.remove("hidden");
+      document.getElementById("resultsView").classList.add("results-active");
+
+      setNavStatus("Calibration Complete • 100%");
+
+      // Gauge Score
+      const score = report.overall_score || 86;
+      document.getElementById("resOverallScoreVal").textContent = `${score}%`;
+      
+      // Animate SVG circular progress
+      const circle = document.getElementById("gaugeCircleFill");
+      const radius = 60;
+      const circumference = 2 * Math.PI * radius; // 377
+      const offset = circumference - (score / 100) * circumference;
+      circle.style.strokeDashoffset = offset;
+
+      document.getElementById("resHeading").textContent = "Great job!";
+      document.getElementById("resStatusMsg").textContent = report.status_message || "Your calibration is complete and your AI coach is ready to guide you on calls.";
+      document.getElementById("resRoundsCompleted").textContent = report.rounds_completed || 8;
+      document.getElementById("resTotalTime").textContent = report.total_time_formatted || "8m 24s";
+      document.getElementById("resCompletedOn").textContent = report.completed_on || "May 16, 2025";
+
+      // Render 8 Stepper Steps
+      const stepperContainer = document.getElementById("roundStepperSteps");
+      stepperContainer.innerHTML = "";
+      const perfList = report.round_performance || [];
+
+      perfList.forEach(p => {
+        const stepDiv = document.createElement("div");
+        stepDiv.className = "step-node";
+        stepDiv.innerHTML = `
+          <div class="step-circle">✓</div>
+          <div class="step-label">Round ${p.round_number}</div>
+          <div class="step-score">${p.score || 85}%</div>
+        `;
+        stepperContainer.appendChild(stepDiv);
+      });
+
+      // Render 6 Metric Breakdown Bars
+      const b = report.score_breakdown || {
+        word_choice: 80, pacing: 84, sentiment: 82, tone_emphasis: 86, pause_filters: 83, energy_inflection: 85
+      };
+
+      setBar("metricWordChoiceVal", "metricWordChoiceBar", b.word_choice || 80);
+      setBar("metricPacingVal", "metricPacingBar", b.pacing || 84);
+      setBar("metricSentimentVal", "metricSentimentBar", b.sentiment || 82);
+      setBar("metricToneVal", "metricToneBar", b.tone_emphasis || 86);
+      setBar("metricPauseVal", "metricPauseBar", b.pause_filters || 83);
+      setBar("metricEnergyVal", "metricEnergyBar", b.energy_inflection || 85);
+    }
+
+    function setBar(textId, barId, val) {
+      document.getElementById(textId).textContent = `${val}%`;
+      setTimeout(() => {
+        document.getElementById(barId).style.width = `${val}%`;
+      }, 100);
+    }
+
+    function restartCalibration() {
+      document.getElementById("resultsView").classList.add("hidden");
+      document.getElementById("resultsView").classList.remove("results-active");
+      document.getElementById("studioView").classList.add("studio-active");
+      initiateCalibration();
+    }
+
+    // Canvas Waveform Visualizer
+    function initVisualizer() {
+      const canvas = document.getElementById("visualizerCanvas");
+      const ctx = canvas.getContext("2d");
+      canvas.width = canvas.offsetWidth;
+      canvas.height = canvas.offsetHeight;
+
+      function drawIdle() {
+        ctx.fillStyle = "#091a18";
+        ctx.fillRect(0, 0, canvas.width, canvas.height);
+        
+        ctx.strokeStyle = "#0d9488";
+        ctx.lineWidth = 2;
+        ctx.beginPath();
+        const midY = canvas.height / 2;
+        ctx.moveTo(0, midY);
+        ctx.lineTo(canvas.width, midY);
+        ctx.stroke();
+      }
+      drawIdle();
+    }
+
+    function connectAudioStreamToVisualizer(stream) {
+      const canvas = document.getElementById("visualizerCanvas");
+      const ctx = canvas.getContext("2d");
+      audioContext = new (window.AudioContext || window.webkitAudioContext)();
+      analyser = audioContext.createAnalyser();
+      const source = audioContext.createMediaStreamSource(stream);
+      source.connect(analyser);
+      analyser.fftSize = 256;
+      const bufferLength = analyser.frequencyBinCount;
+      const dataArray = new Uint8Array(bufferLength);
+
+      function draw() {
+        if (!isRecording) return;
+        animFrameId = requestAnimationFrame(draw);
+        analyser.getByteFrequencyData(dataArray);
+
+        ctx.fillStyle = "#091a18";
+        ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+        const barWidth = (canvas.width / bufferLength) * 2.5;
+        let x = 0;
+
+        for (let i = 0; i < bufferLength; i++) {
+          const barHeight = (dataArray[i] / 255) * canvas.height;
+          ctx.fillStyle = `rgb(13, ${148 + dataArray[i] / 3}, 136)`;
+          ctx.fillRect(x, canvas.height - barHeight, barWidth, barHeight);
+          x += barWidth + 1;
+        }
+      }
+      draw();
+    }
+  </script>
+
+</body>
+</html>
