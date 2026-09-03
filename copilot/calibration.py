@@ -520,14 +520,12 @@ Respond ONLY with valid JSON with keys "question_text" and "teleprompt_text":
         teleprompt = round_data["teleprompt_text"]
 
         # 1. Transcribe speech if audio is provided
-        if transcript_override and transcript_override.strip():
+        if transcript_override is not None:
             user_transcript = transcript_override.strip()
         elif audio_bytes and len(audio_bytes) > 100:
-            user_transcript = await self.stt.transcribe(audio_bytes, mime_type)
-            if not user_transcript:
-                user_transcript = teleprompt
+            user_transcript = (await self.stt.transcribe(audio_bytes, mime_type)).strip()
         else:
-            user_transcript = teleprompt
+            user_transcript = ""
 
         # 2. Compute AI Performance Evaluation via LLM
         evaluation = await self._run_llm_evaluation(
@@ -560,9 +558,34 @@ Respond ONLY with valid JSON with keys "question_text" and "teleprompt_text":
         user_transcript: str,
         duration_seconds: float,
     ) -> dict[str, Any]:
-        """Perform strict, objective AI evaluation on rep delivery vs teleprompt."""
+        """Perform strict, objective AI evaluation comparing teleprompt vs user speech. Gives 0 for silence or irrelevant text."""
         import difflib
         import re
+
+        user_transcript_clean = user_transcript.strip() if user_transcript else ""
+
+        # Check for empty / silence -> Strictly 0 score
+        if not user_transcript_clean:
+            return {
+                "round_number": round_num,
+                "stage": stage,
+                "overall_score": 0,
+                "score_breakdown": {
+                    "word_choice": 0,
+                    "pacing": 0,
+                    "sentiment": 0,
+                    "tone_emphasis": 0,
+                    "pause_filters": 0,
+                    "energy_inflection": 0,
+                },
+                "transcribed_text": "[No speech detected]",
+                "target_teleprompt": target_teleprompt,
+                "feedback": "No speech detected. You received 0% because you did not speak or repeat the teleprompt script.",
+                "strengths": [],
+                "improvements": ["Speak clearly into your microphone and repeat the teleprompt script aloud."],
+                "detected_fillers": [],
+                "wpm": 0,
+            }
 
         # Detect filler words
         filler_patterns = [
@@ -572,62 +595,104 @@ Respond ONLY with valid JSON with keys "question_text" and "teleprompt_text":
             r"\b(literally)\b", r"\b(so yeah)\b", r"\b(i mean)\b"
         ]
         detected_fillers = []
-        lower_transcript = user_transcript.lower()
+        lower_transcript = user_transcript_clean.lower()
         for pat in filler_patterns:
             matches = re.findall(pat, lower_transcript)
             if matches:
                 detected_fillers.extend(matches if isinstance(matches[0], str) else [m[0] for m in matches])
 
-        # Strict text similarity and word match ratio
+        # Text normalization
         target_clean = re.sub(r"[^\w\s]", "", target_teleprompt.lower()).strip()
         user_clean = re.sub(r"[^\w\s]", "", lower_transcript).strip()
         
         target_words = target_clean.split()
         user_words = user_clean.split()
-        
-        # Sequence matcher similarity (0.0 to 1.0)
+
+        if not user_words:
+            return {
+                "round_number": round_num,
+                "stage": stage,
+                "overall_score": 0,
+                "score_breakdown": {
+                    "word_choice": 0, "pacing": 0, "sentiment": 0, "tone_emphasis": 0, "pause_filters": 0, "energy_inflection": 0
+                },
+                "transcribed_text": user_transcript,
+                "target_teleprompt": target_teleprompt,
+                "feedback": "No audible words detected. Teleprompt was not repeated.",
+                "strengths": [],
+                "improvements": ["Repeat the full teleprompt script on screen."],
+                "detected_fillers": [],
+                "wpm": 0,
+            }
+
+        # Similarity metrics
         seq_ratio = difflib.SequenceMatcher(None, target_clean, user_clean).ratio()
-        
-        # Keyword intersection
         target_set = set(target_words)
         user_set = set(user_words)
         common_words = target_set.intersection(user_set)
-        coverage_ratio = len(common_words) / max(len(target_set), 1)
-        
-        # Strict Word Choice (penalize truncated, missing, or altered words heavily)
-        strict_word_choice = int(round((seq_ratio * 0.6 + coverage_ratio * 0.4) * 100))
-        if len(user_words) < len(target_words) * 0.5:
-            strict_word_choice = min(strict_word_choice, 45)  # Harsh penalty for partial responses
 
-        # Strict Pacing (Words Per Minute)
+        # Stop words to ignore for keyword coverage
+        stop_words = {"the", "a", "an", "and", "or", "in", "on", "at", "to", "for", "with", "is", "we", "our", "i", "you", "it", "this", "that", "of"}
+        target_keywords = target_set - stop_words
+        user_keywords = user_set - stop_words
+        common_keywords = target_keywords.intersection(user_keywords)
+        coverage_ratio = len(common_keywords) / max(len(target_keywords), 1) if target_keywords else (len(common_words) / max(len(target_set), 1))
+
+        # Check for completely irrelevant / disconnected speech -> Strictly 0 score
+        if coverage_ratio < 0.25 or seq_ratio < 0.30:
+            return {
+                "round_number": round_num,
+                "stage": stage,
+                "overall_score": 0,
+                "score_breakdown": {
+                    "word_choice": 0,
+                    "pacing": 0,
+                    "sentiment": 0,
+                    "tone_emphasis": 0,
+                    "pause_filters": 0,
+                    "energy_inflection": 0,
+                },
+                "transcribed_text": user_transcript,
+                "target_teleprompt": target_teleprompt,
+                "feedback": "Irrelevant response. What you said does not match the teleprompt script, resulting in a score of 0%.",
+                "strengths": [],
+                "improvements": ["Make sure to read and repeat the exact teleprompt response displayed on screen."],
+                "detected_fillers": detected_fillers,
+                "wpm": int((len(user_words) / max(duration_seconds, 1.0)) * 60) if duration_seconds > 0 else 0,
+            }
+
+        # Strict Word Choice based on similarity and length completeness
+        raw_word_score = (seq_ratio * 0.6 + coverage_ratio * 0.4) * 100
+        length_penalty = min(1.0, len(user_words) / max(len(target_words), 1))
+        strict_word_choice = max(0, min(100, int(round(raw_word_score * length_penalty))))
+
+        # Strict Pacing (Words Per Minute relative to content)
         wpm = int((len(user_words) / max(duration_seconds, 1.0)) * 60) if duration_seconds > 0 else 135
         if 125 <= wpm <= 155:
-            strict_pacing = 92
-        elif 110 <= wpm < 125 or 156 <= wpm <= 170:
-            strict_pacing = 78
-        elif 90 <= wpm < 110 or 171 <= wpm <= 190:
-            strict_pacing = 60
+            strict_pacing = min(95, int(round(strict_word_choice * 1.05)))
+        elif 105 <= wpm < 125 or 156 <= wpm <= 175:
+            strict_pacing = min(75, int(round(strict_word_choice * 0.85)))
+        elif 80 <= wpm < 105 or 176 <= wpm <= 195:
+            strict_pacing = min(50, int(round(strict_word_choice * 0.60)))
         else:
-            strict_pacing = 42  # Extreme rushing or dragging
+            strict_pacing = min(25, int(round(strict_word_choice * 0.35)))
 
-        # Strict Pause / Filters (penalize 12 points per filler word)
-        filler_penalty = len(detected_fillers) * 12
-        strict_pause_filters = max(20, min(96, 95 - filler_penalty))
+        # Strict Pause / Filters (deduct 15 points per filler)
+        filler_deduction = len(detected_fillers) * 15
+        strict_pause_filters = max(0, min(100, strict_word_choice - filler_deduction if strict_word_choice < 85 else 100 - filler_deduction))
 
-        # Strict Tone & Sentiment
-        hedging_words = ["maybe", "i guess", "probably", "i think", "sort of", "kinda", "hopefully"]
-        hedge_count = sum(1 for hw in hedging_words if hw in lower_transcript)
-        strict_sentiment = max(35, min(95, 88 - (hedge_count * 15)))
-        strict_tone = max(35, min(95, 86 - (hedge_count * 12) - (0 if len(user_words) >= len(target_words)*0.8 else 20)))
-        strict_energy = max(40, min(95, 85 - (0 if 120 <= wpm <= 160 else 15)))
+        # Tone & Sentiment & Energy
+        strict_tone = max(0, min(100, int(round(strict_word_choice * 0.95))))
+        strict_sentiment = max(0, min(100, int(round(strict_word_choice * 0.95))))
+        strict_energy = max(0, min(100, int(round(strict_word_choice * 0.90))))
 
         strict_overall = int(round(
-            (strict_word_choice * 0.25) +
+            (strict_word_choice * 0.35) +
             (strict_pacing * 0.20) +
-            (strict_pause_filters * 0.20) +
+            (strict_pause_filters * 0.15) +
             (strict_tone * 0.15) +
             (strict_energy * 0.10) +
-            (strict_sentiment * 0.10)
+            (strict_sentiment * 0.05)
         ))
 
         eval_prompt = f"""You are a strict, demanding B2B Executive Sales Performance Coach evaluating a salesperson's voice delivery.

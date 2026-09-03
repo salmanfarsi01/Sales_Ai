@@ -1524,8 +1524,7 @@
       if (audioBlob) {
         formData.append("audio_file", audioBlob, `round_${currentRoundNumber}.webm`);
       } else {
-        // Use teleprompt as text override fallback
-        formData.append("transcript_override", currentRoundData.teleprompt_text);
+        formData.append("transcript_override", "");
       }
 
       try {
