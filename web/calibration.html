@@ -601,6 +601,148 @@
       box-shadow: inset 0 2px 4px rgba(0, 0, 0, 0.02);
     }
 
+    .teleprompt-live-box {
+      animation: telepromptReveal 0.5s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+      border: 2px solid #10b981 !important;
+      box-shadow: 0 0 24px rgba(16, 185, 129, 0.2) !important;
+    }
+
+    @keyframes telepromptReveal {
+      from {
+        opacity: 0;
+        transform: translateY(8px) scale(0.98);
+      }
+      to {
+        opacity: 1;
+        transform: translateY(0) scale(1);
+      }
+    }
+
+    .teleprompt-status-badge {
+      font-size: 0.72rem;
+      font-weight: 700;
+      padding: 4px 10px;
+      border-radius: 9999px;
+      display: inline-flex;
+      align-items: center;
+      gap: 5px;
+      letter-spacing: 0.02em;
+      transition: all 0.3s ease;
+    }
+
+    .badge-waiting {
+      background: #fef3c7;
+      color: #92400e;
+      border: 1px solid #fde68a;
+    }
+
+    .badge-listening {
+      background: #e0e7ff;
+      color: #3730a3;
+      border: 1px solid #c7d2fe;
+      animation: pulseBadge 1.5s infinite;
+    }
+
+    .badge-live {
+      background: #d1fae5;
+      color: #065f46;
+      border: 1px solid #a7f3d0;
+    }
+
+    @keyframes pulseBadge {
+      0%, 100% { opacity: 1; transform: scale(1); }
+      50% { opacity: 0.85; transform: scale(1.03); }
+    }
+
+    .teleprompt-placeholder {
+      background: #f8fafc;
+      border: 2px dashed #cbd5e1;
+      border-radius: 12px;
+      padding: 28px 20px;
+      text-align: center;
+      margin: 16px 0;
+      transition: all 0.3s ease;
+    }
+
+    .teleprompt-placeholder-inner {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 8px;
+    }
+
+    .teleprompt-placeholder-title {
+      font-size: 0.95rem;
+      font-weight: 700;
+      color: var(--slate-700);
+    }
+
+    .teleprompt-placeholder-subtitle {
+      font-size: 0.82rem;
+      color: var(--slate-500);
+      max-width: 380px;
+      line-height: 1.45;
+    }
+
+    .teleprompt-wave-anim {
+      display: flex;
+      align-items: center;
+      gap: 4px;
+      height: 24px;
+      margin-bottom: 6px;
+    }
+
+    .teleprompt-wave-anim span {
+      display: inline-block;
+      width: 4px;
+      height: 8px;
+      background: var(--slate-300);
+      border-radius: 2px;
+      transition: height 0.2s ease, background 0.2s ease;
+    }
+
+    .teleprompt-wave-anim.active span {
+      background: var(--primary);
+      animation: waveBar 1.2s infinite ease-in-out;
+    }
+
+    .teleprompt-wave-anim.active span:nth-child(1) { animation-delay: 0.0s; }
+    .teleprompt-wave-anim.active span:nth-child(2) { animation-delay: 0.2s; }
+    .teleprompt-wave-anim.active span:nth-child(3) { animation-delay: 0.4s; }
+    .teleprompt-wave-anim.active span:nth-child(4) { animation-delay: 0.1s; }
+    .teleprompt-wave-anim.active span:nth-child(5) { animation-delay: 0.3s; }
+
+    @keyframes waveBar {
+      0%, 100% { height: 6px; }
+      50% { height: 22px; background: #059669; }
+    }
+
+    .live-dot-pulse {
+      display: inline-block;
+      width: 8px;
+      height: 8px;
+      background: #10b981;
+      border-radius: 50%;
+      box-shadow: 0 0 0 rgba(16, 185, 129, 0.7);
+      animation: livePulse 1.4s infinite;
+      margin-right: 4px;
+    }
+
+    @keyframes livePulse {
+      0% { box-shadow: 0 0 0 0 rgba(16, 185, 129, 0.7); }
+      70% { box-shadow: 0 0 0 8px rgba(16, 185, 129, 0); }
+      100% { box-shadow: 0 0 0 0 rgba(16, 185, 129, 0); }
+    }
+
+    .teleprompt-meta-row {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      font-size: 0.82rem;
+      color: var(--slate-500);
+      margin-top: 6px;
+    }
+
     .teleprompt-label {
       font-size: 0.75rem;
       text-transform: uppercase;
@@ -916,30 +1058,48 @@
           </div>
         </div>
 
-        <!-- Right: Teleprompt Script To Repeat -->
-        <div class="card">
-          <div class="card-header-icon">
-            <!-- <div class="icon-badge">📝</div> -->
+        <!-- Right: Teleprompt Script To Repeat (Reveals strictly after AI voice finishes) -->
+        <div class="card" id="telepromptCard">
+          <div class="card-header-icon" style="display: flex; justify-content: space-between; align-items: flex-start;">
             <div>
               <h3>Your AI Teleprompt Script</h3>
-              <p style="font-size: 0.8rem; color: var(--slate-400);">Speak with clear pacing, confidence, and natural
-                inflection</p>
+              <p style="font-size: 0.8rem; color: var(--slate-400);">Speak with clear pacing, confidence, and natural inflection</p>
+            </div>
+            <div id="telepromptStatusBadge" class="teleprompt-status-badge badge-waiting">
+              <span>🎧 Listen to AI Voice</span>
             </div>
           </div>
 
-          <div class="teleprompt-label">
-            <span> Live Delivery Teleprompt</span>
+          <!-- Waiting / Listening State (shown while prospect speaks) -->
+          <div class="teleprompt-placeholder" id="telepromptPlaceholder">
+            <div class="teleprompt-placeholder-inner">
+              <div class="teleprompt-wave-anim" id="telepromptWaveAnim">
+                <span></span><span></span><span></span><span></span><span></span>
+              </div>
+              <div class="teleprompt-placeholder-title" id="telepromptPlaceholderTitle">
+                Listen to the Prospect First
+              </div>
+              <div class="teleprompt-placeholder-subtitle" id="telepromptPlaceholderSubtitle">
+                Click <strong>▶ Play</strong> on the left. The live teleprompt response will dynamically appear here the instant the prospect finishes speaking.
+              </div>
+            </div>
           </div>
 
-          <div class="teleprompt-box" id="studioTelepromptText">
-            "Our standard onboarding takes less than two weeks, and you'll have a dedicated customer success manager
-            walking your team through every single step."
-          </div>
+          <!-- Live Teleprompt Script Container (Reveals dynamically when AI voice ends) -->
+          <div id="telepromptLiveContainer" style="display: none;">
+            <div class="teleprompt-label">
+              <span class="live-dot-pulse"></span>
+              <span>LIVE DELIVERY TELEPROMPT</span>
+            </div>
 
-          <div
-            style="display: flex; justify-content: space-between; align-items: center; font-size: 0.82rem; color: var(--slate-500);">
-            <span>Target word count: ~25 words</span>
-            <span>Recommended cadence: 135-150 WPM</span>
+            <div class="teleprompt-box teleprompt-live-box" id="studioTelepromptText">
+              "Our standard onboarding takes less than two weeks, and you'll have a dedicated customer success manager walking your team through every single step."
+            </div>
+
+            <div class="teleprompt-meta-row">
+              <span id="telepromptWordCount">Target: ~25 words</span>
+              <span id="telepromptCadence">Target Cadence: 135-150 WPM</span>
+            </div>
           </div>
         </div>
 
@@ -1352,10 +1512,13 @@
       }, 1000);
     }
 
+    let isTelepromptRevealed = false;
+
     // 2. Render Active Round in Studio
     function renderStudioRound(roundData) {
       currentRoundData = roundData;
       currentRoundNumber = roundData.round_number;
+      isTelepromptRevealed = false;
 
       document.getElementById("studioRoundBadge").textContent = `Round ${roundData.round_number} of 8`;
       document.getElementById("studioStageName").textContent = roundData.stage || "Discovery";
@@ -1366,6 +1529,19 @@
 
       document.getElementById("studioQuestionText").textContent = `"${roundData.question_text}"`;
       document.getElementById("studioTelepromptText").textContent = `"${roundData.teleprompt_text}"`;
+
+      // Lock & hide teleprompt script initially until AI voice ends
+      document.getElementById("telepromptLiveContainer").style.display = "none";
+      document.getElementById("telepromptPlaceholder").style.display = "block";
+      
+      const badge = document.getElementById("telepromptStatusBadge");
+      badge.className = "teleprompt-status-badge badge-waiting";
+      badge.innerHTML = "<span>🎧 Listen to AI Voice</span>";
+
+      document.getElementById("telepromptPlaceholderTitle").textContent = "Listen to the Prospect First";
+      document.getElementById("telepromptPlaceholderSubtitle").innerHTML = "Click <strong>▶ Play</strong> on the left. The live teleprompt response will dynamically appear here the instant the prospect finishes speaking.";
+      const wave = document.getElementById("telepromptWaveAnim");
+      if (wave) wave.classList.remove("active");
 
       const voicePersonaMap = {
         "21m00Tcm4TlvDq8ikWAM": "Rachel (Calm & Professional)",
@@ -1381,6 +1557,7 @@
       const voiceDisplay = roundData.voice_name ? `ElevenLabs: ${roundData.voice_name}` : (voicePersonaMap[roundData.voice_id] || "ElevenLabs AI Voice");
       document.getElementById("voicePersonaLabel").textContent = `${voiceDisplay} • Speaking as ${roundData.persona_name || 'Prospect'}`;
       document.getElementById("audioStatusLabel").textContent = "Click play to listen to prospect voice";
+      document.getElementById("micStatusHint").textContent = "🎧 Listen to prospect voice before recording";
 
       // Setup audio element
       const audioEl = document.getElementById("scenarioAudioElement");
@@ -1391,15 +1568,25 @@
       resetCurrentRecording();
     }
 
-    // 3. Audio Playback
+    // 3. Audio Playback & Real-time Teleprompter Trigger
     function playCurrentScenarioAudio() {
       const audioEl = document.getElementById("scenarioAudioElement");
       const btn = document.getElementById("btnPlayAiVoice");
+      const badge = document.getElementById("telepromptStatusBadge");
+      const wave = document.getElementById("telepromptWaveAnim");
 
       if (audioEl.paused) {
         audioEl.play().then(() => {
           btn.textContent = "⏸";
           document.getElementById("audioStatusLabel").textContent = "Playing prospect voice...";
+
+          if (!isTelepromptRevealed) {
+            badge.className = "teleprompt-status-badge badge-listening";
+            badge.innerHTML = "<span>🔊 Prospect Speaking...</span>";
+            document.getElementById("telepromptPlaceholderTitle").textContent = "Prospect is speaking...";
+            document.getElementById("telepromptPlaceholderSubtitle").textContent = "Listen closely to the question. The live teleprompt script will appear in real-time the moment they finish.";
+            if (wave) wave.classList.add("active");
+          }
         }).catch(err => {
           console.warn("Audio play blocked, synthesizing speech tone", err);
           simulateAudioPlayback();
@@ -1408,21 +1595,67 @@
         audioEl.pause();
         btn.textContent = "▶";
         document.getElementById("audioStatusLabel").textContent = "Paused";
+        if (wave) wave.classList.remove("active");
       }
 
       audioEl.onended = () => {
         btn.textContent = "▶";
-        document.getElementById("audioStatusLabel").textContent = "Completed. Now repeat the teleprompt script!";
+        document.getElementById("audioStatusLabel").textContent = "Question complete! Repeat the teleprompt.";
+        if (wave) wave.classList.remove("active");
+        revealTelepromptScript();
       };
     }
 
     function simulateAudioPlayback() {
       const btn = document.getElementById("btnPlayAiVoice");
+      const badge = document.getElementById("telepromptStatusBadge");
+      const wave = document.getElementById("telepromptWaveAnim");
+
       btn.textContent = "🔊";
+      document.getElementById("audioStatusLabel").textContent = "Playing prospect voice...";
+      if (!isTelepromptRevealed) {
+        badge.className = "teleprompt-status-badge badge-listening";
+        badge.innerHTML = "<span>🔊 Prospect Speaking...</span>";
+        document.getElementById("telepromptPlaceholderTitle").textContent = "Prospect is speaking...";
+        if (wave) wave.classList.add("active");
+      }
+
       setTimeout(() => {
         btn.textContent = "▶";
-        document.getElementById("audioStatusLabel").textContent = "Scenario heard. Now repeat the teleprompt script!";
+        document.getElementById("audioStatusLabel").textContent = "Question complete! Repeat the teleprompt.";
+        if (wave) wave.classList.remove("active");
+        revealTelepromptScript();
       }, 3000);
+    }
+
+    function revealTelepromptScript() {
+      if (isTelepromptRevealed) return;
+      isTelepromptRevealed = true;
+
+      // Smoothly hide placeholder and reveal live teleprompt script
+      document.getElementById("telepromptPlaceholder").style.display = "none";
+      const liveContainer = document.getElementById("telepromptLiveContainer");
+      liveContainer.style.display = "block";
+
+      // Compute and update word count
+      const text = currentRoundData ? currentRoundData.teleprompt_text : "";
+      const words = text ? text.split(/\s+/).filter(Boolean).length : 25;
+      document.getElementById("telepromptWordCount").textContent = `Target: ~${words} words`;
+
+      // Update badge to LIVE
+      const badge = document.getElementById("telepromptStatusBadge");
+      badge.className = "teleprompt-status-badge badge-live";
+      badge.innerHTML = "<span class='live-dot-pulse'></span><span>LIVE TELEPROMPT</span>";
+
+      // Update recording hint
+      document.getElementById("micStatusHint").textContent = "🎯 Teleprompt Live! Click microphone to record your repetition.";
+
+      // Pulse mic button
+      const micBtn = document.getElementById("btnMicRecord");
+      if (micBtn) {
+        micBtn.style.transform = "scale(1.08)";
+        setTimeout(() => { micBtn.style.transform = "scale(1)"; }, 350);
+      }
     }
 
     // 4. Microphone Recording & Web Audio
@@ -1435,6 +1668,10 @@
     }
 
     async function startRecording() {
+      if (!isTelepromptRevealed) {
+        revealTelepromptScript();
+      }
+
       try {
         const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
         audioChunks = [];
