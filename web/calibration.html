@@ -1224,23 +1224,25 @@
 
             <ul class="whats-next-list">
               <li class="whats-next-item">
-                <!-- <span class="whats-next-icon">📞</span> -->
                 <span>You can now make calls with real-time AI guidance.</span>
               </li>
               <li class="whats-next-item">
-                <!-- <span class="whats-next-icon">📊</span> -->
                 <span>Your prompts will adapt to your style automatically.</span>
               </li>
               <li class="whats-next-item">
-                <!-- <span class="whats-next-icon">🔄</span> -->
                 <span>Recalibrate anytime to fine tune your experience.</span>
               </li>
             </ul>
           </div>
 
-          <a href="/" class="btn-outline" style="text-align: center; justify-content: center; width: 100%;">
-            <span>Go to Dashboard</span>
-          </a>
+          <div style="display: flex; flex-direction: column; gap: 10px; margin-top: 16px;">
+            <a href="/" class="btn-outline" style="text-align: center; justify-content: center; width: 100%;">
+              <span>Go to Dashboard</span>
+            </a>
+            <button class="btn-outline" onclick="downloadJSONReport()" style="text-align: center; justify-content: center; width: 100%; border-color: #99f6e4; background: #f0fdfa; color: #0d9488;">
+              <span>📥 Download JSON Report</span>
+            </button>
+          </div>
         </div>
 
       </div>
@@ -1611,8 +1613,11 @@
       setNavStatus(`Calibrating • Round ${nextRoundNum} of 8`);
     }
 
+    let lastSummaryReport = null;
+
     // 6. Final Calibration Results Display (1:1 Screenshot Match)
     function showResultsDashboard(report) {
+      lastSummaryReport = report;
       clearInterval(timerInterval);
       document.getElementById("studioView").classList.remove("studio-active");
       document.getElementById("resultsView").classList.remove("hidden");
@@ -1664,6 +1669,21 @@
       setBar("metricToneVal", "metricToneBar", b.tone_emphasis || 86);
       setBar("metricPauseVal", "metricPauseBar", b.pause_filters || 83);
       setBar("metricEnergyVal", "metricEnergyBar", b.energy_inflection || 85);
+    }
+
+    function downloadJSONReport() {
+      if (!lastSummaryReport) {
+        alert("No report data available to download.");
+        return;
+      }
+      const dataStr = "data:text/json;charset=utf-8," + encodeURIComponent(JSON.stringify(lastSummaryReport, null, 2));
+      const downloadAnchor = document.createElement("a");
+      const filename = lastSummaryReport.local_filename || `calibration_${lastSummaryReport.session_id || "report"}.json`;
+      downloadAnchor.setAttribute("href", dataStr);
+      downloadAnchor.setAttribute("download", filename);
+      document.body.appendChild(downloadAnchor);
+      downloadAnchor.click();
+      downloadAnchor.remove();
     }
 
     function setBar(textId, barId, val) {

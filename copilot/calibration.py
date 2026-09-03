@@ -797,8 +797,37 @@ Return strictly valid JSON:
                     "completed": False,
                 })
 
+        # Detailed round evaluations for local JSON storage
+        rounds_detailed = []
+        for i in range(1, 9):
+            r_data = rounds.get(i)
+            if r_data:
+                ev = r_data.get("evaluation") or {}
+                rounds_detailed.append({
+                    "round_number": i,
+                    "stage": r_data.get("stage", f"Round {i}"),
+                    "persona_name": r_data.get("persona_name", "AI Prospect"),
+                    "persona_title": r_data.get("persona_title", "Executive"),
+                    "voice_name": r_data.get("voice_name", "Rachel"),
+                    "question_text": r_data.get("question_text", ""),
+                    "teleprompt_text": r_data.get("teleprompt_text", ""),
+                    "user_transcript": ev.get("transcribed_text", ""),
+                    "duration_seconds": r_data.get("duration_seconds", 0.0),
+                    "wpm": ev.get("wpm", 0),
+                    "overall_score": ev.get("overall_score"),
+                    "score_breakdown": ev.get("score_breakdown", {}),
+                    "feedback": ev.get("feedback", ""),
+                    "strengths": ev.get("strengths", []),
+                    "improvements": ev.get("improvements", []),
+                    "detected_fillers": ev.get("detected_fillers", []),
+                })
+
         report_dict = {
             "session_id": session["session_id"],
+            "user_id": session.get("user_id", "sales_rep_1"),
+            "industry": session.get("industry", "Enterprise B2B SaaS"),
+            "created_at": session.get("created_at"),
+            "completed_at": datetime.now(timezone.utc).isoformat(),
             "overall_score": overall_score,
             "rounds_completed": num_completed,
             "total_rounds": 8,
@@ -807,6 +836,7 @@ Return strictly valid JSON:
             "completed_on": completed_on_str,
             "status_message": "Great job! Your calibration is complete and your AI coach is ready to guide you on calls.",
             "round_performance": round_performance_list,
+            "rounds_detail": rounds_detailed,
             "score_breakdown": {
                 "word_choice": avg_word_choice,
                 "pacing": avg_pacing,
@@ -828,15 +858,25 @@ Return strictly valid JSON:
             ],
         }
 
-        # Save report to disk in reports directory
+        # Save report to local disk in reports/ directory
         try:
             reports_dir = Path(__file__).resolve().parent.parent / "reports"
             reports_dir.mkdir(parents=True, exist_ok=True)
-            report_path = reports_dir / f"calibration_{session['session_id']}.json"
+            
+            # 1. Unique session report
+            report_filename = f"calibration_{session['session_id']}.json"
+            report_path = reports_dir / report_filename
             report_path.write_text(json.dumps(report_dict, indent=2), encoding="utf-8")
-            LOGGER.info("Saved calibration report to: %s", report_path)
+            
+            # 2. Latest calibration pointer
+            latest_path = reports_dir / "latest_calibration_report.json"
+            latest_path.write_text(json.dumps(report_dict, indent=2), encoding="utf-8")
+            
+            report_dict["local_file_path"] = str(report_path.resolve())
+            report_dict["local_filename"] = report_filename
+            LOGGER.info("Successfully stored calibration JSON report to local disk: %s", report_path)
         except Exception as exc:
-            LOGGER.warning("Could not write report to disk: %s", exc)
+            LOGGER.warning("Could not write report to local disk: %s", exc)
 
         return report_dict
 
