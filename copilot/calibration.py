@@ -38,6 +38,10 @@ from groq import Groq
 from openai import OpenAI
 from pydantic import BaseModel, Field
 
+from dotenv import load_dotenv
+
+load_dotenv()
+
 LOGGER = logging.getLogger("copilot.calibration")
 STATIC_DIR = Path(__file__).resolve().parent.parent / "web"
 AUDIO_CACHE_DIR = Path(__file__).resolve().parent.parent / "calibration_audio"
@@ -367,12 +371,9 @@ class CalibrationService:
         self.audio_store: dict[str, tuple[bytes, str]] = {}
 
     async def create_dynamic_session(self, user_id: str = "sales_rep_1", industry: Optional[str] = None) -> dict[str, Any]:
-        """Generate a completely dynamic 8-round calibration session plan via Groq LLM."""
+        """Generate a completely dynamic 8-round calibration session plan."""
         session_id = f"calib_{uuid.uuid4().hex[:12]}"
         selected_industry = industry or random.choice(INDUSTRIES)
-
-        # 1. Generate 8 dynamic round speech texts via Groq LLM
-        dynamic_rounds_plan = await self._generate_all_rounds_with_groq(selected_industry)
 
         session_data = {
             "session_id": session_id,
@@ -384,8 +385,7 @@ class CalibrationService:
             "current_round": 1,
             "total_rounds": 8,
             "status": "in_progress",
-            "rounds_plan": dynamic_rounds_plan,
-            "rounds": {},  # Populated on-demand as user reaches each round
+            "rounds": {},  # Populated dynamically on-demand per round
             "summary_report": None,
         }
         self.sessions[session_id] = session_data
@@ -399,141 +399,94 @@ class CalibrationService:
             raise HTTPException(status_code=404, detail="Calibration session not found")
         return session
 
-    async def _generate_all_rounds_with_groq(self, industry: str) -> list[dict[str, Any]]:
-        """Call Groq LLM to dynamically create 8 unique sales questions and teleprompts."""
-        prompt = f"""You are a master enterprise sales coach designing an 8-round voice calibration training session.
-Target Industry: {industry}
-
-Generate exactly 8 sequential sales calibration rounds covering these stages:
-Round 1: Discovery & Onboarding (time-to-value, implementation support)
-Round 2: Security & Compliance (SOC 2, data privacy, architecture)
-Round 3: Competitive Differentiator (why switch from legacy vendor, AI advantage)
-Round 4: Pricing Pushback & ROI (cost justification, 4x ROI metric)
-Round 5: Adoption & Change Management (rep usability, low friction)
-Round 6: Executive / CFO Justification (strategic revenue impact)
-Round 7: Contract Terms & Flexibility (trial milestone, SLA guarantee)
-Round 8: Closing & Next Steps (immediate kickoff, workspace launch)
-
-For each round provide:
-1. "round_number": 1 to 8
-2. "stage": Stage title
-3. "persona_name": Realistic buyer name (e.g. "Marcus Vance", "Elena Torres")
-4. "persona_title": Realistic executive title (e.g. "VP of Engineering", "Chief Information Officer")
-5. "question_text": Natural, realistic buyer question or objection (1-2 sentences).
-6. "teleprompt_text": Crisp, high-converting salesperson response script to repeat (20-35 words, confident, structured).
-
-Respond ONLY with valid JSON in this exact structure:
-{{
-  "rounds": [
-    {{
-      "round_number": 1,
-      "stage": "Discovery & Onboarding",
-      "persona_name": "Marcus Vance",
-      "persona_title": "VP of Engineering",
-      "question_text": "...",
-      "teleprompt_text": "..."
-    }}
-  ]
-}}
-"""
-        # Default dynamic template in case of network issue
-        fallback_plan = []
-        for i, s in enumerate(SALES_STAGES):
-            persona = VOICE_PERSONAS[i % len(VOICE_PERSONAS)]
-            fallback_plan.append({
-                "round_number": s["round"],
-                "stage": s["stage"],
-                "persona_name": f"Alex {persona['name']}",
-                "persona_title": persona["title"],
-                "voice_id": persona["voice_id"],
-                "voice_name": persona["name"],
-                "question_text": f"In terms of {s['stage'].lower()}, {s['focus'].lower()}",
-                "teleprompt_text": f"We provide an enterprise-grade solution that guarantees measurable value and dedicated support from day one.",
-            })
-
-        if not self.groq_client and not self.openai_client:
-            return fallback_plan
-
-        try:
-            if self.groq_client:
-                def _call():
-                    res = self.groq_client.chat.completions.create(
-                        model=self.llm_model,
-                        messages=[
-                            {"role": "system", "content": "You create high-converting enterprise sales calibration programs in strictly valid JSON."},
-                            {"role": "user", "content": prompt},
-                        ],
-                        temperature=0.7,
-                        response_format={"type": "json_object"},
-                    )
-                    return res.choices[0].message.content or "{}"
-                raw = await asyncio.to_thread(_call)
-            elif self.openai_client:
-                def _call():
-                    res = self.openai_client.chat.completions.create(
-                        model="gpt-4o-mini",
-                        messages=[
-                            {"role": "system", "content": "You create high-converting enterprise sales calibration programs in strictly valid JSON."},
-                            {"role": "user", "content": prompt},
-                        ],
-                        temperature=0.7,
-                        response_format={"type": "json_object"},
-                    )
-                    return res.choices[0].message.content or "{}"
-                raw = await asyncio.to_thread(_call)
-            else:
-                raw = "{}"
-
-            parsed = json.loads(_clean_json_text(raw))
-            generated_rounds = parsed.get("rounds", [])
-            
-            if len(generated_rounds) == 8:
-                result_plan = []
-                for i, r in enumerate(generated_rounds):
-                    persona = VOICE_PERSONAS[i % len(VOICE_PERSONAS)]
-                    result_plan.append({
-                        "round_number": i + 1,
-                        "stage": r.get("stage", SALES_STAGES[i]["stage"]),
-                        "persona_name": r.get("persona_name", f"{persona['name']} Miller"),
-                        "persona_title": r.get("persona_title", persona["title"]),
-                        "voice_id": persona["voice_id"],
-                        "voice_name": persona["name"],
-                        "question_text": r.get("question_text", "").strip(),
-                        "teleprompt_text": r.get("teleprompt_text", "").strip(),
-                    })
-                return result_plan
-        except Exception as exc:
-            LOGGER.warning("Dynamic 8-round generation error: %s. Using structured fallback.", exc)
-
-        return fallback_plan
-
     async def generate_round_voice_on_demand(self, session_id: str, round_num: int) -> dict[str, Any]:
-        """Convert the dynamic Groq-generated round text into ElevenLabs voice audio on-demand."""
+        """Generate a dynamic question & teleprompt using Groq LLM, then synthesize ElevenLabs voice on-demand."""
         session = self.get_session(session_id)
         if round_num < 1 or round_num > 8:
             raise HTTPException(status_code=400, detail="Round number must be between 1 and 8")
 
-        # If voice already generated for this round in this session, return it
+        # If already generated for this round in this session, return existing
         if round_num in session["rounds"] and session["rounds"][round_num].get("audio_id"):
             return session["rounds"][round_num]
 
-        plan_item = session["rounds_plan"][round_num - 1]
-        question_text = plan_item["question_text"]
-        teleprompt_text = plan_item["teleprompt_text"]
-        voice_id = plan_item["voice_id"]
-        voice_name = plan_item["voice_name"]
+        stage_info = SALES_STAGES[round_num - 1]
+        stage = stage_info["stage"]
+        focus = stage_info["focus"]
+        persona = VOICE_PERSONAS[(round_num - 1) % len(VOICE_PERSONAS)]
+        industry = session.get("industry", "B2B Enterprise SaaS & AI")
 
-        # Synthesize ElevenLabs voice on-demand for this specific round
+        # Generate unique scenario dynamically using Groq LLM
+        dynamic_prompt = f"""You are an elite B2B sales simulation coach generating Round {round_num} of 8.
+Target Industry: {industry}
+Sales Stage: {stage}
+Key Focus: {focus}
+Buyer Persona: {persona['name']} ({persona['title']}, {persona['style']})
+
+Generate:
+1. "question_text": A realistic, natural question or objection from {persona['name']} ({persona['title']}). Must be conversational, specific to {industry}, and 1-2 sentences.
+2. "teleprompt_text": An ideal, high-converting salesperson response script to repeat (20-35 words, confident, structured, addressing {persona['name']}'s concern directly).
+
+Respond ONLY with valid JSON with keys "question_text" and "teleprompt_text":
+{{
+  "question_text": "...",
+  "teleprompt_text": "..."
+}}
+"""
+
+        question_text = f"In terms of {stage.lower()}, how does your solution address {focus.lower()}?"
+        teleprompt_text = f"We provide a proven enterprise solution tailored for {industry} that delivers fast measurable results with dedicated engineering support."
+
+        if self.groq_client or self.openai_client:
+            try:
+                if self.groq_client:
+                    def _call_groq():
+                        res = self.groq_client.chat.completions.create(
+                            model=self.llm_model,
+                            messages=[
+                                {"role": "system", "content": "You are an enterprise sales simulator returning valid JSON."},
+                                {"role": "user", "content": dynamic_prompt},
+                            ],
+                            temperature=0.8,
+                            response_format={"type": "json_object"},
+                        )
+                        return res.choices[0].message.content or "{}"
+                    raw = await asyncio.to_thread(_call_groq)
+                elif self.openai_client:
+                    def _call_openai():
+                        res = self.openai_client.chat.completions.create(
+                            model="gpt-4o-mini",
+                            messages=[
+                                {"role": "system", "content": "You are an enterprise sales simulator returning valid JSON."},
+                                {"role": "user", "content": dynamic_prompt},
+                            ],
+                            temperature=0.8,
+                            response_format={"type": "json_object"},
+                        )
+                        return res.choices[0].message.content or "{}"
+                    raw = await asyncio.to_thread(_call_openai)
+                else:
+                    raw = "{}"
+
+                parsed = json.loads(_clean_json_text(raw))
+                if parsed.get("question_text") and parsed.get("teleprompt_text"):
+                    question_text = parsed["question_text"].strip()
+                    teleprompt_text = parsed["teleprompt_text"].strip()
+            except Exception as exc:
+                LOGGER.warning("Groq dynamic generation error for round %d: %s", round_num, exc)
+
+        # Synthesize ElevenLabs voice on-demand for this specific dynamic question
+        voice_id = persona["voice_id"]
+        voice_name = persona["name"]
         audio_id = f"audio_{session_id}_{round_num}_{uuid.uuid4().hex[:6]}"
         audio_bytes, mime_type = await self.tts.generate_speech(question_text, voice_id=voice_id)
         self.audio_store[audio_id] = (audio_bytes, mime_type)
 
         round_data = {
             "round_number": round_num,
-            "stage": plan_item["stage"],
-            "scenario_type": f"{session['industry']} • {plan_item['persona_title']}",
-            "persona_name": plan_item["persona_name"],
-            "persona_title": plan_item["persona_title"],
+            "stage": stage,
+            "scenario_type": f"{industry} • {persona['title']}",
+            "persona_name": persona["name"],
+            "persona_title": persona["title"],
             "voice_id": voice_id,
             "voice_name": voice_name,
             "question_text": question_text,
@@ -607,75 +560,133 @@ Respond ONLY with valid JSON in this exact structure:
         user_transcript: str,
         duration_seconds: float,
     ) -> dict[str, Any]:
-        """Evaluate spoken response across the 6 dimensions from the user's screenshot."""
-        eval_prompt = f"""You are an elite AI Sales Coach evaluating a salesperson repeating an AI teleprompt script.
+        """Perform strict, objective AI evaluation on rep delivery vs teleprompt."""
+        import difflib
+        import re
 
-Round: {round_num} of 8 ({stage})
-Target Teleprompt:
+        # Detect filler words
+        filler_patterns = [
+            r"\b(um+)\b", r"\b(uh+)\b", r"\b(er+)\b", r"\b(ah+)\b",
+            r"\b(like)\b", r"\b(you know)\b", r"\b(sort of)\b",
+            r"\b(kind of)\b", r"\b(actually)\b", r"\b(basically)\b",
+            r"\b(literally)\b", r"\b(so yeah)\b", r"\b(i mean)\b"
+        ]
+        detected_fillers = []
+        lower_transcript = user_transcript.lower()
+        for pat in filler_patterns:
+            matches = re.findall(pat, lower_transcript)
+            if matches:
+                detected_fillers.extend(matches if isinstance(matches[0], str) else [m[0] for m in matches])
+
+        # Strict text similarity and word match ratio
+        target_clean = re.sub(r"[^\w\s]", "", target_teleprompt.lower()).strip()
+        user_clean = re.sub(r"[^\w\s]", "", lower_transcript).strip()
+        
+        target_words = target_clean.split()
+        user_words = user_clean.split()
+        
+        # Sequence matcher similarity (0.0 to 1.0)
+        seq_ratio = difflib.SequenceMatcher(None, target_clean, user_clean).ratio()
+        
+        # Keyword intersection
+        target_set = set(target_words)
+        user_set = set(user_words)
+        common_words = target_set.intersection(user_set)
+        coverage_ratio = len(common_words) / max(len(target_set), 1)
+        
+        # Strict Word Choice (penalize truncated, missing, or altered words heavily)
+        strict_word_choice = int(round((seq_ratio * 0.6 + coverage_ratio * 0.4) * 100))
+        if len(user_words) < len(target_words) * 0.5:
+            strict_word_choice = min(strict_word_choice, 45)  # Harsh penalty for partial responses
+
+        # Strict Pacing (Words Per Minute)
+        wpm = int((len(user_words) / max(duration_seconds, 1.0)) * 60) if duration_seconds > 0 else 135
+        if 125 <= wpm <= 155:
+            strict_pacing = 92
+        elif 110 <= wpm < 125 or 156 <= wpm <= 170:
+            strict_pacing = 78
+        elif 90 <= wpm < 110 or 171 <= wpm <= 190:
+            strict_pacing = 60
+        else:
+            strict_pacing = 42  # Extreme rushing or dragging
+
+        # Strict Pause / Filters (penalize 12 points per filler word)
+        filler_penalty = len(detected_fillers) * 12
+        strict_pause_filters = max(20, min(96, 95 - filler_penalty))
+
+        # Strict Tone & Sentiment
+        hedging_words = ["maybe", "i guess", "probably", "i think", "sort of", "kinda", "hopefully"]
+        hedge_count = sum(1 for hw in hedging_words if hw in lower_transcript)
+        strict_sentiment = max(35, min(95, 88 - (hedge_count * 15)))
+        strict_tone = max(35, min(95, 86 - (hedge_count * 12) - (0 if len(user_words) >= len(target_words)*0.8 else 20)))
+        strict_energy = max(40, min(95, 85 - (0 if 120 <= wpm <= 160 else 15)))
+
+        strict_overall = int(round(
+            (strict_word_choice * 0.25) +
+            (strict_pacing * 0.20) +
+            (strict_pause_filters * 0.20) +
+            (strict_tone * 0.15) +
+            (strict_energy * 0.10) +
+            (strict_sentiment * 0.10)
+        ))
+
+        eval_prompt = f"""You are a strict, demanding B2B Executive Sales Performance Coach evaluating a salesperson's voice delivery.
+Sales Stage: {stage} (Round {round_num} of 8)
+
+Required Teleprompt:
 "{target_teleprompt}"
 
 User Spoken Transcript:
 "{user_transcript}"
 
-Spoken Duration: {duration_seconds:.2f} seconds
+Spoken Duration: {duration_seconds:.2f} seconds | WPM: {wpm} | Detected Fillers: {detected_fillers}
 
-Evaluate the delivery thoroughly and output strictly valid JSON with scores between 0 and 100:
-1. "word_choice": How accurately and clearly the user reproduced the teleprompt text and key terms.
-2. "pacing": Conversational rhythm and speaking rate (optimal is 130-155 words per minute).
-3. "sentiment": Warmth, positive confidence, solution-oriented delivery without hesitation.
-4. "tone_emphasis": Strategic vocal emphasis on value drivers, metrics, and key benefits.
-5. "pause_filters": Clean pauses without filler sounds ("um", "uh", "like", "you know").
-6. "energy_inflection": Engaging vocal energy, natural pitch variance, avoiding monotone.
-7. "overall_score": Weighted overall composite score (0-100).
-8. "feedback": A 1-2 sentence coaching tip on delivery.
-9. "strengths": Array of 1-2 key strengths demonstrated.
-10. "improvements": Array of 1-2 specific actionable coaching recommendations.
-11. "detected_fillers": Array of detected filler words or empty sounds.
+STRICT GRADING RULES:
+- Word Choice (0-100): Score 85+ ONLY if almost every key word, metric, and benefit from the teleprompt was accurately delivered. If the rep skipped or butchered key terms, score 30-65.
+- Pacing (0-100): Optimal enterprise rate is 130-150 WPM. If rushed (>170 WPM) or sluggish (<110 WPM), penalize strictly.
+- Sentiment (0-100): Solution-oriented, calm executive authority. Penalize defensive or timid delivery.
+- Tone/Emphasis (0-100): Did they stress ROI metrics and clear value? Penalize casual or monotone speech.
+- Pause/Filters (0-100): Each filler word ('um', 'uh', 'like') must deduct 10-15 points.
+- Energy/Inflection (0-100): Natural pitch modulation and conviction. Penalize flat delivery.
+- Overall Score (0-100): Strict composite score. Reps must earn 80+ only through sharp, fluent execution.
 
-Return strictly JSON:
+Return strictly valid JSON:
 {{
-  "overall_score": 85,
+  "overall_score": {strict_overall},
   "score_breakdown": {{
-    "word_choice": 82,
-    "pacing": 84,
-    "sentiment": 86,
-    "tone_emphasis": 85,
-    "pause_filters": 88,
-    "energy_inflection": 87
+    "word_choice": {strict_word_choice},
+    "pacing": {strict_pacing},
+    "sentiment": {strict_sentiment},
+    "tone_emphasis": {strict_tone},
+    "pause_filters": {strict_pause_filters},
+    "energy_inflection": {strict_energy}
   }},
-  "feedback": "Great clarity and steady cadence throughout the objection response.",
-  "strengths": ["Strong emphasis on ROI numbers", "Steady pacing"],
-  "improvements": ["Slightly vary inflection at the closing question"],
-  "detected_fillers": []
+  "feedback": "Concise 1-2 sentence coaching feedback noting exact delivery strengths or critical shortcomings.",
+  "strengths": ["1-2 specific strengths demonstrated"],
+  "improvements": ["1-2 specific actionable coaching directives to improve delivery"],
+  "detected_fillers": {json.dumps(detected_fillers)}
 }}
 """
-
-        target_words = target_teleprompt.lower().split()
-        user_words = user_transcript.lower().split()
-        common_words = set(target_words).intersection(set(user_words))
-        word_accuracy = len(common_words) / max(len(set(target_words)), 1)
-        base_score = int(76 + word_accuracy * 18)
-        base_score = min(max(base_score, 72), 96)
 
         fallback_eval = {
             "round_number": round_num,
             "stage": stage,
-            "overall_score": base_score,
+            "overall_score": strict_overall,
             "score_breakdown": {
-                "word_choice": min(base_score + 2, 98),
-                "pacing": min(base_score - 1, 95),
-                "sentiment": min(base_score + 3, 97),
-                "tone_emphasis": min(base_score + 1, 96),
-                "pause_filters": min(base_score - 2, 94),
-                "energy_inflection": min(base_score, 95),
+                "word_choice": strict_word_choice,
+                "pacing": strict_pacing,
+                "sentiment": strict_sentiment,
+                "tone_emphasis": strict_tone,
+                "pause_filters": strict_pause_filters,
+                "energy_inflection": strict_energy,
             },
             "transcribed_text": user_transcript,
             "target_teleprompt": target_teleprompt,
-            "feedback": "Strong delivery with clear articulation of key value propositions.",
-            "strengths": ["Clear articulation", "Well-paced delivery"],
-            "improvements": ["Maintain steady breathing across long sentences"],
-            "detected_fillers": [],
-            "wpm": int((len(user_words) / max(duration_seconds, 1.0)) * 60) if duration_seconds > 0 else 140,
+            "feedback": "Strict analysis: Ensure high fidelity to teleprompt value metrics and eliminate all filler hesitations.",
+            "strengths": ["Accurate core phrasing" if strict_word_choice > 70 else "Clear initial tone"],
+            "improvements": ["Improve pacing cadence" if strict_pacing < 75 else "Maintain crisp sentence endings without fillers"],
+            "detected_fillers": detected_fillers,
+            "wpm": wpm,
         }
 
         if not self.groq_client and not self.openai_client:
@@ -717,14 +728,14 @@ Return strictly JSON:
             return {
                 "round_number": round_num,
                 "stage": stage,
-                "overall_score": int(data.get("overall_score", base_score)),
+                "overall_score": int(data.get("overall_score", strict_overall)),
                 "score_breakdown": {
-                    "word_choice": int(breakdown.get("word_choice", base_score)),
-                    "pacing": int(breakdown.get("pacing", base_score)),
-                    "sentiment": int(breakdown.get("sentiment", base_score)),
-                    "tone_emphasis": int(breakdown.get("tone_emphasis", base_score)),
-                    "pause_filters": int(breakdown.get("pause_filters", base_score)),
-                    "energy_inflection": int(breakdown.get("energy_inflection", base_score)),
+                    "word_choice": int(breakdown.get("word_choice", strict_word_choice)),
+                    "pacing": int(breakdown.get("pacing", strict_pacing)),
+                    "sentiment": int(breakdown.get("sentiment", strict_sentiment)),
+                    "tone_emphasis": int(breakdown.get("tone_emphasis", strict_tone)),
+                    "pause_filters": int(breakdown.get("pause_filters", strict_pause_filters)),
+                    "energy_inflection": int(breakdown.get("energy_inflection", strict_energy)),
                 },
                 "transcribed_text": user_transcript,
                 "target_teleprompt": target_teleprompt,
@@ -778,7 +789,7 @@ Return strictly JSON:
                     "completed": True,
                 })
             else:
-                stage_name = session["rounds_plan"][i - 1]["stage"] if i <= len(session.get("rounds_plan", [])) else f"Round {i}"
+                stage_name = SALES_STAGES[i - 1]["stage"]
                 round_performance_list.append({
                     "round_number": i,
                     "stage": stage_name,
@@ -786,7 +797,7 @@ Return strictly JSON:
                     "completed": False,
                 })
 
-        return {
+        report_dict = {
             "session_id": session["session_id"],
             "overall_score": overall_score,
             "rounds_completed": num_completed,
@@ -816,6 +827,18 @@ Return strictly JSON:
                 "Recalibrate anytime to fine tune your experience.",
             ],
         }
+
+        # Save report to disk in reports directory
+        try:
+            reports_dir = Path(__file__).resolve().parent.parent / "reports"
+            reports_dir.mkdir(parents=True, exist_ok=True)
+            report_path = reports_dir / f"calibration_{session['session_id']}.json"
+            report_path.write_text(json.dumps(report_dict, indent=2), encoding="utf-8")
+            LOGGER.info("Saved calibration report to: %s", report_path)
+        except Exception as exc:
+            LOGGER.warning("Could not write report to disk: %s", exc)
+
+        return report_dict
 
 
 # ==========================================

@@ -15,7 +15,7 @@ async def test_calibration_session_lifecycle():
     assert session_id.startswith("calib_")
     assert session["current_round"] == 1
     assert session["status"] == "in_progress"
-    assert len(session["rounds_plan"]) == 8
+    assert session["total_rounds"] == 8
 
     # 2. Generate on-demand Round 1 ElevenLabs Voice
     round_1 = await service.generate_round_voice_on_demand(session_id, 1)

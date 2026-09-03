@@ -1,14 +1,18 @@
 <!DOCTYPE html>
 <html lang="en">
+
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>AI Voice Calibration Studio</title>
-  <meta name="description" content="8-Round AI Voice Calibration Studio for evaluating salesperson speech pacing, tone, delivery, and teleprompt alignment.">
+  <meta name="description"
+    content="8-Round AI Voice Calibration Studio for evaluating salesperson speech pacing, tone, delivery, and teleprompt alignment.">
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
-  
+  <link
+    href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&family=Inter:wght@400;500;600;700&display=swap"
+    rel="stylesheet">
+
   <style>
     :root {
       --primary: #0d9488;
@@ -459,20 +463,39 @@
       display: flex;
       justify-content: space-between;
       align-items: center;
-      font-size: 0.86rem;
-      font-weight: 600;
-      color: var(--slate-700);
+      font-size: 0.9rem;
+      margin-bottom: 8px;
     }
 
     .metric-title {
       display: flex;
       align-items: center;
-      gap: 8px;
+      gap: 12px;
+    }
+
+    .metric-icon-box {
+      width: 34px;
+      height: 34px;
+      border-radius: 8px;
+      background: #ecfdf5;
+      color: #0d9488;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      flex-shrink: 0;
+      border: 1px solid #d1fae5;
+    }
+
+    .metric-name {
+      font-size: 0.92rem;
+      font-weight: 600;
+      color: #334155;
     }
 
     .metric-val {
-      color: var(--primary);
+      color: #0d9488;
       font-weight: 700;
+      font-size: 0.95rem;
     }
 
     .progress-bar-bg {
@@ -663,9 +686,20 @@
     }
 
     @keyframes pulse-mic {
-      0% { transform: scale(1); box-shadow: 0 0 0 4px rgba(239, 68, 68, 0.4); }
-      50% { transform: scale(1.08); box-shadow: 0 0 0 12px rgba(239, 68, 68, 0.1); }
-      100% { transform: scale(1); box-shadow: 0 0 0 4px rgba(239, 68, 68, 0.4); }
+      0% {
+        transform: scale(1);
+        box-shadow: 0 0 0 4px rgba(239, 68, 68, 0.4);
+      }
+
+      50% {
+        transform: scale(1.08);
+        box-shadow: 0 0 0 12px rgba(239, 68, 68, 0.1);
+      }
+
+      100% {
+        transform: scale(1);
+        box-shadow: 0 0 0 4px rgba(239, 68, 68, 0.4);
+      }
     }
 
     .timer-badge {
@@ -775,23 +809,31 @@
     }
 
     @keyframes spin {
-      0% { transform: rotate(0deg); }
-      100% { transform: rotate(360deg); }
+      0% {
+        transform: rotate(0deg);
+      }
+
+      100% {
+        transform: rotate(360deg);
+      }
     }
 
     /* Responsive */
     @media (max-width: 900px) {
+
       .results-grid-top,
       .results-grid-bottom,
       .studio-grid {
         grid-template-columns: 1fr;
       }
+
       .breakdown-grid {
         grid-template-columns: 1fr;
       }
     }
   </style>
 </head>
+
 <body>
 
   <!-- Top Navigation -->
@@ -802,24 +844,26 @@
     </a>
     <div style="display: flex; align-items: center; gap: 16px;">
       <span class="nav-badge" id="navStatus">Ready for Calibration</span>
-      <a href="/" class="btn-secondary" style="text-decoration: none; padding: 6px 14px; font-size: 0.82rem;">Dashboard</a>
+      <a href="/" class="btn-secondary"
+        style="text-decoration: none; padding: 6px 14px; font-size: 0.82rem;">Dashboard</a>
     </div>
   </header>
 
   <main class="container">
-    
+
     <!-- ========================================================
          VIEW 1: Active Interactive Calibration Studio
          ======================================================== -->
     <div id="studioView" class="studio-view studio-active">
-      
+
       <div class="page-title-row">
         <div>
           <h1 class="page-title">Voice Calibration Studio</h1>
-          <p class="subtitle">Complete 8 quick business rounds. Listen to the prospect voice, then read the AI teleprompt aloud.</p>
+          <p class="subtitle">Complete 8 quick business rounds. Listen to the prospect voice, then read the AI
+            teleprompt aloud.</p>
         </div>
         <button id="btnStartSession" class="btn-primary" onclick="initiateCalibration()">
-          <span>⚡ Start 8-Round Calibration</span>
+          <span> Start 8-Round Calibration</span>
         </button>
       </div>
 
@@ -828,38 +872,45 @@
         <div style="display: flex; align-items: center; gap: 14px;">
           <span class="round-pill" id="studioRoundBadge">Round 1 of 8</span>
           <div>
-            <h3 id="studioStageName" style="font-size: 1.1rem; font-weight: 700; color: var(--slate-900);">Discovery & Onboarding</h3>
-            <p id="studioScenarioType" style="font-size: 0.82rem; color: var(--slate-500);">Scenario: Implementation Timeline & Value</p>
+            <h3 id="studioStageName" style="font-size: 1.1rem; font-weight: 700; color: var(--slate-900);">Discovery &
+              Onboarding</h3>
+            <p id="studioScenarioType" style="font-size: 0.82rem; color: var(--slate-500);">Scenario: Implementation
+              Timeline & Value</p>
           </div>
         </div>
         <div style="text-align: right;">
-          <span id="sessionTimerText" style="font-family: monospace; font-size: 0.9rem; color: var(--slate-500); font-weight: 600;">Time: 00:00</span>
+          <span id="sessionTimerText"
+            style="font-family: monospace; font-size: 0.9rem; color: var(--slate-500); font-weight: 600;">Time:
+            00:00</span>
         </div>
       </div>
 
       <!-- Studio Grid: AI Scenario Question & Teleprompt -->
       <div class="studio-grid">
-        
+
         <!-- Left: Prospect Question & Voice -->
         <div class="card">
           <div class="card-header-icon">
-            <div class="icon-badge">🗣️</div>
+            <!-- <div class="icon-badge">🗣️</div> -->
             <div>
               <h3>AI Prospect Question</h3>
               <p style="font-size: 0.8rem; color: var(--slate-400);">Generated on-demand with ElevenLabs Voice</p>
             </div>
           </div>
-          
+
           <div class="scenario-box" id="studioQuestionText">
-            "How long does your typical onboarding take, and will my team have a dedicated specialist to help us configure everything during the first month?"
+            "How long does your typical onboarding take, and will my team have a dedicated specialist to help us
+            configure everything during the first month?"
           </div>
 
           <!-- Audio Player Widget -->
           <div class="audio-player-widget">
             <button id="btnPlayAiVoice" class="btn-circle" onclick="playCurrentScenarioAudio()">▶</button>
             <div style="flex: 1;">
-              <div style="font-size: 0.85rem; font-weight: 700; color: var(--slate-800);" id="voicePersonaLabel">ElevenLabs Voice: Rachel</div>
-              <div style="font-size: 0.75rem; color: var(--slate-500);" id="audioStatusLabel">Click play to listen to prospect</div>
+              <div style="font-size: 0.85rem; font-weight: 700; color: var(--slate-800);" id="voicePersonaLabel">
+                ElevenLabs Voice: Rachel</div>
+              <div style="font-size: 0.75rem; color: var(--slate-500);" id="audioStatusLabel">Click play to listen to
+                prospect</div>
             </div>
             <audio id="scenarioAudioElement" style="display: none;"></audio>
           </div>
@@ -868,22 +919,25 @@
         <!-- Right: Teleprompt Script To Repeat -->
         <div class="card">
           <div class="card-header-icon">
-            <div class="icon-badge">📝</div>
+            <!-- <div class="icon-badge">📝</div> -->
             <div>
               <h3>Your AI Teleprompt Script</h3>
-              <p style="font-size: 0.8rem; color: var(--slate-400);">Speak with clear pacing, confidence, and natural inflection</p>
+              <p style="font-size: 0.8rem; color: var(--slate-400);">Speak with clear pacing, confidence, and natural
+                inflection</p>
             </div>
           </div>
 
           <div class="teleprompt-label">
-            <span>✨ Live Delivery Teleprompt</span>
+            <span> Live Delivery Teleprompt</span>
           </div>
 
           <div class="teleprompt-box" id="studioTelepromptText">
-            "Our standard onboarding takes less than two weeks, and you'll have a dedicated customer success manager walking your team through every single step."
+            "Our standard onboarding takes less than two weeks, and you'll have a dedicated customer success manager
+            walking your team through every single step."
           </div>
 
-          <div style="display: flex; justify-content: space-between; align-items: center; font-size: 0.82rem; color: var(--slate-500);">
+          <div
+            style="display: flex; justify-content: space-between; align-items: center; font-size: 0.82rem; color: var(--slate-500);">
             <span>Target word count: ~25 words</span>
             <span>Recommended cadence: 135-150 WPM</span>
           </div>
@@ -893,9 +947,11 @@
 
       <!-- Bottom: Recording Studio -->
       <div class="card recorder-card">
-        <h3 style="font-size: 1.25rem; font-weight: 800; color: var(--slate-900); margin-bottom: 4px;">Record Your Speech Delivery</h3>
+        <h3 style="font-size: 1.25rem; font-weight: 800; color: var(--slate-900); margin-bottom: 4px;">Record Your
+          Speech Delivery</h3>
         <p style="color: var(--slate-500); font-size: 0.9rem; max-width: 500px;">
-          Press the microphone, read the teleprompt clearly, and click stop when finished to receive your instant AI evaluation.
+          Press the microphone, read the teleprompt clearly, and click stop when finished to receive your instant AI
+          evaluation.
         </p>
 
         <!-- Live Waveform Canvas -->
@@ -907,24 +963,27 @@
             <span id="micIcon">🎙️</span>
           </button>
           <div id="recordingTimer" class="timer-badge">00:00s</div>
-          <p id="micStatusHint" style="font-size: 0.85rem; color: var(--slate-500); font-weight: 600;">Click microphone to record</p>
+          <p id="micStatusHint" style="font-size: 0.85rem; color: var(--slate-500); font-weight: 600;">Click microphone
+            to record</p>
         </div>
 
         <!-- Action Buttons -->
         <div style="display: flex; gap: 12px; margin-top: 24px;">
           <button id="btnSubmitEval" class="btn-primary" onclick="submitForEvaluation()" style="display: none;">
-            <span>✨ Evaluate Round Performance</span>
+            <span> Evaluate Round Performance</span>
           </button>
           <button id="btnReRecord" class="btn-secondary" onclick="resetCurrentRecording()" style="display: none;">
-            <span>🔄 Re-record</span>
+            <span>Re-record</span>
           </button>
         </div>
 
         <!-- Fallback Manual Text Input for non-mic environments -->
-        <details style="margin-top: 20px; font-size: 0.82rem; color: var(--slate-500); text-align: left; width: 100%; max-width: 500px;">
+        <details
+          style="margin-top: 20px; font-size: 0.82rem; color: var(--slate-500); text-align: left; width: 100%; max-width: 500px;">
           <summary style="cursor: pointer;">Manual / Text Input Fallback</summary>
           <div style="margin-top: 8px; display: flex; gap: 8px;">
-            <input type="text" id="manualTranscriptInput" placeholder="Paste or type speech transcript..." style="flex: 1; padding: 8px 12px; border: 1px solid var(--slate-300); border-radius: 8px; font-size: 0.85rem;">
+            <input type="text" id="manualTranscriptInput" placeholder="Paste or type speech transcript..."
+              style="flex: 1; padding: 8px 12px; border: 1px solid var(--slate-300); border-radius: 8px; font-size: 0.85rem;">
             <button class="btn-secondary" onclick="submitManualTranscript()">Submit Text</button>
           </div>
         </details>
@@ -937,7 +996,7 @@
          VIEW 2: Calibration Results Dashboard (Exact Screenshot 1:1 Match)
          ======================================================== -->
     <div id="resultsView" class="hidden">
-      
+
       <div class="page-title-row">
         <div>
           <h1 class="page-title">Calibration results</h1>
@@ -946,7 +1005,7 @@
 
       <!-- Top Row: Score Gauge & What this means -->
       <div class="results-grid-top">
-        
+
         <!-- Left: Donut Score Gauge & Meta -->
         <div class="card score-gauge-card">
           <div class="gauge-wrapper">
@@ -963,11 +1022,11 @@
           <div class="score-details" style="flex: 1;">
             <h3 id="resHeading">Great job!</h3>
             <p id="resStatusMsg">Your calibration is complete and your AI coach is ready to guide you on calls.</p>
-            
+
             <div class="stat-list">
               <div class="stat-item">
                 <div class="stat-left">
-                  <span class="stat-icon">🎯</span>
+                  <!-- <span class="stat-icon">🎯</span> -->
                   <span id="resRoundsCompleted">8</span>
                 </div>
                 <div class="stat-right">Rounds completed</div>
@@ -975,7 +1034,7 @@
 
               <div class="stat-item">
                 <div class="stat-left">
-                  <span class="stat-icon">⏱️</span>
+                  <!-- <span class="stat-icon">⏱️</span> -->
                   <span id="resTotalTime">8m 24s</span>
                 </div>
                 <div class="stat-right">Total time</div>
@@ -983,7 +1042,7 @@
 
               <div class="stat-item">
                 <div class="stat-left">
-                  <span class="stat-icon">📅</span>
+                  <!-- <span class="stat-icon">📅</span> -->
                   <span id="resCompletedOn">May 16, 2025</span>
                 </div>
                 <div class="stat-right">Completed on</div>
@@ -996,7 +1055,7 @@
         <div class="card info-card">
           <div>
             <div class="card-header-icon">
-              <div class="icon-badge">✨</div>
+              <!-- <div class="icon-badge">✨</div> -->
               <h3>What this means</h3>
             </div>
 
@@ -1030,7 +1089,7 @@
       <!-- Middle Card: Round Performance Stepper -->
       <div class="card stepper-card">
         <h3 class="card-title">Round performance</h3>
-        
+
         <div class="stepper-track-container">
           <div class="stepper-line" id="stepperLine"></div>
           <div class="stepper-steps" id="roundStepperSteps">
@@ -1041,18 +1100,25 @@
 
       <!-- Bottom Row: Score Breakdown & What's Next -->
       <div class="results-grid-bottom">
-        
-        <!-- Score Breakdown with 6 metrics -->
+
+        <!-- Score Breakdown with 6 metrics (Exact Screenshot Match) -->
         <div class="card">
           <h3 class="card-title">Score breakdown</h3>
-          
+
           <div class="breakdown-grid">
-            
+
             <!-- Column 1 -->
-            <div style="display: flex; flex-direction: column; gap: 18px;">
+            <div style="display: flex; flex-direction: column; gap: 20px;">
+              
+              <!-- Word Choice -->
               <div class="metric-row">
                 <div class="metric-header">
-                  <span class="metric-title">💬 Word choice</span>
+                  <div class="metric-title">
+                    <div class="metric-icon-box">
+                      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"></path></svg>
+                    </div>
+                    <span class="metric-name">Word choice</span>
+                  </div>
                   <span class="metric-val" id="metricWordChoiceVal">80%</span>
                 </div>
                 <div class="progress-bar-bg">
@@ -1060,9 +1126,15 @@
                 </div>
               </div>
 
+              <!-- Pacing -->
               <div class="metric-row">
                 <div class="metric-header">
-                  <span class="metric-title">⏱️ Pacing</span>
+                  <div class="metric-title">
+                    <div class="metric-icon-box">
+                      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"></circle><polyline points="12 6 12 12 16 14"></polyline></svg>
+                    </div>
+                    <span class="metric-name">Pacing</span>
+                  </div>
                   <span class="metric-val" id="metricPacingVal">84%</span>
                 </div>
                 <div class="progress-bar-bg">
@@ -1070,9 +1142,15 @@
                 </div>
               </div>
 
+              <!-- Sentiment -->
               <div class="metric-row">
                 <div class="metric-header">
-                  <span class="metric-title">😊 Sentiment</span>
+                  <div class="metric-title">
+                    <div class="metric-icon-box">
+                      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"></circle><path d="M8 14s1.5 2 4 2 4-2 4-2"></path><line x1="9" y1="9" x2="9.01" y2="9"></line><line x1="15" y1="9" x2="15.01" y2="9"></line></svg>
+                    </div>
+                    <span class="metric-name">Sentiment</span>
+                  </div>
                   <span class="metric-val" id="metricSentimentVal">82%</span>
                 </div>
                 <div class="progress-bar-bg">
@@ -1082,10 +1160,17 @@
             </div>
 
             <!-- Column 2 -->
-            <div style="display: flex; flex-direction: column; gap: 18px;">
+            <div style="display: flex; flex-direction: column; gap: 20px;">
+              
+              <!-- Tone / Emphasis -->
               <div class="metric-row">
                 <div class="metric-header">
-                  <span class="metric-title">🎧 Tone/Emphasis</span>
+                  <div class="metric-title">
+                    <div class="metric-icon-box">
+                      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 18v-6a9 9 0 0 1 18 0v6"></path><path d="M21 19a2 2 0 0 1-2 2h-1a2 2 0 0 1-2-2v-3a2 2 0 0 1 2-2h3zM3 19a2 2 0 0 0 2 2h1a2 2 0 0 0 2-2v-3a2 2 0 0 0-2-2H3z"></path></svg>
+                    </div>
+                    <span class="metric-name">Tone/Emphasis</span>
+                  </div>
                   <span class="metric-val" id="metricToneVal">86%</span>
                 </div>
                 <div class="progress-bar-bg">
@@ -1093,9 +1178,15 @@
                 </div>
               </div>
 
+              <!-- Pause / Filters -->
               <div class="metric-row">
                 <div class="metric-header">
-                  <span class="metric-title">⏸️ Pause/Filters</span>
+                  <div class="metric-title">
+                    <div class="metric-icon-box">
+                      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="6" y="4" width="4" height="16"></rect><rect x="14" y="4" width="4" height="16"></rect></svg>
+                    </div>
+                    <span class="metric-name">Pause/Filters</span>
+                  </div>
                   <span class="metric-val" id="metricPauseVal">83%</span>
                 </div>
                 <div class="progress-bar-bg">
@@ -1103,9 +1194,15 @@
                 </div>
               </div>
 
+              <!-- Energy / Inflection -->
               <div class="metric-row">
                 <div class="metric-header">
-                  <span class="metric-title">⚡ Energy/Inflection</span>
+                  <div class="metric-title">
+                    <div class="metric-icon-box">
+                      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"></polygon></svg>
+                    </div>
+                    <span class="metric-name">Energy/Inflection</span>
+                  </div>
                   <span class="metric-val" id="metricEnergyVal">85%</span>
                 </div>
                 <div class="progress-bar-bg">
@@ -1121,21 +1218,21 @@
         <div class="card info-card">
           <div>
             <div class="card-header-icon">
-              <div class="icon-badge">🚀</div>
+              <!-- <div class="icon-badge">🚀</div> -->
               <h3>What's next?</h3>
             </div>
 
             <ul class="whats-next-list">
               <li class="whats-next-item">
-                <span class="whats-next-icon">📞</span>
+                <!-- <span class="whats-next-icon">📞</span> -->
                 <span>You can now make calls with real-time AI guidance.</span>
               </li>
               <li class="whats-next-item">
-                <span class="whats-next-icon">📊</span>
+                <!-- <span class="whats-next-icon">📊</span> -->
                 <span>Your prompts will adapt to your style automatically.</span>
               </li>
               <li class="whats-next-item">
-                <span class="whats-next-icon">🔄</span>
+                <!-- <span class="whats-next-icon">🔄</span> -->
                 <span>Recalibrate anytime to fine tune your experience.</span>
               </li>
             </ul>
@@ -1159,22 +1256,28 @@
   <div id="evalModal" class="modal-overlay">
     <div class="modal-content">
       <div style="text-align: center; margin-bottom: 20px;">
-        <div style="font-size: 2.2rem; margin-bottom: 6px;">🎉</div>
-        <h2 style="font-size: 1.4rem; font-weight: 800; color: var(--slate-900);" id="modalRoundTitle">Round 1 Evaluation</h2>
-        <div style="font-size: 2.4rem; font-weight: 800; color: var(--primary); margin: 8px 0;" id="modalScoreVal">88%</div>
-        <p style="color: var(--slate-600); font-size: 0.9rem;" id="modalFeedbackText">Great pace and confident delivery.</p>
+        <!-- <div style="font-size: 2.2rem; margin-bottom: 6px;">🎉</div> -->
+        <h2 style="font-size: 1.4rem; font-weight: 800; color: var(--slate-900);" id="modalRoundTitle">Round 1
+          Evaluation</h2>
+        <div style="font-size: 2.4rem; font-weight: 800; color: var(--primary); margin: 8px 0;" id="modalScoreVal">88%
+        </div>
+        <p style="color: var(--slate-600); font-size: 0.9rem;" id="modalFeedbackText">Great pace and confident delivery.
+        </p>
       </div>
 
       <div style="background: var(--slate-50); border-radius: 12px; padding: 16px; margin-bottom: 24px;">
-        <div style="font-size: 0.82rem; font-weight: 700; color: var(--slate-700); margin-bottom: 8px;">Key Strengths & Coaching:</div>
-        <ul id="modalStrengthsList" style="font-size: 0.85rem; color: var(--slate-600); padding-left: 20px; line-height: 1.5;">
+        <div style="font-size: 0.82rem; font-weight: 700; color: var(--slate-700); margin-bottom: 8px;">Key Strengths &
+          Coaching:</div>
+        <ul id="modalStrengthsList"
+          style="font-size: 0.85rem; color: var(--slate-600); padding-left: 20px; line-height: 1.5;">
           <li>Clear articulation of value proposition</li>
           <li>Steady speaking rate (142 WPM)</li>
         </ul>
       </div>
 
       <div style="display: flex; justify-content: flex-end; gap: 12px;">
-        <button id="modalBtnNext" class="btn-primary" onclick="advanceToNextRound()" style="width: 100%; justify-content: center;">
+        <button id="modalBtnNext" class="btn-primary" onclick="advanceToNextRound()"
+          style="width: 100%; justify-content: center;">
           <span>Continue to Round 2 →</span>
         </button>
       </div>
@@ -1216,14 +1319,14 @@
         setNavStatus("Initializing session...");
         const res = await fetch("/api/calibration/start", { method: "POST" });
         const data = await res.json();
-        
+
         currentSessionId = data.session.session_id;
         currentRoundNumber = 1;
         currentRoundData = data.current_round_data;
-        
+
         sessionStartTime = Date.now();
         startSessionTimer();
-        
+
         renderStudioRound(currentRoundData);
         setNavStatus(`Calibrating • Round 1 of 8`);
       } catch (err) {
@@ -1254,11 +1357,11 @@
 
       document.getElementById("studioRoundBadge").textContent = `Round ${roundData.round_number} of 8`;
       document.getElementById("studioStageName").textContent = roundData.stage || "Discovery";
-      
+
       const scenarioText = roundData.scenario_type || 'B2B Enterprise Scenario';
       const personaInfo = roundData.persona_name ? `${roundData.persona_name} (${roundData.persona_title})` : 'Prospect Executive';
       document.getElementById("studioScenarioType").textContent = `${scenarioText} • ${personaInfo}`;
-      
+
       document.getElementById("studioQuestionText").textContent = `"${roundData.question_text}"`;
       document.getElementById("studioTelepromptText").textContent = `"${roundData.teleprompt_text}"`;
 
@@ -1290,7 +1393,7 @@
     function playCurrentScenarioAudio() {
       const audioEl = document.getElementById("scenarioAudioElement");
       const btn = document.getElementById("btnPlayAiVoice");
-      
+
       if (audioEl.paused) {
         audioEl.play().then(() => {
           btn.textContent = "⏸";
@@ -1333,12 +1436,12 @@
       try {
         const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
         audioChunks = [];
-        
+
         mediaRecorder = new MediaRecorder(stream);
         mediaRecorder.ondataavailable = (e) => {
           if (e.data.size > 0) audioChunks.push(e.data);
         };
-        
+
         mediaRecorder.onstop = () => {
           audioBlob = new Blob(audioChunks, { type: 'audio/webm' });
           document.getElementById("btnSubmitEval").style.display = "inline-flex";
@@ -1349,11 +1452,11 @@
         mediaRecorder.start();
         isRecording = true;
         recordStartTime = Date.now();
-        
+
         document.getElementById("btnMicRecord").classList.add("recording");
         document.getElementById("micIcon").textContent = "⏹";
         document.getElementById("micStatusHint").textContent = "Recording... Read teleprompt aloud!";
-        
+
         // Start live visualizer
         connectAudioStreamToVisualizer(stream);
 
@@ -1385,7 +1488,7 @@
       document.getElementById("btnMicRecord").classList.add("recording");
       document.getElementById("micIcon").textContent = "⏹";
       document.getElementById("micStatusHint").textContent = "Simulating voice input...";
-      
+
       setTimeout(() => {
         isRecording = false;
         document.getElementById("btnMicRecord").classList.remove("recording");
@@ -1412,7 +1515,7 @@
       const formData = new FormData();
       formData.append("session_id", currentSessionId);
       formData.append("round_number", currentRoundNumber);
-      
+
       const durationSec = Math.max((Date.now() - recordStartTime) / 1000, 4.0);
       formData.append("duration_seconds", durationSec.toFixed(2));
 
@@ -1429,7 +1532,7 @@
           body: formData
         });
         const data = await res.json();
-        
+
         handleEvaluationResult(data);
       } catch (err) {
         console.error("Evaluation error:", err);
@@ -1454,12 +1557,12 @@
 
     function handleEvaluationResult(data) {
       const roundEval = data.round_data.evaluation;
-      
+
       // Populate Modal
       document.getElementById("modalRoundTitle").textContent = `Round ${currentRoundNumber} Evaluation`;
       document.getElementById("modalScoreVal").textContent = `${roundEval.overall_score}%`;
       document.getElementById("modalFeedbackText").textContent = roundEval.feedback;
-      
+
       const listEl = document.getElementById("modalStrengthsList");
       listEl.innerHTML = "";
       (roundEval.strengths || ["Crisp delivery"]).forEach(s => {
@@ -1520,7 +1623,7 @@
       // Gauge Score
       const score = report.overall_score || 86;
       document.getElementById("resOverallScoreVal").textContent = `${score}%`;
-      
+
       // Animate SVG circular progress
       const circle = document.getElementById("gaugeCircleFill");
       const radius = 60;
@@ -1587,7 +1690,7 @@
       function drawIdle() {
         ctx.fillStyle = "#091a18";
         ctx.fillRect(0, 0, canvas.width, canvas.height);
-        
+
         ctx.strokeStyle = "#0d9488";
         ctx.lineWidth = 2;
         ctx.beginPath();
@@ -1633,4 +1736,5 @@
   </script>
 
 </body>
+
 </html>
