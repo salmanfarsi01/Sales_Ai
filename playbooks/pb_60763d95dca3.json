@@ -1,0 +1,92 @@
+{
+  "id": "pb_60763d95dca3",
+  "title": "Daniel G. Master Method",
+  "status": "draft",
+  "current_step": 1,
+  "created_at": "2026-09-05T03:18:06.373548+00:00",
+  "updated_at": "2026-09-05T03:18:06.373548+00:00",
+  "basic_info": {
+    "name": "Daniel G. Master Method",
+    "short_description": "My approach to building trust and closing more high-value deals.",
+    "industry": "SaaS / Software",
+    "lead_types": [
+      "Inbound Qualified Leads"
+    ],
+    "experience_level": "Intermediate (2-4 yrs)",
+    "voice_phrases": "Here's the thing\nBottom line",
+    "philosophy": "Build trust before pitching value.",
+    "goals": [
+      "Build stronger trust",
+      "Close more deals"
+    ]
+  },
+  "style": {
+    "overall_tone": "Confident",
+    "communication_style": "Consultative",
+    "energy_level": "Medium",
+    "sentence_style": "Short & Conversational",
+    "formality": "Professional",
+    "humor_level": "Light",
+    "voice_phrases": null,
+    "core_selling_principles": null
+  },
+  "stages": [
+    {
+      "id": "stage_c4eaa0dc",
+      "order": 1,
+      "name": "Opening",
+      "goal": "Set a positive tone and gain engagement.",
+      "description": "Create rapport and get permission.",
+      "icon": "hand"
+    },
+    {
+      "id": "stage_005f7736",
+      "order": 2,
+      "name": "Discovery",
+      "goal": "Understand their motivation and timeline.",
+      "description": "Ask questions and uncover needs.",
+      "icon": "search"
+    },
+    {
+      "id": "stage_779e4f83",
+      "order": 3,
+      "name": "Value Proposition",
+      "goal": "Build credibility and differentiate.",
+      "description": "Position value clearly.",
+      "icon": "diamond"
+    },
+    {
+      "id": "stage_1347f82a",
+      "order": 4,
+      "name": "Handle Objections",
+      "goal": "Overcome doubt and strengthen confidence.",
+      "description": "Address concerns and remove hesitation.",
+      "icon": "shield"
+    },
+    {
+      "id": "stage_f747972e",
+      "order": 5,
+      "name": "Close",
+      "goal": "Get a commitment to move forward.",
+      "description": "Guide them to commit.",
+      "icon": "target"
+    },
+    {
+      "id": "stage_fbb9e514",
+      "order": 6,
+      "name": "Follow Up",
+      "goal": "Stay top of mind and convert later.",
+      "description": "Reinforce value.",
+      "icon": "phone"
+    },
+    {
+      "id": "stage_76d1d883",
+      "order": 7,
+      "name": "Wrap Up & Next Steps",
+      "goal": "Confirm onboarding date.",
+      "description": "Review deliverables and sign-off.",
+      "icon": "target"
+    }
+  ],
+  "metadata": {}
+}
