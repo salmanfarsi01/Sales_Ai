@@ -320,12 +320,18 @@ class PlaybookSaveRequest(BaseModel):
 # 3. Runtime Methodology Lens Constructor
 # ==========================================
 
-def build_playbook_methodology_prompt(playbook: Playbook, live_context: Optional[Dict[str, Any]] = None) -> str:
-    """Build the runtime methodology lens prompt that wraps around PitchProX Core intelligence.
+def serialize_playbook_prompt_section(
+    playbook: Playbook,
+    current_lead_type: Optional[str] = None,
+    detected_objection: Optional[str] = None,
+) -> str:
+    """Serializes structured playbook data into a labeled text section.
 
-    According to the Playbook Integration Spec:
-    - Does NOT replace Core facts, safety, or compliance.
-    - Guides tone, response sequence, objection framing, and prompt brevity.
+    This section is concatenated into the single unified generation prompt alongside:
+    - [LEAD TYPE CONTEXT]
+    - [AI TRAINING / RAG KNOWLEDGE]
+    - [CALIBRATION SPEAKING PROFILE]
+    - [LIVE CONVERSATION STATE]
     """
     tone = playbook.style.overall_tone
     comm_style = playbook.style.communication_style
@@ -333,30 +339,55 @@ def build_playbook_methodology_prompt(playbook: Playbook, live_context: Optional
     sentence = playbook.style.sentence_style
     formality = playbook.style.formality
     humor = playbook.style.humor_level
-    philosophy = playbook.basic_info.philosophy or "Focus on client value and clear next steps."
+    philosophy = playbook.basic_info.philosophy or "Deliver value upfront and guide the prospect to clear next steps."
     voice = playbook.basic_info.voice_phrases or ""
+    settings = playbook.style.runtime_settings
 
     seq_order = " -> ".join([s.name for s in sorted(playbook.response_sequence, key=lambda x: x.order)])
-    do_dont = "\n".join([f"- {rule}" for rule in playbook.style.runtime_settings.do_dont_boundaries])
+    do_dont_lines = "\n".join([f"  * {rule}" for rule in settings.do_dont_boundaries])
+    lang_rules = "\n".join([f"  * {rule}" for rule in settings.language_rules])
 
-    prompt = (
-        f"=== METHODOLOGY LENS: {playbook.title.upper()} ===\n"
-        f"Role: Act as the real-time live teleprompter coach applying the '{playbook.title}' sales methodology.\n"
-        f"Philosophy: {philosophy}\n"
-        f"Coaching Tone: {tone} | Style: {comm_style} | Energy: {energy} | Sentence Style: {sentence} | Formality: {formality} | Humor: {humor}\n"
-        f"Objection Handling Framework Sequence: {seq_order}\n"
-        f"Boundaries & Do/Don'ts:\n{do_dont}\n"
-    )
+    # Find relevant objection if detected
+    matching_obj_str = ""
+    if detected_objection:
+        for obj in playbook.objections:
+            if obj.objection.lower() in detected_objection.lower() or detected_objection.lower() in obj.objection.lower():
+                matching_obj_str = (
+                    f"\n  [Matched Objection Rule]:\n"
+                    f"  - Objection: {obj.objection} ({obj.category})\n"
+                    f"  - Response Style: {obj.response_style}\n"
+                    f"  - AI Strategy Tip: {obj.ai_suggestion}\n"
+                )
+                break
+
+    lines = [
+        f"### ACTIVE PLAYBOOK METHODOLOGY LENS: {playbook.title.upper()} ###",
+        f"- Philosophy: {philosophy}",
+        f"- Coaching Style: Tone={tone} | Approach={comm_style} | Energy={energy} | Sentence={sentence} | Formality={formality} | Humor={humor}",
+        f"- Objection Response Sequence: {seq_order}",
+        f"- Runtime Sensitivity & Thresholds: Timing={settings.prompt_timing_sensitivity} | Emotion={settings.emotional_sensitivity} | Min Confidence={int(settings.objection_confidence_threshold*100)}% | Trust Alert={int(settings.trust_alert_threshold*100)}% | Cooldown={settings.prompt_cooldown_seconds}s",
+        "- Do / Don't Boundaries:\n" + do_dont_lines,
+        "- Language Rules:\n" + lang_rules,
+    ]
+
     if voice:
-        prompt += f"Signature Phrases/Voice Style:\n{voice}\n"
+        lines.append(f"- Signature Voice Expressions:\n{voice}")
 
-    prompt += (
-        "\nCRITICAL OPERATIONAL RULES:\n"
-        "1. Output exactly ONE live teleprompter response for the salesperson to deliver right now.\n"
-        "2. Keep the prompt punchy, conversational, and under 25 words.\n"
-        "3. Core safety, factual truth, and live conversational reality ALWAYS take precedence over static rules.\n"
+    if matching_obj_str:
+        lines.append(matching_obj_str)
+
+    lines.append(
+        "- Runtime Operational Constraint: Apply this methodology lens to guide HOW the response is formulated. Never invent unverified facts; always output exactly ONE concise prompt (<25 words) for the salesperson."
     )
-    return prompt
+    return "\n".join(lines)
+
+
+def build_playbook_methodology_prompt(playbook: Playbook, live_context: Optional[Dict[str, Any]] = None) -> str:
+    """Build the runtime methodology lens prompt that wraps around PitchProX Core intelligence."""
+    lead_type = live_context.get("lead_type") if live_context else None
+    detected_obj = live_context.get("detected_objection") if live_context else None
+    return serialize_playbook_prompt_section(playbook, current_lead_type=lead_type, detected_objection=detected_obj)
+
 
 
 # ==========================================

@@ -234,3 +234,30 @@ def test_api_save_and_retrieve_playbook(client):
     assert res_list.status_code == 200
     assert len(res_list.json()["playbooks"]) == 1
     assert res_list.json()["playbooks"][0]["objections_count"] == 1
+
+
+def test_serialize_playbook_prompt_section():
+    """Verify that structured playbook data gets serialized into the labeled prompt block."""
+    from copilot.playbook import serialize_playbook_prompt_section
+    info = PlaybookBasicInfo(
+        name="Daniel G. Method",
+        industry="Real Estate",
+        lead_types=["Expired Listings", "FSBO (For Sale By Owner)"],
+        philosophy="1. Establish trust. 2. Frame price as net ROI.",
+        voice_phrases="Here's the thing\nBottom line",
+    )
+    pb = Playbook(title="Daniel G. Method", basic_info=info)
+
+    prompt_section = serialize_playbook_prompt_section(
+        pb,
+        current_lead_type="Expired Listings",
+        detected_objection="I don't want to pay commission."
+    )
+
+    assert "### ACTIVE PLAYBOOK METHODOLOGY LENS: DANIEL G. METHOD ###" in prompt_section
+    assert "Coaching Style: Tone=Confident" in prompt_section
+    assert "Objection Response Sequence: Acknowledge -> Validate -> Reframe -> Guide Forward" in prompt_section
+    assert "Matched Objection Rule" in prompt_section
+    assert "I don't want to pay commission." in prompt_section
+    assert "Quantify" in prompt_section
+    assert "Do / Don't Boundaries" in prompt_section
