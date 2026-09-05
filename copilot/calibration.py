@@ -1040,8 +1040,10 @@ Return strictly valid JSON in this exact structure:
 # FastAPI Router & App Factory
 # ==========================================
 
-def get_calibration_router(service: CalibrationService) -> APIRouter:
+def get_calibration_router(service: Optional[CalibrationService] = None) -> APIRouter:
     """Create dedicated FastAPI APIRouter for calibration endpoints."""
+    if service is None:
+        service = CalibrationService()
     router = APIRouter(prefix="/api/calibration", tags=["Calibration"])
 
     @router.post("/start")
@@ -1069,6 +1071,30 @@ def get_calibration_router(service: CalibrationService) -> APIRouter:
             "rounds": session["rounds"],
             "summary_report": report,
         }
+
+    @router.get("/latest")
+    async def get_latest_calibration():
+        reports_dir = Path(__file__).resolve().parent.parent / "reports"
+        latest_file = reports_dir / "latest_calibration_report.json"
+        if not latest_file.exists():
+            return {
+                "status": "default",
+                "wpm": 140,
+                "tone": "Confident & Assertive",
+                "pacing": "Direct, structured, 140 WPM pace",
+                "clarity": 85,
+            }
+        try:
+            with open(latest_file, "r", encoding="utf-8") as f:
+                data = json.load(f)
+            return {"status": "success", "report": data}
+        except Exception as exc:
+            return {
+                "status": "default",
+                "wpm": 140,
+                "tone": "Confident & Assertive",
+                "error": str(exc),
+            }
 
     @router.post("/round/generate")
     async def generate_round_endpoint(session_id: str = Form(...), round_number: int = Form(...)):

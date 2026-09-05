@@ -1,12 +1,462 @@
-<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Twilio Copilot Diagnostics</title>
-<style>:root{color-scheme:dark;font-family:Inter,system-ui,sans-serif}body{margin:0;background:#08101f;color:#edf3ff}main{max-width:1180px;margin:auto;padding:24px 18px}h1{margin:0;font-size:24px}.sub{color:#8fa4d2;margin-top:5px}.stages{display:grid;grid-template-columns:repeat(6,1fr);gap:9px;margin:20px 0}.stage{background:#121d34;border:1px solid #273755;border-radius:9px;padding:11px;min-height:58px}.stage b{display:block;font-size:11px;text-transform:uppercase;color:#8ea5d6}.stage span{font-size:12px;color:#aebcdf}.stage[data-state=ready],.stage[data-state=receiving],.stage[data-state=streaming],.stage[data-state=transcribing]{border-color:#38c98a}.stage[data-state=connecting],.stage[data-state=generating]{border-color:#e6b84f}.stage[data-state=error]{border-color:#ff637a}.grid{display:grid;grid-template-columns:1fr 1fr;gap:16px}section{background:#101a30;border:1px solid #283957;border-radius:12px;min-height:350px;padding:17px}h2{font-size:13px;letter-spacing:.08em;text-transform:uppercase;color:#91a8dc;margin:0 0 12px}.turn{padding:9px 11px;border-radius:8px;margin:7px 0}.client{background:#222e4d}.salesperson{background:#15372f}.interim{opacity:.55}.label{font-size:10px;text-transform:uppercase;color:#91a7d5}.answer{font-size:20px;line-height:1.5;white-space:pre-wrap}.meta{font-size:12px;color:#8ea3cc;margin-top:13px}.log{margin-top:15px;background:#080e1a;padding:12px;border-radius:8px;font:12px ui-monospace,monospace;color:#95a7c9;max-height:130px;overflow:auto}.error{color:#ff8193}@media(max-width:850px){.stages{grid-template-columns:repeat(2,1fr)}.grid{grid-template-columns:1fr}}</style></head>
-<body><main><h1>user sales</h1><div class="sub">Independent low-latency audio tracks · AI triggered only by client speech</div>
-<div class="stages"><div class="stage" id="twilio"><b>Twilio</b><span>Waiting</span></div><div class="stage" id="audio_salesperson"><b>Sales audio</b><span>Waiting</span></div><div class="stage" id="audio_client"><b>Client audio</b><span>Waiting</span></div><div class="stage" id="stt_salesperson"><b>Sales STT</b><span>Waiting</span></div><div class="stage" id="stt_client"><b>Client STT</b><span>Waiting</span></div><div class="stage" id="llm"><b>AI answer</b><span>Waiting</span></div></div>
-<div class="grid"><section><h2>Live transcript</h2><div id="transcript"></div></section><section><h2>Recommended response</h2><div class="answer" id="answer">Waiting for client speech…</div><div class="meta" id="sources"></div><div class="meta" id="metrics"></div></section></div><div class="log" id="log"></div>
-</main><script>
-const transcript=document.querySelector('#transcript'),answer=document.querySelector('#answer'),sources=document.querySelector('#sources'),metrics=document.querySelector('#metrics'),log=document.querySelector('#log');let current=null,interim={};
-function note(text,bad=false){const line=document.createElement('div');line.textContent=`${new Date().toLocaleTimeString()}  ${text}`;if(bad)line.className='error';log.appendChild(line);log.scrollTop=log.scrollHeight}
-function stage(name,state,detail){const box=document.getElementById(name);if(!box)return;box.dataset.state=state;box.querySelector('span').textContent=detail||state;note(`${name}: ${state}${detail?' — '+detail:''}`,state==='error')}
-function turn(role,text,final){let node=interim[role];if(!node){node=document.createElement('div');node.className=`turn ${role} interim`;node.innerHTML='<div class="label"></div><div class="text"></div>';transcript.appendChild(node);interim[role]=node}node.querySelector('.label').textContent=role;node.querySelector('.text').textContent=text;if(final){node.classList.remove('interim');delete interim[role]}}
-function connect(){const ws=new WebSocket(`${location.protocol==='https:'?'wss':'ws'}://${location.host}/events`);ws.onopen=()=>note('Dashboard event channel connected');ws.onmessage=({data})=>{const e=JSON.parse(data);const d=e.data||{};if(e.type==='component')stage(d.component,d.state,d.detail);else if(e.type==='status')note(d.message);else if(e.type==='call_start'){transcript.textContent='';note(`Call started: ${d.call_sid}`)}else if(e.type==='transcript')turn(d.role,d.text,d.final);else if(e.type==='suggestion_start'){current=d.id;answer.textContent='';sources.textContent=d.sources.length?'Sources: '+d.sources.join(', '):'No matching local knowledge';metrics.textContent='Generating from: '+d.question}else if(e.type==='suggestion_delta'&&d.id===current)answer.textContent+=d.text;else if(e.type==='suggestion_end'&&d.id===current){if(d.metrics){const m=d.metrics;metrics.textContent+=` · Pinecone: ${m.retrieval_ms}ms · LLM TTFT: ${m.llm_ttft_ms}ms · Gen: ${m.llm_generation_ms}ms · Total pipeline: ${m.pipeline_latency_total_ms}ms`}else{metrics.textContent+=` · TTFT ${d.ttft_ms??'n/a'} ms · total ${d.total_ms} ms`}}else if(e.type==='call_end')note(`Call ended; dropped audio ${d.dropped_audio_chunks}`);else if(e.type==='error')note(d.message,true)};ws.onclose=()=>{note('Dashboard event channel disconnected',true);setTimeout(connect,1200)}}connect();
-</script></body></html>
+<!doctype html>
+<html lang="en">
+
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width,initial-scale=1">
+    <title>PitchProX Fast Diagnostics & Calling</title>
+    <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+    <style>
+        :root {
+            color-scheme: dark;
+            font-family: 'Plus Jakarta Sans', system-ui, sans-serif;
+            --bg-dark: #08101f;
+            --card-bg: #101a30;
+            --card-border: #283957;
+            --accent-green: #38c98a;
+            --accent-blue: #3b82f6;
+        }
+
+        body {
+            margin: 0;
+            background: var(--bg-dark);
+            color: #edf3ff;
+            padding: 20px;
+        }
+
+        main {
+            max-width: 1200px;
+            margin: auto;
+        }
+
+        header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 16px;
+        }
+
+        h1 {
+            margin: 0;
+            font-size: 22px;
+            color: #fff;
+        }
+
+        .nav-links {
+            display: flex;
+            gap: 10px;
+        }
+
+        .nav-link {
+            color: #94a3b8;
+            text-decoration: none;
+            font-size: 13px;
+            font-weight: 600;
+            padding: 6px 12px;
+            border-radius: 6px;
+            border: 1px solid var(--card-border);
+            background: #121d34;
+        }
+
+        .nav-link:hover {
+            color: #fff;
+            border-color: var(--accent-blue);
+        }
+
+        /* Pre-Call Strip */
+        .pre-call-strip {
+            background: #111d35;
+            border: 1px solid #23375c;
+            border-radius: 10px;
+            padding: 12px 16px;
+            display: grid;
+            grid-template-columns: 1.5fr 1.5fr 1.2fr auto;
+            gap: 12px;
+            align-items: center;
+            margin-bottom: 16px;
+        }
+
+        .strip-label {
+            font-size: 10px;
+            text-transform: uppercase;
+            color: #8fa4d2;
+            font-weight: 700;
+            display: block;
+            margin-bottom: 4px;
+        }
+
+        select, button {
+            background: #091222;
+            color: #edf3ff;
+            border: 1px solid #2b3f68;
+            border-radius: 6px;
+            padding: 8px 10px;
+            font-size: 13px;
+            font-weight: 600;
+            outline: none;
+            width: 100%;
+        }
+
+        button.sync-btn {
+            background: #2563eb;
+            color: #fff;
+            cursor: pointer;
+            border: none;
+            width: auto;
+            padding: 8px 16px;
+            margin-top: 14px;
+            transition: background 0.2s;
+        }
+
+        button.sync-btn:hover {
+            background: #1d4ed8;
+        }
+
+        .stages {
+            display: grid;
+            grid-template-columns: repeat(6, 1fr);
+            gap: 8px;
+            margin-bottom: 16px;
+        }
+
+        .stage {
+            background: #121d34;
+            border: 1px solid #273755;
+            border-radius: 8px;
+            padding: 10px;
+            min-height: 55px;
+        }
+
+        .stage b {
+            display: block;
+            font-size: 10px;
+            text-transform: uppercase;
+            color: #8ea5d6;
+        }
+
+        .stage span {
+            font-size: 11px;
+            color: #aebcdf;
+        }
+
+        .stage[data-state=ready],
+        .stage[data-state=receiving],
+        .stage[data-state=streaming],
+        .stage[data-state=transcribing] {
+            border-color: #38c98a;
+        }
+
+        .stage[data-state=connecting],
+        .stage[data-state=generating] {
+            border-color: #e6b84f;
+        }
+
+        .stage[data-state=error] {
+            border-color: #ff637a;
+        }
+
+        .grid {
+            display: grid;
+            grid-template-columns: 1fr 1.2fr;
+            gap: 16px;
+        }
+
+        section {
+            background: var(--card-bg);
+            border: 1px solid var(--card-border);
+            border-radius: 12px;
+            min-height: 380px;
+            padding: 16px;
+            display: flex;
+            flex-direction: column;
+        }
+
+        h2 {
+            font-size: 12px;
+            letter-spacing: .08em;
+            text-transform: uppercase;
+            color: #91a8dc;
+            margin: 0 0 12px;
+        }
+
+        #transcript {
+            flex: 1;
+            overflow-y: auto;
+            max-height: 380px;
+        }
+
+        .turn {
+            padding: 8px 12px;
+            border-radius: 8px;
+            margin: 6px 0;
+            font-size: 14px;
+        }
+
+        .client {
+            background: #222e4d;
+        }
+
+        .salesperson {
+            background: #15372f;
+        }
+
+        .interim {
+            opacity: .55;
+        }
+
+        .label {
+            font-size: 10px;
+            text-transform: uppercase;
+            color: #91a7d5;
+            margin-bottom: 2px;
+        }
+
+        .answer {
+            font-size: 20px;
+            line-height: 1.5;
+            white-space: pre-wrap;
+            color: #f8fafc;
+            flex: 1;
+        }
+
+        .meta {
+            font-size: 12px;
+            color: #8ea3cc;
+            margin-top: 12px;
+            font-family: 'JetBrains Mono', monospace;
+        }
+
+        .log {
+            margin-top: 14px;
+            background: #080e1a;
+            padding: 12px;
+            border-radius: 8px;
+            font: 12px 'JetBrains Mono', monospace;
+            color: #95a7c9;
+            max-height: 120px;
+            overflow: auto;
+        }
+
+        .error {
+            color: #ff8193;
+        }
+    </style>
+</head>
+
+<body>
+    <main>
+        <header>
+            <div>
+                <h1>PitchProX Fast Diagnostics & Teleprompter</h1>
+            </div>
+            <div class="nav-links">
+                <a href="/" class="nav-link">Main Calling</a>
+                <a href="/playbook" class="nav-link">Playbook Studio</a>
+                <a href="/calibration" class="nav-link">Voice Calibration</a>
+            </div>
+        </header>
+
+        <!-- Pre-Call Strip -->
+        <div class="pre-call-strip">
+            <div>
+                <span class="strip-label">Lead Type</span>
+                <select id="leadTypeSelect">
+                    <option value="Expired Listings" selected>Expired Listings</option>
+                    <option value="Pre-Expired Listings">Pre-Expired Listings</option>
+                    <option value="FSBO (For Sale By Owner)">FSBO (For Sale By Owner)</option>
+                    <option value="Absentee Owners">Absentee Owners</option>
+                    <option value="Circle Prospecting">Circle Prospecting</option>
+                    <option value="Just Listed">Just Listed</option>
+                    <option value="Just Sold">Just Sold</option>
+                    <option value="Probate">Probate</option>
+                    <option value="Trust & Estate">Trust & Estate</option>
+                    <option value="Pre-Foreclosure">Pre-Foreclosure</option>
+                    <option value="Foreclosure / REO">Foreclosure / REO</option>
+                    <option value="Divorce">Divorce</option>
+                    <option value="Tax Delinquent">Tax Delinquent</option>
+                    <option value="Vacant Properties">Vacant Properties</option>
+                    <option value="Investor (Flip / Buy & Hold)">Investor (Flip / Buy & Hold)</option>
+                    <option value="Downsizing / Relocation">Downsizing / Relocation</option>
+                </select>
+            </div>
+            <div>
+                <span class="strip-label">Playbook Methodology</span>
+                <select id="playbookSelect">
+                    <option value="pitchprox_standard">PitchProX Standard Methodology</option>
+                </select>
+            </div>
+            <div>
+                <span class="strip-label">Calibration Pace</span>
+                <div style="font-size: 12px; font-weight: 600; color: #38c98a; padding: 8px; background: #091222; border-radius: 6px; border: 1px solid #2b3f68;" id="calibBadge">
+                    ⚡ 142 WPM · Direct
+                </div>
+            </div>
+            <div>
+                <button class="sync-btn" id="btnSync">Sync Folder</button>
+            </div>
+        </div>
+
+        <div class="stages">
+            <div class="stage" id="twilio"><b>Twilio</b><span>Waiting</span></div>
+            <div class="stage" id="audio_salesperson"><b>Sales audio</b><span>Waiting</span></div>
+            <div class="stage" id="audio_client"><b>Client audio</b><span>Waiting</span></div>
+            <div class="stage" id="stt_salesperson"><b>Sales STT</b><span>Waiting</span></div>
+            <div class="stage" id="stt_client"><b>Client STT</b><span>Waiting</span></div>
+            <div class="stage" id="llm"><b>AI Copilot</b><span>Waiting</span></div>
+        </div>
+
+        <div class="grid">
+            <section>
+                <h2>Live transcript</h2>
+                <div id="transcript"></div>
+            </section>
+            <section>
+                <h2>Recommended response</h2>
+                <div class="answer" id="answer">Waiting for client speech…</div>
+                <div class="meta" id="sources"></div>
+                <div class="meta" id="metrics"></div>
+            </section>
+        </div>
+        <div class="log" id="log"></div>
+    </main>
+
+    <script>
+        const transcript = document.querySelector('#transcript'),
+            answer = document.querySelector('#answer'),
+            sources = document.querySelector('#sources'),
+            metrics = document.querySelector('#metrics'),
+            log = document.querySelector('#log'),
+            leadTypeSelect = document.querySelector('#leadTypeSelect'),
+            playbookSelect = document.querySelector('#playbookSelect'),
+            calibBadge = document.querySelector('#calibBadge'),
+            btnSync = document.querySelector('#btnSync');
+
+        let current = null, interim = {}, activeCallSid = 'default';
+
+        function note(text, bad = false) {
+            const line = document.createElement('div');
+            line.textContent = `${new Date().toLocaleTimeString()}  ${text}`;
+            if (bad) line.className = 'error';
+            log.appendChild(line);
+            log.scrollTop = log.scrollHeight;
+        }
+
+        function stage(name, state, detail) {
+            const box = document.getElementById(name);
+            if (!box) return;
+            box.dataset.state = state;
+            box.querySelector('span').textContent = detail || state;
+            note(`${name}: ${state}${detail ? ' — ' + detail : ''}`, state === 'error');
+        }
+
+        function turn(role, text, final) {
+            let node = interim[role];
+            if (!node) {
+                node = document.createElement('div');
+                node.className = `turn ${role} interim`;
+                node.innerHTML = '<div class="label"></div><div class="text"></div>';
+                transcript.appendChild(node);
+                interim[role] = node;
+            }
+            node.querySelector('.label').textContent = role === 'salesperson' ? 'Rep (You)' : 'Prospect';
+            node.querySelector('.text').textContent = text;
+            transcript.scrollTop = transcript.scrollHeight;
+            if (final) {
+                node.classList.remove('interim');
+                delete interim[role];
+            }
+        }
+
+        async function syncFolder() {
+            try {
+                const fd = new FormData();
+                fd.append('call_sid', activeCallSid);
+                fd.append('lead_type', leadTypeSelect.value);
+                if (playbookSelect.value !== 'pitchprox_standard') {
+                    fd.append('playbook_id', playbookSelect.value);
+                }
+                const res = await fetch('/api/call/init-folder', { method: 'POST', body: fd });
+                if (res.ok) {
+                    const data = await res.json();
+                    note(`Pre-Call Folder Synced: ${data.lead_type} | ${data.playbook_title}`);
+                }
+            } catch (e) {
+                note(`Sync error: ${e.message}`, true);
+            }
+        }
+
+        async function loadData() {
+            try {
+                const [pbRes, calRes] = await Promise.all([
+                    fetch('/api/playbook/list').catch(() => null),
+                    fetch('/api/calibration/latest').catch(() => null)
+                ]);
+                if (pbRes && pbRes.ok) {
+                    const data = await pbRes.json();
+                    if (data.playbooks) {
+                        data.playbooks.forEach(pb => {
+                            const opt = document.createElement('option');
+                            opt.value = pb.id;
+                            opt.textContent = `${pb.title} (${pb.quality_score}/100)`;
+                            playbookSelect.appendChild(opt);
+                        });
+                    }
+                }
+                if (calRes && calRes.ok) {
+                    const cData = await calRes.json();
+                    if (cData.report) {
+                        calibBadge.textContent = `⚡ ${cData.report.wpm || 142} WPM · ${cData.report.tone || 'Assertive'}`;
+                    }
+                }
+            } catch (e) {
+                console.warn(e);
+            }
+        }
+
+        leadTypeSelect.addEventListener('change', syncFolder);
+        playbookSelect.addEventListener('change', syncFolder);
+        btnSync.addEventListener('click', syncFolder);
+
+        function connect() {
+            const ws = new WebSocket(`${location.protocol === 'https:' ? 'wss' : 'ws'}://${location.host}/events`);
+            ws.onopen = () => {
+                note('Event channel connected');
+                syncFolder();
+            };
+            ws.onmessage = ({ data }) => {
+                const e = JSON.parse(data);
+                const d = e.data || {};
+                if (e.type === 'component') stage(d.component, d.state, d.detail);
+                else if (e.type === 'status') note(d.message);
+                else if (e.type === 'call_start') {
+                    activeCallSid = d.call_sid;
+                    transcript.textContent = '';
+                    note(`Call started: ${d.call_sid}`);
+                    syncFolder();
+                } else if (e.type === 'transcript') turn(d.role, d.text, d.final);
+                else if (e.type === 'suggestion_start') {
+                    current = d.id;
+                    answer.textContent = '';
+                    sources.textContent = d.sources.length ? 'Sources: ' + d.sources.join(', ') : 'Applied: Playbook Methodology Lens';
+                    metrics.textContent = 'Generating for: ' + d.question;
+                } else if (e.type === 'suggestion_delta' && d.id === current) answer.textContent += d.text;
+                else if (e.type === 'suggestion_end' && d.id === current) {
+                    if (d.metrics) {
+                        const m = d.metrics;
+                        metrics.textContent = `Pinecone: ${m.retrieval_ms}ms · TTFT: ${m.llm_ttft_ms}ms · Pipeline: ${m.pipeline_latency_total_ms}ms`;
+                    }
+                } else if (e.type === 'call_end') note(`Call ended.`);
+                else if (e.type === 'error') note(d.message, true);
+            };
+            ws.onclose = () => {
+                note('Channel disconnected', true);
+                setTimeout(connect, 1200);
+            };
+        }
+
+        loadData();
+        connect();
+    </script>
+</body>
+
+</html>

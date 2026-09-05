@@ -4,247 +4,705 @@
 <head>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width,initial-scale=1">
-    <title>Sales Copilot</title>
+    <title>PitchProX Sales Copilot | Live Call Teleprompter</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
     <style>
         :root {
-            color-scheme: dark;
-            font-family: Inter, system-ui, sans-serif
+            --bg-dark: #070d18;
+            --card-bg: #0d172b;
+            --card-border: #1a2948;
+            --card-hover: #162442;
+            --accent-green: #10b981;
+            --accent-green-glow: rgba(16, 185, 129, 0.2);
+            --accent-blue: #3b82f6;
+            --accent-purple: #8b5cf6;
+            --accent-amber: #f59e0b;
+            --accent-red: #ef4444;
+            --text-main: #f8fafc;
+            --text-muted: #94a3b8;
+            --text-dim: #64748b;
+        }
+
+        * {
+            box-sizing: border-box;
         }
 
         body {
             margin: 0;
-            background: #08101f;
-            color: #edf3ff
+            background: var(--bg-dark);
+            color: var(--text-main);
+            font-family: 'Plus Jakarta Sans', system-ui, sans-serif;
+            -webkit-font-smoothing: antialiased;
+            min-height: 100vh;
+        }
+
+        /* Top Navigation */
+        .navbar {
+            background: rgba(13, 23, 43, 0.85);
+            backdrop-filter: blur(12px);
+            border-bottom: 1px solid var(--card-border);
+            padding: 12px 24px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            position: sticky;
+            top: 0;
+            z-index: 100;
+        }
+
+        .brand-group {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+        }
+
+        .brand-badge {
+            background: linear-gradient(135deg, #10b981, #059669);
+            color: #fff;
+            font-weight: 800;
+            font-size: 13px;
+            padding: 4px 9px;
+            border-radius: 6px;
+            letter-spacing: 0.05em;
+        }
+
+        .brand-title {
+            font-weight: 700;
+            font-size: 17px;
+            letter-spacing: -0.01em;
+            color: #fff;
+        }
+
+        .nav-links {
+            display: flex;
+            gap: 10px;
+            align-items: center;
+        }
+
+        .nav-btn {
+            background: #13223f;
+            border: 1px solid #233559;
+            color: #cbd5e1;
+            padding: 7px 14px;
+            border-radius: 8px;
+            font-size: 13px;
+            font-weight: 600;
+            text-decoration: none;
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+            transition: all 0.2s ease;
+        }
+
+        .nav-btn:hover {
+            background: #1c3059;
+            border-color: #3b82f6;
+            color: #fff;
+        }
+
+        .nav-btn.active {
+            background: rgba(59, 130, 246, 0.15);
+            border-color: #3b82f6;
+            color: #60a5fa;
         }
 
         main {
-            max-width: 1180px;
+            max-width: 1280px;
             margin: auto;
-            padding: 22px 18px
+            padding: 24px 20px;
         }
 
-        header {
+        /* Pre-Call Strategy Folder Bar */
+        .pre-call-bar {
+            background: linear-gradient(180deg, #111e38 0%, #0d172b 100%);
+            border: 1px solid #23365a;
+            border-radius: 14px;
+            padding: 16px 20px;
+            margin-bottom: 20px;
+            box-shadow: 0 8px 24px rgba(0, 0, 0, 0.35);
+        }
+
+        .pre-call-header {
             display: flex;
             justify-content: space-between;
-            gap: 18px;
-            align-items: center
+            align-items: center;
+            margin-bottom: 14px;
+            padding-bottom: 12px;
+            border-bottom: 1px solid rgba(255, 255, 255, 0.06);
         }
 
-        h1 {
-            margin: 0;
-            font-size: 24px
+        .folder-title {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            font-weight: 700;
+            font-size: 14px;
+            color: #93c5fd;
+            text-transform: uppercase;
+            letter-spacing: 0.06em;
         }
 
-        .sub,
-        .meta {
+        .folder-status-pill {
+            background: rgba(16, 185, 129, 0.15);
+            border: 1px solid rgba(16, 185, 129, 0.4);
+            color: #34d399;
+            padding: 3px 10px;
+            border-radius: 20px;
+            font-size: 12px;
+            font-weight: 600;
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+        }
+
+        .status-dot {
+            width: 7px;
+            height: 7px;
+            border-radius: 50%;
+            background: #10b981;
+            box-shadow: 0 0 8px #10b981;
+            animation: pulse-dot 2s infinite;
+        }
+
+        @keyframes pulse-dot {
+            0%, 100% { opacity: 1; transform: scale(1); }
+            50% { opacity: 0.4; transform: scale(0.85); }
+        }
+
+        .pre-call-grid {
+            display: grid;
+            grid-template-columns: 1.4fr 1.4fr 1.2fr auto;
+            gap: 14px;
+            align-items: center;
+        }
+
+        .input-group {
+            display: flex;
+            flex-direction: column;
+            gap: 6px;
+        }
+
+        .input-label {
+            font-size: 11px;
+            font-weight: 700;
             color: #8fa4d2;
-            font-size: 13px
+            text-transform: uppercase;
+            letter-spacing: 0.05em;
         }
 
-        .upload {
+        .select-input, .text-input {
+            background: #081120;
+            border: 1px solid #253961;
+            color: #f8fafc;
+            border-radius: 8px;
+            padding: 9px 12px;
+            font-size: 13px;
+            font-weight: 600;
+            font-family: inherit;
+            outline: none;
+            transition: all 0.2s ease;
+            width: 100%;
+        }
+
+        .select-input:focus, .text-input:focus {
+            border-color: #3b82f6;
+            box-shadow: 0 0 0 2px rgba(59, 130, 246, 0.2);
+        }
+
+        .calib-badge-box {
+            background: #081120;
+            border: 1px solid #253961;
+            border-radius: 8px;
+            padding: 8px 12px;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 8px;
+        }
+
+        .calib-info {
+            font-size: 12px;
+            font-weight: 600;
+            color: #e2e8f0;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+        }
+
+        .calib-link {
+            font-size: 11px;
+            color: #38bdf8;
+            text-decoration: none;
+            font-weight: 700;
+            flex-shrink: 0;
+        }
+
+        .calib-link:hover {
+            text-decoration: underline;
+        }
+
+        .btn-sync {
+            background: linear-gradient(135deg, #2563eb, #1d4ed8);
+            border: 1px solid #3b82f6;
+            color: #fff;
+            padding: 9px 16px;
+            border-radius: 8px;
+            font-weight: 700;
+            font-size: 13px;
+            cursor: pointer;
+            transition: all 0.2s ease;
+            display: flex;
+            align-items: center;
+            gap: 6px;
+            margin-top: 18px;
+        }
+
+        .btn-sync:hover {
+            background: linear-gradient(135deg, #1d4ed8, #1e40af);
+            transform: translateY(-1px);
+        }
+
+        /* Top Header & Document Ingestion */
+        .sub-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 16px;
+            gap: 16px;
+        }
+
+        .upload-bar {
             display: flex;
             gap: 8px;
             align-items: center;
-            background: #121d34;
-            padding: 9px;
-            border-radius: 9px
-        }
-
-        .upload select {
-            background: #0d1830;
-            color: #edf3ff;
-            border: 1px solid #2c446e;
-            border-radius: 7px;
-            padding: 9px 12px;
-            font-weight: 600;
-            min-width: 150px
-        }
-
-        .upload button {
-            background: #65dda4;
-            border: 0;
+            background: var(--card-bg);
+            border: 1px solid var(--card-border);
             padding: 8px 12px;
-            border-radius: 7px;
-            font-weight: 700;
-            cursor: pointer
+            border-radius: 10px;
         }
 
+        .upload-bar input[type="file"] {
+            font-size: 12px;
+            color: #94a3b8;
+        }
+
+        .upload-bar button {
+            background: #10b981;
+            border: none;
+            color: #042f1f;
+            padding: 7px 14px;
+            border-radius: 6px;
+            font-weight: 700;
+            font-size: 12px;
+            cursor: pointer;
+            transition: opacity 0.2s;
+        }
+
+        .upload-bar button:hover {
+            opacity: 0.9;
+        }
+
+        /* Stages Strip */
         .stages {
             display: grid;
             grid-template-columns: repeat(6, 1fr);
-            gap: 8px;
-            margin: 18px 0
+            gap: 10px;
+            margin-bottom: 20px;
         }
 
         .stage {
-            background: #121d34;
-            border: 1px solid #273755;
-            border-radius: 9px;
-            padding: 10px;
-            min-height: 55px
+            background: var(--card-bg);
+            border: 1px solid var(--card-border);
+            border-radius: 10px;
+            padding: 10px 12px;
+            min-height: 60px;
+            transition: border-color 0.2s;
         }
 
         .stage b {
             display: block;
-            font-size: 10px;
+            font-size: 11px;
             text-transform: uppercase;
-            color: #8ea5d6
+            color: #8ea5d6;
+            letter-spacing: 0.05em;
+            margin-bottom: 4px;
         }
 
         .stage span {
-            font-size: 11px;
-            color: #aebcdf
+            font-size: 12px;
+            color: #cbd5e1;
+            font-weight: 500;
         }
 
         .stage[data-state=ready],
         .stage[data-state=receiving],
         .stage[data-state=streaming],
         .stage[data-state=transcribing] {
-            border-color: #38c98a
+            border-color: #10b981;
+            background: rgba(16, 185, 129, 0.05);
         }
 
         .stage[data-state=connecting],
         .stage[data-state=generating] {
-            border-color: #e6b84f
+            border-color: #f59e0b;
+            background: rgba(245, 158, 11, 0.05);
         }
 
         .stage[data-state=error] {
-            border-color: #ff637a
+            border-color: #ef4444;
+            background: rgba(239, 68, 68, 0.05);
         }
 
+        /* Main Workspace Grid */
         .grid {
             display: grid;
-            grid-template-columns: 1fr 1fr;
-            gap: 16px
+            grid-template-columns: 1fr 1.2fr;
+            gap: 18px;
+            margin-bottom: 20px;
         }
 
         section {
-            background: #101a30;
-            border: 1px solid #283957;
-            border-radius: 12px;
-            min-height: 340px;
-            padding: 17px
+            background: var(--card-bg);
+            border: 1px solid var(--card-border);
+            border-radius: 14px;
+            min-height: 420px;
+            padding: 20px;
+            display: flex;
+            flex-direction: column;
+        }
+
+        .section-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 16px;
+            padding-bottom: 12px;
+            border-bottom: 1px solid rgba(255, 255, 255, 0.06);
         }
 
         h2 {
             font-size: 13px;
             letter-spacing: .08em;
             text-transform: uppercase;
-            color: #91a8dc;
-            margin: 0 0 12px
+            color: #93c5fd;
+            margin: 0;
+            font-weight: 700;
+        }
+
+        .lens-badge {
+            background: rgba(139, 92, 246, 0.18);
+            border: 1px solid rgba(139, 92, 246, 0.4);
+            color: #c4b5fd;
+            padding: 3px 9px;
+            border-radius: 6px;
+            font-size: 11px;
+            font-weight: 700;
+        }
+
+        /* Live Transcript Area */
+        #transcript {
+            flex: 1;
+            overflow-y: auto;
+            max-height: 420px;
+            display: flex;
+            flex-direction: column;
+            gap: 10px;
+            padding-right: 4px;
         }
 
         .turn {
-            padding: 9px 11px;
-            border-radius: 8px;
-            margin: 7px 0
+            padding: 10px 14px;
+            border-radius: 10px;
+            font-size: 14px;
+            line-height: 1.45;
         }
 
-        .client {
-            background: #222e4d
+        .turn.client {
+            background: #182847;
+            border: 1px solid #233c6e;
+            align-self: flex-start;
+            max-width: 90%;
         }
 
-        .salesperson {
-            background: #15372f
+        .turn.salesperson {
+            background: #11382b;
+            border: 1px solid #1c5945;
+            align-self: flex-end;
+            max-width: 90%;
+        }
+
+        .turn .label {
+            font-size: 10px;
+            font-weight: 700;
+            text-transform: uppercase;
+            letter-spacing: 0.05em;
+            margin-bottom: 4px;
+        }
+
+        .turn.client .label {
+            color: #60a5fa;
+        }
+
+        .turn.salesperson .label {
+            color: #34d399;
         }
 
         .interim {
-            opacity: .55
+            opacity: 0.6;
         }
 
-        .label {
-            font-size: 10px;
-            text-transform: uppercase;
-            color: #91a7d5
+        /* Live Teleprompter Recommendation Box */
+        .teleprompter-box {
+            background: #081120;
+            border: 1px solid #21355a;
+            border-radius: 12px;
+            padding: 20px;
+            flex: 1;
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+            position: relative;
         }
 
         .answer {
-            font-size: 20px;
+            font-size: 22px;
+            font-weight: 600;
             line-height: 1.5;
-            white-space: pre-wrap
+            color: #f8fafc;
+            white-space: pre-wrap;
+            transition: color 0.2s;
         }
 
-        .log {
-            margin-top: 14px;
-            background: #080e1a;
-            padding: 11px;
-            border-radius: 8px;
-            font: 12px ui-monospace, monospace;
-            color: #95a7c9;
-            max-height: 135px;
-            overflow: auto
+        .answer.streaming {
+            color: #38bdf8;
+            text-shadow: 0 0 16px rgba(56, 189, 248, 0.3);
         }
 
-        .error {
-            color: #ff8193
+        .metrics-bar {
+            margin-top: 16px;
+            display: flex;
+            flex-wrap: wrap;
+            gap: 8px;
+            align-items: center;
         }
 
-        @media(max-width:850px) {
-            header {
-                align-items: flex-start;
-                flex-direction: column
+        .metric-pill {
+            background: #0f1c33;
+            border: 1px solid #223456;
+            color: #94a3b8;
+            padding: 4px 10px;
+            border-radius: 6px;
+            font-size: 11px;
+            font-family: 'JetBrains Mono', monospace;
+        }
+
+        .metric-pill b {
+            color: #38bdf8;
+        }
+
+        .sources-bar {
+            margin-top: 10px;
+            font-size: 12px;
+            color: #64748b;
+        }
+
+        /* Activity Log Console */
+        .log-panel {
+            background: #070d18;
+            border: 1px solid #1a2742;
+            border-radius: 10px;
+            padding: 12px 16px;
+            font-family: 'JetBrains Mono', monospace;
+            font-size: 12px;
+            color: #8da4c4;
+            max-height: 130px;
+            overflow-y: auto;
+        }
+
+        .log-entry {
+            margin-bottom: 4px;
+        }
+
+        .log-entry.error {
+            color: #f87171;
+        }
+
+        @media (max-width: 960px) {
+            .pre-call-grid {
+                grid-template-columns: 1fr;
             }
-
             .stages {
-                grid-template-columns: repeat(2, 1fr)
+                grid-template-columns: repeat(3, 1fr);
             }
-
             .grid {
-                grid-template-columns: 1fr
+                grid-template-columns: 1fr;
             }
         }
     </style>
 </head>
 
 <body>
+    <!-- Top Navigation Bar -->
+    <nav class="navbar">
+        <div class="brand-group">
+            <span class="brand-badge">PRO</span>
+            <span class="brand-title">PitchProX Sales Copilot</span>
+        </div>
+        <div class="nav-links">
+            <a href="/" class="nav-btn active">📞 Live Calling</a>
+            <a href="/playbook" class="nav-btn">🎯 Playbook Studio</a>
+            <a href="/calibration" class="nav-btn">⚡ Voice Calibration</a>
+        </div>
+    </nav>
+
     <main>
-        <header>
-            <div>
-                <h1>user sales</h1>
-                <div class="sub">Client questions → context recovery → PDF knowledge → streamed answer</div>
+        <!-- Pre-Call Strategy Folder Bar -->
+        <div class="pre-call-bar">
+            <div class="pre-call-header">
+                <div class="folder-title">
+                    <span>📁 Pre-Call Folder Configuration</span>
+                    <span style="font-size: 11px; font-weight: 500; color: #64748b;">(Assembled once before call start)</span>
+                </div>
+                <div class="folder-status-pill" id="folderStatus">
+                    <span class="status-dot"></span>
+                    <span id="folderStatusText">🟢 Pre-Call Folder Active</span>
+                </div>
             </div>
-            <form class="upload" id="upload"><input id="pdf" name="file" type="file" accept=".pdf,.docx,.doc,.txt,.md,.csv,.xlsx,.xls,.png,.jpg,.jpeg,.mp4,.webm,.wav,.mp3" required><button>Upload
-                    File</button><span class="meta" id="uploadStatus"></span></form>
-        </header>
+
+            <div class="pre-call-grid">
+                <!-- 1. Lead Type Selector (16 Standardized Types) -->
+                <div class="input-group">
+                    <label class="input-label" for="leadTypeSelect">1. Prospect Lead Type</label>
+                    <select id="leadTypeSelect" class="select-input">
+                        <option value="Expired Listings" selected>Expired Listings — Recently expired without selling</option>
+                        <option value="Pre-Expired Listings">Pre-Expired Listings — Approaching expiration date</option>
+                        <option value="FSBO (For Sale By Owner)">FSBO (For Sale By Owner) — Selling without an agent</option>
+                        <option value="Absentee Owners">Absentee Owners — Non-occupant / landlord owners</option>
+                        <option value="Circle Prospecting">Circle Prospecting — Surrounding active/sold listings</option>
+                        <option value="Just Listed">Just Listed — Prospecting nearby newly listed home</option>
+                        <option value="Just Sold">Just Sold — Prospecting around recently sold record</option>
+                        <option value="Probate">Probate — Estates and probate administration</option>
+                        <option value="Trust & Estate">Trust & Estate — Trust-owned and asset planning</option>
+                        <option value="Pre-Foreclosure">Pre-Foreclosure — Mortgage distress / pre-auction</option>
+                        <option value="Foreclosure / REO">Foreclosure / REO — Bank-owned distress assets</option>
+                        <option value="Divorce">Divorce — Property division in legal proceedings</option>
+                        <option value="Tax Delinquent">Tax Delinquent — Delinquent municipal tax obligations</option>
+                        <option value="Vacant Properties">Vacant Properties — Distressed or unoccupied homes</option>
+                        <option value="Investor (Flip / Buy & Hold)">Investor (Flip / Buy & Hold) — Real estate investors</option>
+                        <option value="Downsizing / Relocation">Downsizing / Relocation — Life-stage transitions</option>
+                    </select>
+                </div>
+
+                <!-- 2. Active Playbook Selector -->
+                <div class="input-group">
+                    <label class="input-label" for="playbookSelect">2. Methodology Lens (Playbook)</label>
+                    <select id="playbookSelect" class="select-input">
+                        <option value="pitchprox_standard">PitchProX Standard Methodology (Default Lens)</option>
+                    </select>
+                </div>
+
+                <!-- 3. Salesperson Calibration Badge -->
+                <div class="input-group">
+                    <label class="input-label">3. Sales Rep Calibration</label>
+                    <div class="calib-badge-box">
+                        <div class="calib-info" id="calibProfileText">⚡ 142 WPM · Confident & Assertive</div>
+                        <a href="/calibration" class="calib-link">Recalibrate ↗</a>
+                    </div>
+                </div>
+
+                <!-- Action / Sync Trigger -->
+                <button class="btn-sync" id="btnSyncFolder" title="Re-initialize pre-call cache folder">
+                    <span>⚡ Ready Call</span>
+                </button>
+            </div>
+        </div>
+
+        <!-- Document Ingestion & Meta Strip -->
+        <div class="sub-header">
+            <div>
+                <div style="font-size: 13px; color: #94a3b8;">
+                    Active Session: <span id="activeCallSid" style="font-family: monospace; color: #60a5fa;">default</span>
+                </div>
+            </div>
+            <form class="upload-bar" id="upload">
+                <input id="pdf" name="file" type="file" accept=".pdf,.docx,.doc,.txt,.md,.csv,.xlsx,.xls,.png,.jpg,.jpeg,.mp4,.webm,.wav,.mp3" required>
+                <button type="submit">Upload Knowledge</button>
+                <span style="font-size: 12px; color: #94a3b8;" id="uploadStatus"></span>
+            </form>
+        </div>
+
+        <!-- Stages Pipeline -->
         <div class="stages">
             <div class="stage" id="twilio"><b>Twilio</b><span>Waiting</span></div>
             <div class="stage" id="audio_salesperson"><b>Sales audio</b><span>Waiting</span></div>
             <div class="stage" id="audio_client"><b>Client audio</b><span>Waiting</span></div>
             <div class="stage" id="stt_salesperson"><b>Sales STT</b><span>Waiting</span></div>
             <div class="stage" id="stt_client"><b>Client STT</b><span>Waiting</span></div>
-            <div class="stage" id="llm"><b>AI answer</b><span>Waiting</span></div>
+            <div class="stage" id="llm"><b>AI Copilot</b><span>Waiting</span></div>
         </div>
+
+        <!-- Live Interaction Workspace -->
         <div class="grid">
+            <!-- Left: Transcript -->
             <section>
-                <h2>Live transcript</h2>
+                <div class="section-header">
+                    <h2>Live Transcript Stream</h2>
+                    <span style="font-size: 11px; color: #64748b;">Deepgram Nova-3</span>
+                </div>
                 <div id="transcript"></div>
             </section>
+
+            <!-- Right: Recommended Response Teleprompter -->
             <section>
-                <h2>Recommended response</h2>
-                <div class="answer" id="answer">Waiting for client speech…</div>
-                <div class="meta" id="sources"></div>
-                <div class="meta" id="metrics"></div>
+                <div class="section-header">
+                    <h2>Live Teleprompter Response</h2>
+                    <span class="lens-badge" id="activeLensBadge">Methodology: Standard Lens</span>
+                </div>
+                <div class="teleprompter-box">
+                    <div class="answer" id="answer">Waiting for prospect to speak…</div>
+                </div>
+                <div class="metrics-bar" id="metricsBar">
+                    <div class="metric-pill">Pinecone RAG: <b id="mRAG">—</b></div>
+                    <div class="metric-pill">Groq TTFT: <b id="mTTFT">—</b></div>
+                    <div class="metric-pill">Pipeline: <b id="mTotal">—</b></div>
+                </div>
+                <div class="sources-bar" id="sources">Company Knowledge: General Sales Knowledge</div>
             </section>
         </div>
-        <div class="log" id="log"></div>
+
+        <!-- Activity Console -->
+        <div class="log-panel" id="log"></div>
     </main>
+
     <script>
         const transcript = document.querySelector('#transcript');
         const answer = document.querySelector('#answer');
         const sources = document.querySelector('#sources');
-        const metrics = document.querySelector('#metrics');
         const log = document.querySelector('#log');
         const upload = document.querySelector('#upload');
         const pdf = document.querySelector('#pdf');
         const uploadStatus = document.querySelector('#uploadStatus');
+        const leadTypeSelect = document.querySelector('#leadTypeSelect');
+        const playbookSelect = document.querySelector('#playbookSelect');
+        const calibProfileText = document.querySelector('#calibProfileText');
+        const folderStatusText = document.querySelector('#folderStatusText');
+        const activeLensBadge = document.querySelector('#activeLensBadge');
+        const activeCallSidSpan = document.querySelector('#activeCallSid');
+        const btnSyncFolder = document.querySelector('#btnSyncFolder');
+        const mRAG = document.querySelector('#mRAG');
+        const mTTFT = document.querySelector('#mTTFT');
+        const mTotal = document.querySelector('#mTotal');
 
-        let current = null;
-        let interim = {};
+        let currentSuggestionId = null;
+        let interimNodes = {};
+        let activeCallSid = 'default';
 
         function note(text, bad = false) {
             const line = document.createElement('div');
-            line.textContent = `${new Date().toLocaleTimeString()}  ${text}`;
-            if (bad) line.className = 'error';
+            line.className = `log-entry ${bad ? 'error' : ''}`;
+            line.textContent = `[${new Date().toLocaleTimeString()}] ${text}`;
             log.appendChild(line);
             log.scrollTop = log.scrollHeight;
         }
@@ -252,103 +710,138 @@
         function stage(name, state, detail) {
             const box = document.getElementById(name);
             if (!box) return;
-
             box.dataset.state = state;
             box.querySelector('span').textContent = detail || state;
-            note(`${name}: ${state}${detail ? ' — ' + detail : ''}`, state === 'error');
+            if (state === 'error') {
+                note(`${name} error: ${detail || state}`, true);
+            }
         }
 
         function turn(role, text, final) {
-            let node = interim[role];
+            let node = interimNodes[role];
             if (!node) {
                 node = document.createElement('div');
                 node.className = `turn ${role} interim`;
-                node.innerHTML = '<div class="label"></div><div class="text"></div>';
+                node.innerHTML = `<div class="label">${role === 'salesperson' ? '👤 Rep (You)' : '🎯 Prospect'}</div><div class="text"></div>`;
                 transcript.appendChild(node);
-                interim[role] = node;
+                interimNodes[role] = node;
             }
 
-            node.querySelector('.label').textContent = role;
             node.querySelector('.text').textContent = text;
+            transcript.scrollTop = transcript.scrollHeight;
 
             if (final) {
                 node.classList.remove('interim');
-                delete interim[role];
+                delete interimNodes[role];
             }
         }
 
+        // Initialize Pre-Call Folder via Backend
+        async function syncPreCallFolder() {
+            try {
+                const formData = new FormData();
+                formData.append('call_sid', activeCallSid);
+                formData.append('lead_type', leadTypeSelect.value);
+                if (playbookSelect.value && playbookSelect.value !== 'pitchprox_standard') {
+                    formData.append('playbook_id', playbookSelect.value);
+                }
+
+                const res = await fetch('/api/call/init-folder', {
+                    method: 'POST',
+                    body: formData,
+                });
+
+                if (res.ok) {
+                    const data = await res.json();
+                    folderStatusText.textContent = `🟢 Pre-Call Folder Active (${data.lead_type})`;
+                    activeLensBadge.textContent = `Methodology: ${data.playbook_title}`;
+                    note(`Pre-call folder synced: [Lead: ${data.lead_type}] [Playbook: ${data.playbook_title}]`);
+                }
+            } catch (err) {
+                note(`Failed to sync pre-call folder: ${err.message}`, true);
+            }
+        }
+
+        // Fetch Playbooks List for Dropdown
+        async function loadPlaybooks() {
+            try {
+                const res = await fetch('/api/playbook/list');
+                if (res.ok) {
+                    const data = await res.json();
+                    if (data.playbooks && data.playbooks.length > 0) {
+                        playbookSelect.innerHTML = '<option value="pitchprox_standard">PitchProX Standard Methodology (Default Lens)</option>';
+                        data.playbooks.forEach(pb => {
+                            const opt = document.createElement('option');
+                            opt.value = pb.id;
+                            opt.textContent = `${pb.title} (Custom Lens · ${pb.quality_score}/100)`;
+                            playbookSelect.appendChild(opt);
+                        });
+                    }
+                }
+            } catch (err) {
+                console.warn('Playbooks list fetch error:', err);
+            }
+        }
+
+        // Fetch Latest Calibration Profile
+        async function loadCalibration() {
+            try {
+                const res = await fetch('/api/calibration/latest');
+                if (res.ok) {
+                    const data = await res.json();
+                    if (data.report) {
+                        const rep = data.report;
+                        const wpm = rep.wpm || 142;
+                        const tone = rep.tone || 'Assertive & Direct';
+                        calibProfileText.textContent = `⚡ ${wpm} WPM · ${tone}`;
+                    } else if (data.wpm) {
+                        calibProfileText.textContent = `⚡ ${data.wpm} WPM · ${data.tone}`;
+                    }
+                }
+            } catch (err) {
+                console.warn('Calibration fetch error:', err);
+            }
+        }
+
+        // Event Listeners for Pre-Call controls
+        leadTypeSelect.addEventListener('change', syncPreCallFolder);
+        playbookSelect.addEventListener('change', syncPreCallFolder);
+        btnSyncFolder.addEventListener('click', syncPreCallFolder);
+
+        // Document Upload
         upload.onsubmit = async event => {
             event.preventDefault();
-
             const file = pdf.files[0];
             if (!file) {
                 uploadStatus.textContent = 'Please choose a file';
                 return;
             }
-            if (file.size === 0) {
-                uploadStatus.textContent = 'Selected file is empty';
-                note(`File is empty: ${file.name}`, true);
-                return;
-            }
-
             uploadStatus.textContent = 'Uploading...';
-
             const body = new FormData();
             body.append('file', file);
             body.append('target', 'sales');
             body.append('tenant_id', 'default');
 
-            console.log('Uploading file', { name: file.name, size: file.size });
-
             try {
                 const response = await fetch('/knowledge/upload', { method: 'POST', body });
-                const result = response.headers.get('content-type')?.includes('json')
-                    ? await response.json()
-                    : { message: await response.text() };
-
-                if (!response.ok) throw new Error(result.message || result);
-
-                const docId = result.doc_id;
-                note(`Upload accepted. Ingestion job started: ${docId}`);
-                pollIngestionStatus(docId);
+                const result = await response.json();
+                if (!response.ok) throw new Error(result.message || 'Upload failed');
+                uploadStatus.textContent = 'Uploaded & processing';
+                note(`Knowledge document uploaded: ${file.name}`);
             } catch (error) {
                 uploadStatus.textContent = 'Upload failed';
                 note(error.message, true);
             }
         };
 
-        function pollIngestionStatus(docId) {
-            const interval = setInterval(async () => {
-                try {
-                    const response = await fetch(`/knowledge/status/${docId}`);
-                    if (!response.ok) {
-                        throw new Error(`Failed to check status: ${response.statusText}`);
-                    }
-                    const job = await response.json();
-                    
-                    if (job.status === 'completed') {
-                        clearInterval(interval);
-                        uploadStatus.textContent = `Completed! ${job.pages} pages · ${job.chunks_total} chunks indexed`;
-                        note(`PDF successfully processed and indexed: ${job.filename}`);
-                    } else if (job.status === 'failed') {
-                        clearInterval(interval);
-                        uploadStatus.textContent = 'Processing failed';
-                        note(`Processing failed for ${job.filename}: ${job.error}`, true);
-                    } else {
-                        uploadStatus.textContent = `Processing: ${job.progress}% (${job.chunks_uploaded}/${job.chunks_total} chunks)`;
-                    }
-                } catch (error) {
-                    clearInterval(interval);
-                    uploadStatus.textContent = 'Error checking status';
-                    note(error.message, true);
-                }
-            }, 1000);
-        }
-
+        // Live WebSocket Teleprompter Connection
         function connect() {
             const ws = new WebSocket(`${location.protocol === 'https:' ? 'wss' : 'ws'}://${location.host}/events`);
 
-            ws.onopen = () => note('Dashboard connected');
+            ws.onopen = () => {
+                note('Teleprompter event stream connected');
+                syncPreCallFolder();
+            };
 
             ws.onmessage = ({ data }) => {
                 const e = JSON.parse(data);
@@ -359,39 +852,49 @@
                 } else if (e.type === 'status') {
                     note(d.message);
                 } else if (e.type === 'call_start') {
-                    transcript.textContent = '';
-                    note(`Call started: ${d.call_sid}`);
+                    activeCallSid = d.call_sid;
+                    activeCallSidSpan.textContent = activeCallSid;
+                    transcript.innerHTML = '';
+                    answer.textContent = 'Call connected. Listening for prospect…';
+                    answer.classList.remove('streaming');
+                    syncPreCallFolder();
+                    note(`Call started: ${activeCallSid}`);
                 } else if (e.type === 'transcript') {
                     turn(d.role, d.text, d.final);
                 } else if (e.type === 'suggestion_start') {
-                    current = d.id;
+                    currentSuggestionId = d.id;
                     answer.textContent = '';
-                    sources.textContent = d.sources.length ? 'Sources: ' + d.sources.join(', ') : 'Answering from general model knowledge';
-                    metrics.textContent = 'Question: ' + d.question;
-                } else if (e.type === 'suggestion_delta' && d.id === current) {
+                    answer.classList.add('streaming');
+                    sources.textContent = d.sources.length ? 'Sources: ' + d.sources.join(', ') : 'Applied: Active Playbook Methodology';
+                    mRAG.textContent = 'Searching...';
+                    mTTFT.textContent = 'Streaming...';
+                } else if (e.type === 'suggestion_delta' && d.id === currentSuggestionId) {
                     answer.textContent += d.text;
-                } else if (e.type === 'suggestion_end' && d.id === current) {
+                } else if (e.type === 'suggestion_end' && d.id === currentSuggestionId) {
+                    answer.classList.remove('streaming');
                     if (d.metrics) {
                         const m = d.metrics;
-                        metrics.textContent += ` · Pinecone: ${m.retrieval_ms}ms · LLM TTFT: ${m.llm_ttft_ms}ms · Gen: ${m.llm_generation_ms}ms · Total pipeline: ${m.pipeline_latency_total_ms}ms`;
-                    } else {
-                        metrics.textContent += ` · TTFT ${d.ttft_ms ?? 'n/a'} ms · total ${d.total_ms} ms`;
+                        mRAG.textContent = `${m.retrieval_ms}ms`;
+                        mTTFT.textContent = `${m.llm_ttft_ms}ms`;
+                        mTotal.textContent = `${m.pipeline_latency_total_ms}ms`;
                     }
-                } else if (e.type === 'knowledge_uploaded') {
-                    note(`PDF ready: ${d.name}, ${d.pages} pages`);
                 } else if (e.type === 'call_end') {
-                    note(`Call ended; dropped audio ${d.dropped_audio_chunks}`);
+                    note(`Call ended. Transcripts archived.`);
+                    answer.textContent = 'Call finished.';
                 } else if (e.type === 'error') {
                     note(d.message, true);
                 }
             };
 
             ws.onclose = () => {
-                note('Dashboard disconnected', true);
-                setTimeout(connect, 1200);
+                note('Event stream disconnected. Reconnecting...', true);
+                setTimeout(connect, 1500);
             };
         }
 
+        // Initialize on load
+        loadPlaybooks();
+        loadCalibration();
         connect();
     </script>
 </body>

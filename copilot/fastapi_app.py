@@ -285,8 +285,9 @@ class FastAPICopilot:
         owner_id: Optional[str] = None,
         stt_received_time: Optional[float] = None,
     ) -> None:
-        """Retrieve context and stream Groq recommendation with detailed stage timings."""
+        """Retrieve context and stream Groq recommendation with detailed stage timings using Pre-Call Folder."""
         from .context_recovery import recover_query
+        from .call_folder import get_or_create_pre_call_folder
 
         if stt_received_time is None:
             stt_received_time = monotonic()
@@ -311,28 +312,44 @@ class FastAPICopilot:
         greetings = {"hello", "hi", "hey", "test", "ok", "okay", "yes", "no", "bye", "goodbye"}
         is_greeting = all(w in greetings for w in words)
 
-        if is_greeting or len(words) <= 1:
-            # Bypass RAG lookup for simple greetings and conversational filler
-            evidence = ""
-            sources = []
-        elif self.rag_retriever:
-            context_list = self.rag_retriever.get_context(
-                query=reconstructed,
-                tenant_id=tenant_id,
-                top_k=self.settings.rag.search_top_k,
-                min_score=self.settings.rag.min_score_threshold,
-                scope=scope,
-                owner_id=owner_id,
-            )
-            evidence = "\n\n".join(context_list)
-            sources = []
-            for item in context_list:
-                if "From " in item and ":\n" in item:
-                    sources.append(item.split(":\n")[0].replace("From ", ""))
-        else:
-            matched = self.knowledge.search(reconstructed, limit=3, tenant_id=tenant_id)
-            evidence = "\n\n".join(f"[{item.source}]\n{item.text}" for item in matched)
-            sources = [item.source for item in matched]
+        # Parallel Execution: RAG retrieval running concurrently with folder fetching
+        async def fetch_rag_evidence() -> tuple[str, list[str]]:
+            if is_greeting or len(words) <= 1:
+                return "", []
+            if self.rag_retriever:
+                try:
+                    context_list = await asyncio.to_thread(
+                        self.rag_retriever.get_context,
+                        query=reconstructed,
+                        tenant_id=tenant_id,
+                        top_k=self.settings.rag.search_top_k,
+                        min_score=self.settings.rag.min_score_threshold,
+                        scope=scope,
+                        owner_id=owner_id,
+                    )
+                    evidence_text = "\n\n".join(context_list)
+                    srcs = []
+                    for item in context_list:
+                        if "From " in item and ":\n" in item:
+                            srcs.append(item.split(":\n")[0].replace("From ", ""))
+                    return evidence_text, srcs
+                except Exception as e:
+                    LOGGER.warning("RAG retrieval error: %s", e)
+                    return "", []
+            else:
+                try:
+                    matched = await asyncio.to_thread(self.knowledge.search, reconstructed, limit=3, tenant_id=tenant_id)
+                    evidence_text = "\n\n".join(f"[{item.source}]\n{item.text}" for item in matched)
+                    srcs = [item.source for item in matched]
+                    return evidence_text, srcs
+                except Exception as e:
+                    LOGGER.warning("Local knowledge retrieval error: %s", e)
+                    return "", []
+
+        (evidence, sources), folder = await asyncio.gather(
+            fetch_rag_evidence(),
+            asyncio.to_thread(get_or_create_pre_call_folder, call_sid, None, None, owner_id),
+        )
 
         retrieval_completed_time = monotonic()
 
@@ -343,8 +360,17 @@ class FastAPICopilot:
                 "call_sid": call_sid,
                 "question": reconstructed,
                 "sources": sources,
+                "lead_type": folder.lead_type,
+                "playbook_title": folder.playbook_title,
             }
         }, call_sid=call_sid)
+
+        # Build the unified single prompt combining Pre-Call Folder + Conversation History + Verified Facts
+        llm_messages = folder.assemble_prompt(
+            conversation_context=context[-self.settings.transcript_window:],
+            current_utterance=reconstructed,
+            rag_evidence=evidence,
+        )
 
         queue: asyncio.Queue[str | None | Exception] = asyncio.Queue()
         loop = asyncio.get_running_loop()
@@ -353,22 +379,7 @@ class FastAPICopilot:
             try:
                 stream = self.groq.chat.completions.create(
                     model=self.settings.llm_model,
-                    messages=[
-                        {"role": "system", "content": (
-                            "You are a live sales copilot helping the salesperson answer the client. "
-                            "Return at most three concise, conversational sentences with the recommended response only. "
-                            "Answer directly in the first person as the salesperson (using 'I' or 'We'). Output ONLY the exact words the salesperson should repeat to the client. "
-                            "Do not include any meta-advice, conversational filler, or introductory phrases like 'You can say:', 'I recommend:', or 'Tell the client'."
-                            "Use supplied knowledge whenever it matches the question. "
-                            "If the knowledge contains a relevant fact, do not say you have no information. "
-                            "If the supplied knowledge does not contain the answer or is empty, use your general knowledge to answer the client's query professionally and politely."
-                        )},
-                        *context[-self.settings.transcript_window:],
-                        {
-                            "role": "user",
-                            "content": f"Client is asking: {reconstructed}\n\nKnowledge:\n{evidence or 'No matching local knowledge.'}"
-                        },
-                    ],
+                    messages=llm_messages,
                     temperature=0.2,
                     max_completion_tokens=1024,
                     stream=True,
@@ -382,6 +393,7 @@ class FastAPICopilot:
                 loop.call_soon_threadsafe(queue.put_nowait, exc)
 
         asyncio.create_task(asyncio.to_thread(generate))
+
         first_token_time = None
         full_suggestion = ""
         while True:
@@ -472,6 +484,20 @@ class FastAPICopilot:
             if not dashboard_file.exists():
                 raise HTTPException(status_code=404, detail="Dashboard file not found")
             return FileResponse(dashboard_file)
+
+        @app.get("/fast")
+        async def fast_dashboard():
+            fast_file = STATIC / "twilio_fast.html"
+            if not fast_file.exists():
+                raise HTTPException(status_code=404, detail="Fast dashboard file not found")
+            return FileResponse(fast_file)
+
+        @app.get("/calibration")
+        async def calibration_dashboard():
+            calib_file = STATIC / "calibration.html"
+            if not calib_file.exists():
+                raise HTTPException(status_code=404, detail="Calibration UI file not found")
+            return FileResponse(calib_file)
 
         @app.get("/health")
         async def health():
@@ -955,7 +981,52 @@ class FastAPICopilot:
                     "pinecone_indexes": [self.settings.rag.pinecone_index_name],
                 }
 
+        # Mount Playbook & Calibration Routers and Pre-Call Folder endpoints
+        from .playbook import get_playbook_router
+        from .calibration import get_calibration_router
+        from .call_folder import build_pre_call_folder, CALL_FOLDERS
+
+        app.include_router(get_playbook_router())
+        app.include_router(get_calibration_router())
+
+        @app.post("/api/call/init-folder")
+        async def init_call_folder(
+            call_sid: str = Form(...),
+            lead_type: Optional[str] = Form("Expired Listings"),
+            playbook_id: Optional[str] = Form(None),
+            salesman_id: Optional[str] = Form(None),
+        ):
+            folder = build_pre_call_folder(
+                call_sid=call_sid,
+                lead_type=lead_type,
+                playbook_id=playbook_id,
+                salesman_id=salesman_id,
+            )
+            return {
+                "status": "success",
+                "call_sid": call_sid,
+                "lead_type": folder.lead_type,
+                "lead_type_desc": folder.lead_type_desc,
+                "playbook_title": folder.playbook_title,
+                "calibration_summary": folder.calibration_summary_text,
+            }
+
+        @app.get("/api/call/folder/{call_sid}")
+        async def get_call_folder_info(call_sid: str):
+            folder = CALL_FOLDERS.get(call_sid)
+            if not folder:
+                raise HTTPException(status_code=404, detail=f"Call folder not found for {call_sid}")
+            return {
+                "call_sid": folder.call_sid,
+                "lead_type": folder.lead_type,
+                "lead_type_desc": folder.lead_type_desc,
+                "playbook_id": folder.playbook_id,
+                "playbook_title": folder.playbook_title,
+                "calibration_summary": folder.calibration_summary_text,
+            }
+
         return app
+
 
 
 # Module-level instance creation

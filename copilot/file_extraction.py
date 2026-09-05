@@ -10,7 +10,10 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Optional
 
-import fitz  # PyMuPDF for PDFs
+try:
+    import fitz  # PyMuPDF for PDFs
+except Exception:
+    fitz = None
 
 
 @dataclass(frozen=True)
@@ -83,6 +86,8 @@ class FileExtractor:
     @staticmethod
     def _extract_pdf(file_path: Path, content: bytes) -> ExtractedContent:
         """Extract text from PDF using PyMuPDF."""
+        if fitz is None:
+            raise ValueError("PyMuPDF (fitz) is not available on this environment.")
         text_parts = []
         metadata_dict = {}
         
