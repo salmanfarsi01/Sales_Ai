@@ -1,12 +1,13 @@
 """Unit & Pipeline Integration Test Suite for Pre-Call Folder & Parallel Calling Architecture.
 
 Tests:
-1. Pre-Call Folder Initialization and In-Memory Caching (call_folder.py)
-2. All 16 Standardized Lead Types Resolution
-3. Custom Playbook Methodology Lens Integration
-4. Zero-Allocation Prompt Assembly Structure (<25 words rule, labeled sections)
-5. FastAPI Endpoints (/api/call/init-folder, /api/call/folder/{sid}, /api/calibration/latest)
-6. Parallel Concurrency Pipeline Simulation (asyncio.gather for RAG + transcript logging)
+1. Core Intelligence Engine Permanency & 4-Step Diagnostic Reasoning Pattern
+2. Pre-Call Folder Initialization and In-Memory Caching (call_folder.py)
+3. All 16 Standardized Lead Types Resolution
+4. Custom Playbook Methodology Lens Integration
+5. Zero-Allocation Prompt Assembly Structure (<25 words rule, labeled sections, hierarchy ordering)
+6. FastAPI Endpoints (/api/call/init-folder, /api/call/folder/{sid}, /api/calibration/latest)
+7. Parallel Concurrency Pipeline Simulation (asyncio.gather for RAG + transcript logging)
 """
 
 import asyncio
@@ -18,6 +19,7 @@ from copilot.call_folder import (
     PreCallFolder,
     build_pre_call_folder,
     get_or_create_pre_call_folder,
+    CORE_INTELLIGENCE_INSTRUCTION,
     CALL_FOLDERS,
 )
 from copilot.playbook import (
@@ -38,6 +40,50 @@ def clean_call_folders():
     CALL_FOLDERS.clear()
     yield
     CALL_FOLDERS.clear()
+
+
+def test_core_intelligence_engine_permanent_and_unconditional():
+    """Verify that Core Intelligence Engine is permanently at the top of the prompt on every turn."""
+    # 1. Build bare minimal folder with default settings (no custom playbook, no custom training)
+    folder = build_pre_call_folder(call_sid="call_core_test_1", lead_type="Expired Listings")
+    
+    assert folder.core_engine_name == "PitchProX Core Intelligence (Permanent)"
+    
+    messages = folder.assemble_prompt(
+        conversation_context=[],
+        current_utterance="Why are you calling me?",
+        rag_evidence="",
+    )
+
+    system_prompt = messages[0]["content"]
+
+    # Verify Core Intelligence Header
+    assert "=== [CORE INTELLIGENCE — ALWAYS ACTIVE] ===" in system_prompt
+
+    # Verify the 4-Step Core Diagnostic Reasoning Pattern
+    assert "1. Identify literally what the prospect just said." in system_prompt
+    assert "2. Determine the underlying concern or intent behind it" in system_prompt
+    assert "3. Decide the single best strategic move available right now" in system_prompt
+    assert "4. Produce ONE exact sentence the rep should say" in system_prompt
+
+    # Verify Guardrails
+    assert "Never become defensive" in system_prompt
+    assert "Never simply list facts in response to a challenge" in system_prompt
+    assert "Always ground the move in what would actually move this specific conversation forward" in system_prompt
+
+    # Verify Core instruction is placed FIRST (before Lead Type, Playbook, Calibration)
+    core_idx = system_prompt.find("[CORE INTELLIGENCE — ALWAYS ACTIVE]")
+    lead_idx = system_prompt.find("[LEAD TYPE: Expired Listings]")
+    playbook_idx = system_prompt.find("ACTIVE PLAYBOOK METHODOLOGY LENS")
+    calib_idx = system_prompt.find("[CALIBRATION PROFILE]")
+
+    assert core_idx != -1
+    assert lead_idx != -1
+    assert playbook_idx != -1
+    assert calib_idx != -1
+
+    # Strict Hierarchy Ordering: Core (1st) -> Lead Type (2nd) -> Playbook (3rd) -> Calibration (4th)
+    assert core_idx < lead_idx < playbook_idx < calib_idx
 
 
 def test_all_16_standardized_lead_types_valid():
@@ -72,6 +118,7 @@ def test_pre_call_folder_creation_and_caching():
     assert "ACTIVE PLAYBOOK METHODOLOGY LENS" in folder.playbook_prompt_lens
     assert "WPM" in folder.calibration_summary_text
     assert folder.salesman_id == "agent_alpha"
+    assert "Core Intelligence" in folder.core_engine_name
 
     # Verify cached in memory
     assert call_sid in CALL_FOLDERS
@@ -80,7 +127,7 @@ def test_pre_call_folder_creation_and_caching():
 
 
 def test_pre_call_folder_with_custom_playbook(tmp_path):
-    """Verify pre-call folder incorporates custom playbook rules and objection matrix."""
+    """Verify pre-call folder incorporates custom playbook rules without modifying permanent Core logic."""
     store = PlaybookStore(storage_dir=tmp_path / "playbooks")
     custom_pb = Playbook(
         title="The Closer Lens",
@@ -130,9 +177,13 @@ def test_pre_call_folder_with_custom_playbook(tmp_path):
     assert "Energy=High" in folder.playbook_prompt_lens
     assert "save equity" in folder.playbook_prompt_lens
 
+    # Ensure Core Engine is still at the top
+    messages = folder.assemble_prompt([], "I'll do it on my own.")
+    assert "=== [CORE INTELLIGENCE — ALWAYS ACTIVE] ===" in messages[0]["content"]
+
 
 def test_prompt_assembly_structure():
-    """Verify assemble_prompt constructs exact required message sequence."""
+    """Verify assemble_prompt constructs exact required message sequence with Core Brain, transcript, and RAG."""
     folder = build_pre_call_folder(
         call_sid="call_prompt_test",
         lead_type="Probate",
@@ -151,10 +202,10 @@ def test_prompt_assembly_structure():
         rag_evidence=rag_evidence,
     )
 
-    # 1. System instruction
+    # 1. System instruction with Core Engine first
     assert len(messages) == 4  # system + 2 history turns + 1 current prompt turn
     assert messages[0]["role"] == "system"
-    assert "=== 1. [PRE-CALL FOLDER: IMMUTABLE BASELINE] ===" in messages[0]["content"]
+    assert "=== [CORE INTELLIGENCE — ALWAYS ACTIVE] ===" in messages[0]["content"]
     assert "Probate" in messages[0]["content"]
 
     # 2. History turns
@@ -163,15 +214,16 @@ def test_prompt_assembly_structure():
     assert messages[2]["role"] == "assistant"
     assert messages[2]["content"] == "Hi there, I noticed the probate filing on Elm Street."
 
-    # 3. Final Turn with RAG
+    # 3. Final Turn with RAG & Core execution directive
     assert messages[3]["role"] == "user"
-    assert "Client just said: \"We're not interested in selling right now, thanks.\"" in messages[3]["content"]
-    assert "[VERIFIED COMPANY KNOWLEDGE]:" in messages[3]["content"]
+    assert "Prospect just said: \"We're not interested in selling right now, thanks.\"" in messages[3]["content"]
+    assert "[AI TRAINING / COMPANY KNOWLEDGE]:" in messages[3]["content"]
     assert "30-day no-commission consultation" in messages[3]["content"]
+    assert "Core Reasoning & Response:" in messages[3]["content"]
 
 
 def test_api_init_call_folder_and_get_folder():
-    """Verify POST /api/call/init-folder and GET /api/call/folder/{call_sid} endpoints."""
+    """Verify POST /api/call/init-folder and GET /api/call/folder/{call_sid} endpoints include Core Engine."""
     client = TestClient(app)
 
     # 1. POST init-folder
@@ -183,6 +235,7 @@ def test_api_init_call_folder_and_get_folder():
     data = res.json()
     assert data["status"] == "success"
     assert data["call_sid"] == "api_call_sid_777"
+    assert "Core Intelligence" in data["core_engine"]
     assert data["lead_type"] == "Pre-Foreclosure"
     assert "distress" in data["lead_type_desc"].lower()
 
@@ -191,6 +244,7 @@ def test_api_init_call_folder_and_get_folder():
     assert res_get.status_code == 200
     folder_data = res_get.json()
     assert folder_data["call_sid"] == "api_call_sid_777"
+    assert "Core Intelligence" in folder_data["core_engine"]
     assert folder_data["lead_type"] == "Pre-Foreclosure"
 
 

@@ -360,6 +360,7 @@ class FastAPICopilot:
                 "call_sid": call_sid,
                 "question": reconstructed,
                 "sources": sources,
+                "core_engine": folder.core_engine_name,
                 "lead_type": folder.lead_type,
                 "playbook_title": folder.playbook_title,
             }
@@ -1005,6 +1006,7 @@ class FastAPICopilot:
             return {
                 "status": "success",
                 "call_sid": call_sid,
+                "core_engine": folder.core_engine_name,
                 "lead_type": folder.lead_type,
                 "lead_type_desc": folder.lead_type_desc,
                 "playbook_title": folder.playbook_title,
@@ -1018,6 +1020,7 @@ class FastAPICopilot:
                 raise HTTPException(status_code=404, detail=f"Call folder not found for {call_sid}")
             return {
                 "call_sid": folder.call_sid,
+                "core_engine": folder.core_engine_name,
                 "lead_type": folder.lead_type,
                 "lead_type_desc": folder.lead_type_desc,
                 "playbook_id": folder.playbook_id,

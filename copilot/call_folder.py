@@ -1,6 +1,7 @@
 """Pre-Call Folder & Prompt Assembly Module.
 
 Manages the immutable Pre-Call Folder created once before the call starts:
+0. Core Intelligence Engine (Permanent Foundation — always active on every turn)
 1. Lead Type (one of 16 standardized prospect types)
 2. Active Playbook (Methodology lens, objection matrix, tone, rules)
 3. Calibration Profile (Salesperson natural cadence, pacing, WPM, rhythm)
@@ -29,6 +30,24 @@ WORKSPACE_DIR = Path(__file__).resolve().parent.parent
 REPORTS_DIR = WORKSPACE_DIR / "reports"
 
 
+# =========================================================================
+# 0. Core Intelligence Engine — Permanent Thinking Pattern (Fixed Text)
+# =========================================================================
+CORE_INTELLIGENCE_INSTRUCTION = (
+    "=== [CORE INTELLIGENCE — ALWAYS ACTIVE] ===\n"
+    "You are the permanent reasoning engine for a live sales call. On every turn:\n"
+    "1. Identify literally what the prospect just said.\n"
+    "2. Determine the underlying concern or intent behind it — not just the surface words.\n"
+    "3. Decide the single best strategic move available right now (e.g., reframe,\n"
+    "   validate, clarify, de-risk, quantify, challenge, redirect) based on the\n"
+    "   full context provided below.\n"
+    "4. Produce ONE exact sentence the rep should say — not advice, not options,\n"
+    "   not a coaching note. Just the words to speak (<25 words).\n"
+    "Never become defensive. Never simply list facts in response to a challenge.\n"
+    "Always ground the move in what would actually move this specific conversation forward."
+)
+
+
 @dataclass
 class PreCallFolder:
     """Immutable pre-call context assembled once before call begins."""
@@ -41,6 +60,7 @@ class PreCallFolder:
     playbook_prompt_lens: str
     calibration_profile: Dict[str, Any]
     calibration_summary_text: str
+    core_engine_name: str = "PitchProX Core Intelligence (Permanent)"
     salesman_id: Optional[str] = None
     created_at_monotonic: float = field(default_factory=monotonic)
 
@@ -51,15 +71,14 @@ class PreCallFolder:
         rag_evidence: str = "",
     ) -> List[Dict[str, str]]:
         """Assembles the single unified prompt message for the Groq LLM."""
-        # 1. Base System Instruction with Pre-Call Folder
+        # 1. Base System Instruction: Core Brain FIRST & PERMANENT, then contextual modifiers
         system_instruction = (
-            "You are a real-time live sales copilot teleprompter assisting the salesperson during a live customer call.\n"
-            "Your objective is to output ONLY the exact, punchy first-person sentence (<25 words) the salesperson should say right now.\n"
-            "Do NOT include meta-advice, filler, or quotes.\n\n"
-            "=== 1. [PRE-CALL FOLDER: IMMUTABLE BASELINE] ===\n"
-            f"- Prospect Lead Type: {self.lead_type} ({self.lead_type_desc})\n"
-            f"- Salesperson Calibration Profile: {self.calibration_summary_text}\n\n"
-            f"{self.playbook_prompt_lens}\n"
+            f"{CORE_INTELLIGENCE_INSTRUCTION}\n\n"
+            f"[LEAD TYPE: {self.lead_type}]\n"
+            f"{self.lead_type_desc}\n\n"
+            f"{self.playbook_prompt_lens}\n\n"
+            f"[CALIBRATION PROFILE]\n"
+            f"{self.calibration_summary_text}"
         )
 
         messages: List[Dict[str, str]] = [
@@ -74,12 +93,18 @@ class PreCallFolder:
                 if content:
                     messages.append({"role": role, "content": content})
 
-        # 3. Latest Client Utterance + Relevant RAG Knowledge
-        knowledge_block = f"\n\n[VERIFIED COMPANY KNOWLEDGE]:\n{rag_evidence}" if rag_evidence else ""
-        user_message_content = (
-            f"Client just said: \"{current_utterance}\"{knowledge_block}\n\n"
-            f"Respond directly as the salesperson applying the {self.playbook_title} lens for {self.lead_type}:"
+        # 3. Latest Client Utterance + Optional RAG Knowledge + Core Execution Trigger
+        user_message_parts = [
+            f"[CONVERSATION STATE]",
+            f"Prospect just said: \"{current_utterance}\"",
+        ]
+        if rag_evidence:
+            user_message_parts.append(f"\n[AI TRAINING / COMPANY KNOWLEDGE]:\n{rag_evidence}")
+
+        user_message_parts.append(
+            f"\nCore Reasoning & Response: Produce the exact single spoken sentence applying the {self.playbook_title} lens for {self.lead_type}:"
         )
+        user_message_content = "\n".join(user_message_parts)
 
         messages.append({"role": "user", "content": user_message_content})
         return messages
@@ -176,11 +201,12 @@ def build_pre_call_folder(
         playbook_prompt_lens=playbook_lens,
         calibration_profile=calib_data,
         calibration_summary_text=calib_summary,
+        core_engine_name="PitchProX Core Intelligence (Permanent)",
         salesman_id=salesman_id,
     )
 
     CALL_FOLDERS[call_sid] = folder
-    LOGGER.info("Built and cached PreCallFolder for call %s (LeadType: %s, Playbook: %s)", call_sid, resolved_lead_type, playbook.title)
+    LOGGER.info("Built and cached PreCallFolder for call %s (Core: Permanent, LeadType: %s, Playbook: %s)", call_sid, resolved_lead_type, playbook.title)
     return folder
 
 
