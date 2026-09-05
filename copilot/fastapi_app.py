@@ -700,56 +700,63 @@ class FastAPICopilot:
                                             "elapsed_seconds": monotonic() - call_started,
                                         })
         
-                                        # Context recovery for short queries
+                                        # Maintain client query history
                                         if role == "client":
                                             client_text = text.strip()
-                                            client_history = self._client_history.setdefault(call_sid, [])
-                                            if client_text and len(client_text) < 8:
-                                                hist_context = [{"role": "user", "content": prior} for prior in client_history[-6:]]
-                                                asyncio.create_task(
+                                            if client_text:
+                                                client_history = self._client_history.setdefault(call_sid, [])
+                                                client_history.append(client_text)
+                                                del client_history[:-12]
+
+                                    # Deterministic "Respond Now or Wait" Gate Check (Code-Level Suppression)
+                                    if role == "client":
+                                        from .call_folder import get_or_create_pre_call_folder
+                                        folder = get_or_create_pre_call_folder(call_sid, salesman_id=salesman_id)
+                                        current_t = monotonic()
+                                        last_gen = float(state.get("last_generation", 0.0))
+
+                                        should_run, gate_reason = folder.should_respond_now(
+                                            utterance=text,
+                                            is_final=final,
+                                            speech_final=speech_final,
+                                            last_generation_time=last_gen,
+                                            current_time=current_t,
+                                        )
+
+                                        if not should_run:
+                                            LOGGER.debug("Generation suppressed for call %s: %s (text: %s)", call_sid, gate_reason, text[:30])
+                                        else:
+                                            task = state.get("generation_task")
+                                            duplicate = text == state.get("last_client_question")
+                                            can_start = task is None or task.done()
+                                            if task and not task.done() and (speech_final or final):
+                                                task.cancel()
+                                                can_start = True
+                                            if not duplicate and can_start:
+                                                state["last_client_question"] = text
+                                                state["last_generation"] = current_t
+                                                prompt_context = list(context)
+                                                if final and prompt_context and prompt_context[-1]["content"] == text:
+                                                    prompt_context.pop()
+                                                await self.component(tenant_id, "llm", "generating", f"Client speech triggered ({gate_reason})", call_sid=call_sid)
+                                                new_task = asyncio.create_task(
                                                     self.stream_suggestion(
-                                                        call_sid, client_text, hist_context, tenant_id,
+                                                        call_sid, text, prompt_context, tenant_id,
                                                         scope="sales", owner_id=salesman_id,
                                                         stt_received_time=stt_received_time
                                                     )
                                                 )
-                                            if client_text:
-                                                client_history.append(client_text)
-                                                del client_history[:-12]
-        
-                                    if role == "client" and len(text) >= 8 and (final or speech_final):
-                                        task = state.get("generation_task")
-                                        due = monotonic() - float(state["last_generation"]) >= 0.35
-                                        duplicate = text == state["last_client_question"]
-                                        can_start = task is None or task.done()
-                                        if task and not task.done() and (speech_final or final):
-                                            task.cancel()
-                                            can_start = True
-                                        if not duplicate and (due or final) and can_start:
-                                            state["last_client_question"] = text
-                                            state["last_generation"] = monotonic()
-                                            prompt_context = list(context)
-                                            if final and prompt_context and prompt_context[-1]["content"] == text:
-                                                prompt_context.pop()
-                                            await self.component(tenant_id, "llm", "generating", "Client speech triggered suggestion", call_sid=call_sid)
-                                            new_task = asyncio.create_task(
-                                                self.stream_suggestion(
-                                                    call_sid, text, prompt_context, tenant_id,
-                                                    scope="sales", owner_id=salesman_id,
-                                                    stt_received_time=stt_received_time
+                                                state["generation_task"] = new_task
+                                                new_task.add_done_callback(
+                                                    lambda completed: asyncio.create_task(
+                                                        self.component(
+                                                            tenant_id, "llm",
+                                                            "ready" if not completed.exception() else "error",
+                                                            "Suggestion complete",
+                                                            call_sid=call_sid
+                                                        )
+                                                    ) if not completed.cancelled() else None
                                                 )
-                                            )
-                                            state["generation_task"] = new_task
-                                            new_task.add_done_callback(
-                                                lambda completed: asyncio.create_task(
-                                                    self.component(
-                                                        tenant_id, "llm",
-                                                        "ready" if not completed.exception() else "error",
-                                                        "Suggestion complete",
-                                                        call_sid=call_sid
-                                                    )
-                                                ) if not completed.cancelled() else None
-                                            )
         
                             tasks = {asyncio.create_task(send_audio()), asyncio.create_task(receive_text())}
                             done, pending = await asyncio.wait(tasks, return_when=asyncio.FIRST_COMPLETED)

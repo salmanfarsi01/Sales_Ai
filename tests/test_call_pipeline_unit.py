@@ -2,12 +2,14 @@
 
 Tests:
 1. Core Intelligence Engine Permanency & 4-Step Diagnostic Reasoning Pattern
-2. Pre-Call Folder Initialization and In-Memory Caching (call_folder.py)
-3. All 16 Standardized Lead Types Resolution
-4. Custom Playbook Methodology Lens Integration
-5. Zero-Allocation Prompt Assembly Structure (<25 words rule, labeled sections, hierarchy ordering)
-6. FastAPI Endpoints (/api/call/init-folder, /api/call/folder/{sid}, /api/calibration/latest)
-7. Parallel Concurrency Pipeline Simulation (asyncio.gather for RAG + transcript logging)
+2. Stacked Plain-Text Prompt Builder (build_prompt)
+3. Deterministic "Respond Now or Wait" Suppression Gate (should_generate_now)
+4. Pre-Call Folder Initialization and In-Memory Caching (call_folder.py)
+5. All 16 Standardized Lead Types Resolution
+6. Custom Playbook Methodology Lens Integration & Runtime Cooldown Settings
+7. Zero-Allocation Prompt Assembly Structure (<25 words rule, labeled sections, hierarchy ordering)
+8. FastAPI Endpoints (/api/call/init-folder, /api/call/folder/{sid}, /api/calibration/latest)
+9. Parallel Concurrency Pipeline Simulation (asyncio.gather for RAG + transcript logging)
 """
 
 import asyncio
@@ -19,6 +21,9 @@ from copilot.call_folder import (
     PreCallFolder,
     build_pre_call_folder,
     get_or_create_pre_call_folder,
+    build_prompt,
+    should_generate_now,
+    CORE_INSTRUCTIONS,
     CORE_INTELLIGENCE_INSTRUCTION,
     CALL_FOLDERS,
 )
@@ -28,6 +33,7 @@ from copilot.playbook import (
     PlaybookBasicInfo,
     PlaybookStyle,
     PlaybookObjection,
+    PlaybookRuntimeSettings,
     ResponseSequenceStep,
     PlaybookStore,
 )
@@ -86,6 +92,119 @@ def test_core_intelligence_engine_permanent_and_unconditional():
     assert core_idx < lead_idx < playbook_idx < calib_idx
 
 
+def test_stacked_build_prompt_function():
+    """Verify build_prompt stacks plain text pieces starting with permanent Core."""
+    # 1. Bare minimal prompt (only Core + Utterance)
+    raw = build_prompt(current_utterance="Hello")
+    assert CORE_INSTRUCTIONS in raw
+    assert 'Prospect just said: "Hello"' in raw
+    assert "[LEAD TYPE" not in raw
+    assert "[AI TRAINING" not in raw
+
+    # 2. Fully populated prompt
+    full_raw = build_prompt(
+        lead_type="Expired Listings",
+        lead_type_desc="Listings that recently expired without selling.",
+        playbook_prompt_lens="### ACTIVE PLAYBOOK METHODOLOGY LENS: CONSULTATIVE ###",
+        calibration_summary="Pacing: 140 WPM",
+        training_snippet="Brokerage closed 40 homes in this zip code last year.",
+        conversation_turns=[
+            {"role": "user", "content": "Who is this?"},
+            {"role": "assistant", "content": "Hi, I am calling about your property."},
+        ],
+        current_utterance="Why should I list with you?",
+    )
+
+    # Verify exact stacked order: Core -> Lead -> Playbook -> Calibration -> Training -> Conversation
+    p_core = full_raw.find("CORE INTELLIGENCE")
+    p_lead = full_raw.find("[LEAD TYPE: Expired Listings]")
+    p_play = full_raw.find("ACTIVE PLAYBOOK METHODOLOGY LENS")
+    p_calib = full_raw.find("[CALIBRATION PROFILE]")
+    p_train = full_raw.find("[AI TRAINING / COMPANY KNOWLEDGE]")
+    p_conv = full_raw.find("[CONVERSATION SO FAR]")
+
+    assert p_core != -1
+    assert p_lead != -1
+    assert p_play != -1
+    assert p_calib != -1
+    assert p_train != -1
+    assert p_conv != -1
+
+    assert p_core < p_lead < p_play < p_calib < p_train < p_conv
+    assert "Brokerage closed 40 homes" in full_raw
+    assert 'Prospect just said: "Why should I list with you?"' in full_raw
+
+
+def test_should_generate_now_deterministic_gate():
+    """Verify deterministic code-level suppression rules before LLM invocation."""
+    current_time = 100.0
+
+    # 1. Non-critical short junk -> Suppress
+    ok, reason = should_generate_now(
+        utterance="zz", is_final=True, speech_final=True,
+        last_generation_time=0.0, current_time=current_time,
+    )
+    assert not ok
+    assert "insufficient_length" in reason
+
+    # 2. Critical short objections like "Why?", "No.", "Cost?" -> Allowed
+    for short_obj in ["Why?", "No.", "How?", "Cost?", "Pass."]:
+        ok, reason = should_generate_now(
+            utterance=short_obj, is_final=True, speech_final=True,
+            last_generation_time=0.0, current_time=current_time,
+        )
+        assert ok, f"Expected '{short_obj}' to be allowed but got {reason}"
+        assert reason == "ready_to_respond"
+
+    # 3. Passive filler acknowledgments -> Suppress
+    ok, reason = should_generate_now(
+        utterance="yeah, okay", is_final=True, speech_final=True,
+        last_generation_time=0.0, current_time=current_time,
+    )
+    assert not ok
+    assert "passive_acknowledgment" in reason
+
+    # 4. Mid-thought dangling conjunction without speech_final -> Suppress
+    ok, reason = should_generate_now(
+        utterance="I want to sell my house but", is_final=True, speech_final=False,
+        last_generation_time=0.0, current_time=current_time,
+    )
+    assert not ok
+    assert "mid_thought_dangling_connector" in reason
+
+    # 5. Mid-thought trailing ellipsis without speech_final -> Suppress
+    ok, reason = should_generate_now(
+        utterance="I mean, I guess my concern is...", is_final=True, speech_final=False,
+        last_generation_time=0.0, current_time=current_time,
+    )
+    assert not ok
+    assert "mid_thought_trailing_ellipsis" in reason
+
+    # 6. Deepgram is_final=True without speech_final on mid-sentence phrase -> Suppress (awaiting speech final pause)
+    ok, reason = should_generate_now(
+        utterance="I called your office yesterday to check", is_final=True, speech_final=False,
+        last_generation_time=0.0, current_time=current_time,
+    )
+    assert not ok
+    assert "awaiting_speech_final_pause" in reason
+
+    # 7. Playbook Prompt Cooldown active (e.g. last prompt 2s ago, cooldown is 5s) -> Suppress
+    ok, reason = should_generate_now(
+        utterance="What is your commission rate?", is_final=True, speech_final=True,
+        last_generation_time=98.0, current_time=100.0, cooldown_seconds=5.0,
+    )
+    assert not ok
+    assert "cooldown_active" in reason
+
+    # 8. Cooldown expired (last prompt 6s ago, cooldown is 5s) -> Allow
+    ok, reason = should_generate_now(
+        utterance="What is your commission rate?", is_final=True, speech_final=True,
+        last_generation_time=94.0, current_time=100.0, cooldown_seconds=5.0,
+    )
+    assert ok
+    assert reason == "ready_to_respond"
+
+
 def test_all_16_standardized_lead_types_valid():
     """Verify all 16 standardized lead types are recognized and mapped."""
     assert len(STANDARDIZED_LEAD_TYPES) == 16
@@ -119,6 +238,7 @@ def test_pre_call_folder_creation_and_caching():
     assert "WPM" in folder.calibration_summary_text
     assert folder.salesman_id == "agent_alpha"
     assert "Core Intelligence" in folder.core_engine_name
+    assert folder.prompt_cooldown_seconds >= 1.0
 
     # Verify cached in memory
     assert call_sid in CALL_FOLDERS
@@ -127,7 +247,7 @@ def test_pre_call_folder_creation_and_caching():
 
 
 def test_pre_call_folder_with_custom_playbook(tmp_path):
-    """Verify pre-call folder incorporates custom playbook rules without modifying permanent Core logic."""
+    """Verify pre-call folder incorporates custom playbook rules and runtime cooldown settings."""
     store = PlaybookStore(storage_dir=tmp_path / "playbooks")
     custom_pb = Playbook(
         title="The Closer Lens",
@@ -144,6 +264,10 @@ def test_pre_call_folder_with_custom_playbook(tmp_path):
             pacing_words_per_minute=145,
             energy_level="High",
             forbidden_words=["Maybe", "Obviously", "No problem"],
+            runtime_settings=PlaybookRuntimeSettings(
+                prompt_cooldown_seconds=6,
+                prompt_timing_sensitivity="Relaxed",
+            ),
         ),
         response_sequence=[
             ResponseSequenceStep(order=1, name="Validate", icon="heart"),
@@ -172,14 +296,23 @@ def test_pre_call_folder_with_custom_playbook(tmp_path):
 
     assert folder.playbook_id == custom_pb.id
     assert folder.playbook_title == custom_pb.basic_info.name
+    assert folder.prompt_cooldown_seconds == 6.0
+    assert folder.prompt_timing_sensitivity == "Relaxed"
     assert "THE CLOSER LENS" in folder.playbook_prompt_lens
     assert "Validate -> Educate -> Direct" in folder.playbook_prompt_lens
     assert "Energy=High" in folder.playbook_prompt_lens
     assert "save equity" in folder.playbook_prompt_lens
 
-    # Ensure Core Engine is still at the top
-    messages = folder.assemble_prompt([], "I'll do it on my own.")
-    assert "=== [CORE INTELLIGENCE — ALWAYS ACTIVE] ===" in messages[0]["content"]
+    # Test gate on folder instance
+    should_run, reason = folder.should_respond_now(
+        utterance="Why did my last agent fail?",
+        is_final=True,
+        speech_final=True,
+        last_generation_time=95.0,
+        current_time=98.0,  # 3s elapsed vs 6s cooldown
+    )
+    assert not should_run
+    assert "cooldown_active" in reason
 
 
 def test_prompt_assembly_structure():
