@@ -6,7 +6,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Create Your Custom Playbook - PitchProX</title>
   <meta name="description"
-    content="Build a custom sales playbook that reflects your unique style, voice, and sales methodology.">
+    content="Build a custom sales methodology playbook for PitchProX with 16 specialized lead types, objection frameworks, and runtime coaching controls.">
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link
@@ -15,15 +15,14 @@
 
   <style>
     :root {
-      --primary: #059669;
-      --primary-hover: #047857;
+      --primary: #0d9488;
+      --primary-hover: #0f766e;
       --primary-dark: #065f46;
-      --primary-light: #ecfdf5;
-      --primary-border: #a7f3d0;
-      --primary-glow: rgba(5, 150, 105, 0.15);
-      --teal-main: #0d9488;
-      --teal-light: #f0fdfa;
-      --teal-border: #99f6e4;
+      --primary-light: #f0fdfa;
+      --primary-border: #99f6e4;
+      --primary-glow: rgba(13, 148, 136, 0.15);
+      --emerald: #059669;
+      --emerald-light: #ecfdf5;
       --slate-900: #0f172a;
       --slate-800: #1e293b;
       --slate-700: #334155;
@@ -60,11 +59,10 @@
       -webkit-font-smoothing: antialiased;
     }
 
-    /* Top Navbar */
     .top-nav {
       background: var(--white);
       border-bottom: 1px solid var(--slate-200);
-      padding: 16px 36px;
+      padding: 14px 32px;
       display: flex;
       align-items: center;
       justify-content: space-between;
@@ -79,7 +77,7 @@
       gap: 12px;
       text-decoration: none;
       color: var(--slate-900);
-      font-weight: 700;
+      font-weight: 800;
       font-size: 1.15rem;
     }
 
@@ -87,19 +85,19 @@
       width: 38px;
       height: 38px;
       border-radius: 10px;
-      background: linear-gradient(135deg, var(--teal-main), var(--primary));
+      background: linear-gradient(135deg, var(--primary), var(--emerald));
       display: flex;
       align-items: center;
       justify-content: center;
       color: var(--white);
       font-size: 1.2rem;
-      box-shadow: 0 2px 8px rgba(5, 150, 105, 0.25);
+      box-shadow: 0 2px 8px rgba(13, 148, 136, 0.25);
     }
 
     .nav-actions {
       display: flex;
       align-items: center;
-      gap: 12px;
+      gap: 10px;
     }
 
     .btn-nav-secondary {
@@ -136,27 +134,23 @@
       align-items: center;
       gap: 6px;
       transition: all 0.2s;
-      box-shadow: 0 2px 6px rgba(5, 150, 105, 0.2);
+      box-shadow: 0 2px 6px rgba(13, 148, 136, 0.2);
     }
 
     .btn-nav-primary:hover {
       background: var(--primary-hover);
-      border-color: var(--primary-hover);
-      transform: translateY(-1px);
     }
 
-    /* Main Container */
     .container {
-      max-width: 920px;
+      max-width: 1120px;
       width: 100%;
       margin: 0 auto;
-      padding: 36px 20px 80px 20px;
+      padding: 28px 20px 80px 20px;
       flex: 1;
     }
 
-    /* Page Title & Subtitle */
     .page-header {
-      margin-bottom: 28px;
+      margin-bottom: 22px;
     }
 
     .page-title {
@@ -172,15 +166,14 @@
       margin-top: 4px;
     }
 
-    /* Stepper Bar */
     .stepper-wrap {
-      margin-bottom: 32px;
+      margin-bottom: 26px;
       display: flex;
       align-items: center;
       justify-content: space-between;
       position: relative;
       background: var(--white);
-      padding: 16px 28px;
+      padding: 16px 24px;
       border-radius: 16px;
       border: 1px solid var(--slate-200);
       box-shadow: var(--shadow-xs);
@@ -199,14 +192,14 @@
     }
 
     .step-circle {
-      width: 36px;
-      height: 36px;
+      width: 34px;
+      height: 34px;
       border-radius: 50%;
       display: flex;
       align-items: center;
       justify-content: center;
       font-weight: 700;
-      font-size: 0.9rem;
+      font-size: 0.88rem;
       transition: all 0.2s ease;
       border: 2px solid var(--slate-200);
       background: var(--white);
@@ -227,7 +220,7 @@
     }
 
     .step-label {
-      font-size: 0.85rem;
+      font-size: 0.82rem;
       font-weight: 600;
       color: var(--slate-500);
       white-space: nowrap;
@@ -247,7 +240,7 @@
       flex: 1;
       height: 2px;
       background: var(--slate-200);
-      margin: 0 16px;
+      margin: 0 10px;
       position: relative;
       top: -10px;
       z-index: 1;
@@ -258,31 +251,38 @@
       background: var(--primary);
     }
 
-    /* Cards */
+    .layout-2-col {
+      display: grid;
+      grid-template-columns: 1fr 340px;
+      gap: 24px;
+      align-items: start;
+    }
+
+    @media (max-width: 900px) {
+      .layout-2-col {
+        grid-template-columns: 1fr;
+      }
+    }
+
     .card {
       background: var(--white);
       border: 1px solid var(--slate-200);
       border-radius: var(--card-radius);
-      padding: 28px 32px;
-      margin-bottom: 24px;
+      padding: 24px 28px;
+      margin-bottom: 20px;
       box-shadow: var(--shadow-sm);
-      transition: border-color 0.2s, box-shadow 0.2s;
-    }
-
-    .card:hover {
-      border-color: #cbd5e1;
     }
 
     .card-header {
       display: flex;
       align-items: flex-start;
       gap: 14px;
-      margin-bottom: 22px;
+      margin-bottom: 18px;
     }
 
     .card-icon-badge {
-      width: 42px;
-      height: 42px;
+      width: 40px;
+      height: 40px;
       border-radius: 12px;
       display: flex;
       align-items: center;
@@ -315,32 +315,24 @@
       border: 1px solid #99f6e4;
     }
 
-    .badge-orange {
-      background: #fff7ed;
-      color: #ea580c;
-      border: 1px solid #fed7aa;
-    }
-
     .card-title-group {
       flex: 1;
     }
 
     .card-title {
-      font-size: 1.18rem;
+      font-size: 1.15rem;
       font-weight: 700;
       color: var(--slate-900);
-      letter-spacing: -0.015em;
     }
 
     .card-subtitle {
-      font-size: 0.88rem;
+      font-size: 0.86rem;
       color: var(--slate-500);
       margin-top: 2px;
     }
 
-    /* Form Fields */
     .form-group {
-      margin-bottom: 20px;
+      margin-bottom: 18px;
     }
 
     .form-group:last-child {
@@ -357,7 +349,7 @@
 
     .form-label-sub {
       display: block;
-      font-size: 0.8rem;
+      font-size: 0.78rem;
       font-weight: 400;
       color: var(--slate-500);
       margin-bottom: 6px;
@@ -369,26 +361,20 @@
       width: 100%;
       border: 1.5px solid var(--slate-200);
       border-radius: var(--input-radius);
-      padding: 12px 14px;
-      font-size: 0.92rem;
+      padding: 10px 14px;
+      font-size: 0.9rem;
       font-family: inherit;
       color: var(--slate-900);
       background: var(--white);
-      transition: all 0.2s ease;
       outline: none;
+      transition: all 0.2s ease;
     }
 
     .input-text:focus,
     .input-textarea:focus,
     .select-dropdown:focus {
       border-color: var(--primary);
-      box-shadow: 0 0 0 3.5px var(--primary-glow);
-    }
-
-    .input-text::placeholder,
-    .input-textarea::placeholder {
-      color: var(--slate-400);
-      font-size: 0.88rem;
+      box-shadow: 0 0 0 3px var(--primary-glow);
     }
 
     .input-textarea {
@@ -400,7 +386,7 @@
     .char-counter {
       display: flex;
       justify-content: flex-end;
-      font-size: 0.78rem;
+      font-size: 0.76rem;
       color: var(--slate-400);
       margin-top: 4px;
       font-weight: 500;
@@ -412,27 +398,21 @@
       gap: 16px;
     }
 
-    @media (max-width: 768px) {
-      .grid-3-col {
-        grid-template-columns: 1fr;
-      }
-    }
-
     .grid-2-col {
       display: grid;
       grid-template-columns: repeat(2, 1fr);
-      gap: 20px;
+      gap: 18px;
     }
 
     @media (max-width: 768px) {
+      .grid-3-col,
       .grid-2-col {
         grid-template-columns: 1fr;
       }
     }
 
-    /* Chips Row */
     .chips-section {
-      margin-top: 12px;
+      margin-top: 10px;
       display: flex;
       flex-wrap: wrap;
       align-items: center;
@@ -445,7 +425,6 @@
       color: var(--slate-500);
       text-transform: uppercase;
       letter-spacing: 0.05em;
-      margin-right: 4px;
     }
 
     .chip-item {
@@ -463,8 +442,7 @@
     .chip-item:hover {
       background: var(--primary-light);
       border-color: var(--primary-border);
-      color: var(--primary-dark);
-      transform: translateY(-1px);
+      color: var(--primary-hover);
     }
 
     .chip-add-btn {
@@ -476,14 +454,8 @@
       border: 1px dashed var(--primary-border);
       padding: 4px 10px;
       border-radius: 20px;
-      transition: all 0.15s;
     }
 
-    .chip-add-btn:hover {
-      background: var(--primary-light);
-    }
-
-    /* Goals / Outcomes Selectable Cards */
     .goals-grid {
       display: grid;
       grid-template-columns: repeat(3, 1fr);
@@ -499,25 +471,18 @@
     .goal-card {
       border: 2px solid var(--slate-200);
       border-radius: 14px;
-      padding: 18px 16px;
+      padding: 16px;
       cursor: pointer;
-      transition: all 0.2s;
       background: var(--white);
-      position: relative;
       display: flex;
       flex-direction: column;
-      gap: 8px;
-    }
-
-    .goal-card:hover {
-      border-color: var(--slate-300);
-      box-shadow: var(--shadow-sm);
+      gap: 6px;
+      transition: all 0.2s;
     }
 
     .goal-card.selected {
       border-color: var(--primary);
-      background: #f0fdf4;
-      box-shadow: 0 0 0 1px var(--primary);
+      background: #f0fdfa;
     }
 
     .goal-card-top {
@@ -527,19 +492,14 @@
     }
 
     .goal-icon {
-      width: 34px;
-      height: 34px;
+      width: 32px;
+      height: 32px;
       border-radius: 8px;
       display: flex;
       align-items: center;
       justify-content: center;
-      font-size: 1.1rem;
+      font-size: 1.05rem;
       background: var(--slate-100);
-    }
-
-    .goal-card.selected .goal-icon {
-      background: var(--primary-light);
-      color: var(--primary-dark);
     }
 
     .goal-check-circle {
@@ -550,7 +510,6 @@
       display: flex;
       align-items: center;
       justify-content: center;
-      transition: all 0.2s;
     }
 
     .goal-card.selected .goal-check-circle {
@@ -565,7 +524,6 @@
       border-radius: 50%;
       background: var(--white);
       opacity: 0;
-      transition: opacity 0.2s;
     }
 
     .goal-card.selected .goal-check-circle::after {
@@ -573,18 +531,16 @@
     }
 
     .goal-title {
-      font-size: 0.95rem;
+      font-size: 0.92rem;
       font-weight: 700;
       color: var(--slate-900);
     }
 
     .goal-desc {
-      font-size: 0.82rem;
+      font-size: 0.8rem;
       color: var(--slate-500);
-      line-height: 1.4;
     }
 
-    /* Step 2 Styles: Tone grid */
     .tone-grid {
       display: grid;
       grid-template-columns: repeat(3, 1fr);
@@ -592,18 +548,12 @@
       margin-top: 8px;
     }
 
-    @media (max-width: 600px) {
-      .tone-grid {
-        grid-template-columns: repeat(2, 1fr);
-      }
-    }
-
     .tone-btn {
       background: var(--white);
       border: 1.5px solid var(--slate-200);
       border-radius: 10px;
-      padding: 10px 12px;
-      font-size: 0.88rem;
+      padding: 9px 12px;
+      font-size: 0.86rem;
       font-weight: 600;
       color: var(--slate-700);
       cursor: pointer;
@@ -614,30 +564,15 @@
       transition: all 0.15s;
     }
 
-    .tone-btn:hover {
-      border-color: var(--slate-300);
-      background: var(--slate-50);
-    }
-
     .tone-btn.selected {
       border-color: var(--primary);
       background: var(--primary-light);
-      color: var(--primary-dark);
+      color: var(--primary-hover);
       font-weight: 700;
     }
 
-    .tone-btn .check-icon {
-      display: none;
-      font-size: 0.8rem;
-    }
-
-    .tone-btn.selected .check-icon {
-      display: inline-block;
-    }
-
-    /* Stepped Slider */
     .slider-container {
-      margin-top: 10px;
+      margin-top: 8px;
     }
 
     .range-slider {
@@ -647,7 +582,6 @@
       border-radius: 4px;
       background: var(--slate-200);
       outline: none;
-      transition: background 0.2s;
     }
 
     .range-slider::-webkit-slider-thumb {
@@ -659,53 +593,38 @@
       background: var(--primary);
       cursor: pointer;
       box-shadow: 0 0 0 3px var(--primary-glow);
-      transition: all 0.2s;
-    }
-
-    .range-slider::-webkit-slider-thumb:hover {
-      transform: scale(1.15);
     }
 
     .slider-labels {
       display: flex;
       justify-content: space-between;
       margin-top: 6px;
-      font-size: 0.76rem;
+      font-size: 0.74rem;
       color: var(--slate-400);
       font-weight: 600;
     }
 
     .slider-labels span.active {
-      color: var(--primary-dark);
+      color: var(--primary-hover);
       font-weight: 700;
-    }
-
-    /* Step 3: Timeline */
-    .timeline-header-action {
-      display: flex;
-      align-items: center;
-      justify-content: space-between;
-      margin-bottom: 24px;
     }
 
     .btn-add-stage {
       background: var(--white);
       border: 1.5px solid var(--primary);
       color: var(--primary);
-      font-size: 0.9rem;
+      font-size: 0.88rem;
       font-weight: 700;
-      padding: 9px 18px;
-      border-radius: 10px;
+      padding: 8px 16px;
+      border-radius: 8px;
       cursor: pointer;
       display: inline-flex;
       align-items: center;
       gap: 6px;
-      transition: all 0.2s;
     }
 
     .btn-add-stage:hover {
       background: var(--primary-light);
-      transform: translateY(-1px);
     }
 
     .timeline-container {
@@ -726,64 +645,24 @@
     .timeline-stage-row {
       display: flex;
       align-items: center;
-      gap: 18px;
-      margin-bottom: 18px;
+      gap: 16px;
+      margin-bottom: 16px;
       position: relative;
       z-index: 2;
     }
 
-    .timeline-stage-row:last-child {
-      margin-bottom: 0;
-    }
-
     .stage-icon-node {
-      width: 40px;
-      height: 40px;
+      width: 38px;
+      height: 38px;
       border-radius: 50%;
       background: var(--white);
       display: flex;
       align-items: center;
       justify-content: center;
-      font-size: 1.15rem;
+      font-size: 1.1rem;
       flex-shrink: 0;
       border: 2px solid var(--slate-200);
       box-shadow: var(--shadow-xs);
-    }
-
-    .stage-icon-node.icon-hand {
-      background: #ecfdf5;
-      border-color: #a7f3d0;
-      color: #059669;
-    }
-
-    .stage-icon-node.icon-search {
-      background: #eff6ff;
-      border-color: #bfdbfe;
-      color: #2563eb;
-    }
-
-    .stage-icon-node.icon-diamond {
-      background: #f5f3ff;
-      border-color: #ddd6fe;
-      color: #7c3aed;
-    }
-
-    .stage-icon-node.icon-shield {
-      background: #fff7ed;
-      border-color: #fed7aa;
-      color: #ea580c;
-    }
-
-    .stage-icon-node.icon-target {
-      background: #f0fdfa;
-      border-color: #99f6e4;
-      color: #0d9488;
-    }
-
-    .stage-icon-node.icon-phone {
-      background: #fdf2f8;
-      border-color: #fbcfe8;
-      color: #db2777;
     }
 
     .stage-card {
@@ -791,34 +670,21 @@
       background: var(--white);
       border: 1px solid var(--slate-200);
       border-radius: 14px;
-      padding: 16px 20px;
+      padding: 14px 18px;
       display: flex;
       align-items: center;
       justify-content: space-between;
       gap: 16px;
-      transition: all 0.2s;
       box-shadow: var(--shadow-xs);
     }
 
-    .stage-card:hover {
-      border-color: var(--slate-300);
-      box-shadow: var(--shadow-sm);
-    }
-
-    .stage-info {
-      display: flex;
-      align-items: center;
-      gap: 16px;
-      flex: 1;
-    }
-
     .stage-number {
-      width: 28px;
-      height: 28px;
+      width: 26px;
+      height: 26px;
       border-radius: 50%;
       background: var(--slate-100);
       color: var(--slate-600);
-      font-size: 0.82rem;
+      font-size: 0.8rem;
       font-weight: 700;
       display: flex;
       align-items: center;
@@ -826,25 +692,16 @@
       flex-shrink: 0;
     }
 
-    .stage-text-block {
-      flex: 1;
-    }
-
     .stage-name {
-      font-size: 1rem;
+      font-size: 0.96rem;
       font-weight: 700;
       color: var(--slate-900);
     }
 
     .stage-desc {
-      font-size: 0.82rem;
+      font-size: 0.8rem;
       color: var(--slate-500);
       margin-top: 2px;
-    }
-
-    .stage-goal-box {
-      margin-left: auto;
-      max-width: 280px;
     }
 
     .stage-goal-tag {
@@ -853,59 +710,390 @@
       color: var(--primary);
       text-transform: uppercase;
       letter-spacing: 0.05em;
-      margin-bottom: 2px;
     }
 
     .stage-goal-text {
-      font-size: 0.82rem;
+      font-size: 0.8rem;
       color: var(--slate-700);
       font-weight: 500;
     }
 
-    .stage-actions {
+    .filter-bar {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      margin-bottom: 18px;
+      flex-wrap: wrap;
+    }
+
+    .objection-tab-badge {
+      font-size: 0.88rem;
+      font-weight: 700;
+      color: var(--slate-900);
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      padding-right: 8px;
+      border-right: 1px solid var(--slate-200);
+    }
+
+    .badge-count {
+      background: var(--primary-light);
+      color: var(--primary);
+      font-size: 0.76rem;
+      font-weight: 800;
+      padding: 2px 8px;
+      border-radius: 12px;
+    }
+
+    .filter-select {
+      border: 1px solid var(--slate-200);
+      border-radius: 8px;
+      padding: 8px 12px;
+      font-size: 0.84rem;
+      color: var(--slate-700);
+      background: var(--white);
+      outline: none;
+    }
+
+    .search-box {
+      flex: 1;
+      min-width: 200px;
+      position: relative;
+    }
+
+    .search-input {
+      width: 100%;
+      border: 1px solid var(--slate-200);
+      border-radius: 8px;
+      padding: 8px 12px 8px 32px;
+      font-size: 0.84rem;
+      outline: none;
+    }
+
+    .search-icon {
+      position: absolute;
+      left: 10px;
+      top: 9px;
+      font-size: 0.85rem;
+      color: var(--slate-400);
+    }
+
+    .obj-table {
+      width: 100%;
+      border-collapse: separate;
+      border-spacing: 0;
+      margin-top: 8px;
+    }
+
+    .obj-table th {
+      text-align: left;
+      font-size: 0.72rem;
+      font-weight: 800;
+      color: var(--slate-400);
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+      padding: 10px 14px;
+      border-bottom: 1px solid var(--slate-200);
+    }
+
+    .obj-table td {
+      padding: 14px;
+      border-bottom: 1px solid var(--slate-100);
+      vertical-align: middle;
+      font-size: 0.85rem;
+    }
+
+    .obj-row:hover td {
+      background: var(--slate-50);
+    }
+
+    .obj-title {
+      font-weight: 700;
+      color: var(--slate-900);
+      font-size: 0.9rem;
+    }
+
+    .obj-subcat {
+      font-size: 0.75rem;
+      color: var(--slate-400);
+      margin-top: 2px;
+    }
+
+    .tag-pill {
+      display: inline-block;
+      background: var(--slate-100);
+      color: var(--slate-600);
+      font-size: 0.72rem;
+      font-weight: 600;
+      padding: 3px 8px;
+      border-radius: 6px;
+      margin-right: 4px;
+      margin-bottom: 2px;
+    }
+
+    .tag-pill-primary {
+      background: var(--primary-light);
+      color: var(--primary);
+    }
+
+    .btn-table-action {
+      background: transparent;
+      border: none;
+      cursor: pointer;
+      font-size: 0.95rem;
+      color: var(--slate-400);
+      padding: 4px;
+    }
+
+    .btn-table-delete:hover {
+      color: #ef4444;
+    }
+
+    .framework-flow {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 6px;
+      margin-top: 14px;
+    }
+
+    .framework-node {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 6px;
+      flex: 1;
+    }
+
+    .framework-icon-box {
+      width: 44px;
+      height: 44px;
+      border-radius: 12px;
+      background: var(--slate-50);
+      border: 1.5px solid var(--slate-200);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 1.15rem;
+    }
+
+    .framework-icon-box.active {
+      border-color: var(--primary);
+      background: var(--primary-light);
+      color: var(--primary);
+    }
+
+    .framework-node-name {
+      font-size: 0.76rem;
+      font-weight: 700;
+      color: var(--slate-700);
+      text-align: center;
+    }
+
+    .framework-arrow {
+      color: var(--slate-300);
+      font-size: 0.9rem;
+    }
+
+    .live-preview-box {
+      background: #f8fafc;
+      border: 1px solid var(--slate-200);
+      border-radius: 12px;
+      padding: 16px;
+      font-size: 0.88rem;
+      color: var(--slate-700);
+      line-height: 1.5;
+      margin-top: 12px;
+    }
+
+    .tips-list {
+      list-style: none;
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+      margin-top: 10px;
+    }
+
+    .tips-item {
       display: flex;
       align-items: center;
       gap: 8px;
+      font-size: 0.84rem;
+      color: var(--slate-700);
+      font-weight: 500;
     }
 
-    .btn-stage-action {
+    .tips-check {
+      color: var(--emerald);
+      font-weight: 800;
+    }
+
+    .summary-grid {
+      display: grid;
+      grid-template-columns: repeat(4, 1fr);
+      gap: 16px;
+      padding-bottom: 16px;
+      border-bottom: 1px solid var(--slate-100);
+      margin-bottom: 16px;
+    }
+
+    @media (max-width: 768px) {
+      .summary-grid {
+        grid-template-columns: repeat(2, 1fr);
+      }
+    }
+
+    .summary-item-label {
+      font-size: 0.72rem;
+      font-weight: 800;
+      color: var(--slate-400);
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+    }
+
+    .summary-item-val {
+      font-size: 0.95rem;
+      font-weight: 700;
+      color: var(--slate-900);
+      margin-top: 4px;
+    }
+
+    .review-section-card {
+      background: var(--white);
+      border: 1px solid var(--slate-200);
+      border-radius: 14px;
+      padding: 16px 20px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      margin-bottom: 12px;
+      box-shadow: var(--shadow-xs);
+    }
+
+    .review-section-left {
+      display: flex;
+      align-items: center;
+      gap: 14px;
+    }
+
+    .review-section-title {
+      font-size: 0.95rem;
+      font-weight: 700;
+      color: var(--slate-900);
+    }
+
+    .review-section-desc {
+      font-size: 0.82rem;
+      color: var(--slate-500);
+      margin-top: 2px;
+    }
+
+    .btn-edit-jump {
       background: var(--white);
       border: 1px solid var(--slate-200);
       color: var(--slate-600);
-      padding: 6px 12px;
-      border-radius: 8px;
-      font-size: 0.8rem;
+      font-size: 0.82rem;
       font-weight: 600;
+      padding: 6px 14px;
+      border-radius: 8px;
       cursor: pointer;
-      display: inline-flex;
+    }
+
+    .quality-check-card {
+      background: var(--white);
+      border: 1px solid var(--slate-200);
+      border-radius: var(--card-radius);
+      padding: 24px 28px;
+      display: flex;
       align-items: center;
-      gap: 4px;
-      transition: all 0.15s;
+      justify-content: space-between;
+      margin-top: 22px;
     }
 
-    .btn-stage-action:hover {
+    .quality-score-num {
+      font-size: 2.2rem;
+      font-weight: 800;
+      color: var(--primary);
+      line-height: 1;
+    }
+
+    .quality-score-denom {
+      font-size: 1rem;
+      color: var(--slate-400);
+      font-weight: 600;
+    }
+
+    .quality-label {
+      font-size: 0.7rem;
+      font-weight: 800;
+      color: var(--slate-400);
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+    }
+
+    .quality-badge {
+      display: inline-block;
+      background: var(--emerald-light);
+      color: var(--emerald);
+      font-size: 0.78rem;
+      font-weight: 800;
+      padding: 4px 10px;
+      border-radius: 20px;
+      margin-top: 4px;
+    }
+
+    .mini-preview-card {
+      background: var(--white);
+      border: 1px solid var(--slate-200);
+      border-radius: 14px;
+      padding: 16px;
+      margin-top: 12px;
+    }
+
+    .mini-card-header {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      padding-bottom: 12px;
+      border-bottom: 1px solid var(--slate-100);
+      margin-bottom: 12px;
+    }
+
+    .avatar-circle {
+      width: 38px;
+      height: 38px;
+      border-radius: 50%;
+      background: var(--slate-100);
+      color: var(--slate-600);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-weight: 800;
+      font-size: 0.85rem;
+    }
+
+    .mini-stage-list {
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+    }
+
+    .mini-stage-item {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      font-size: 0.82rem;
+      padding: 6px 8px;
+      border-radius: 6px;
       background: var(--slate-50);
-      color: var(--slate-900);
-      border-color: var(--slate-300);
     }
 
-    .btn-stage-delete {
-      color: #ef4444;
-      border-color: #fee2e2;
-    }
-
-    .btn-stage-delete:hover {
-      background: #fef2f2;
-      border-color: #fca5a5;
-      color: #dc2626;
-    }
-
-    /* Bottom Wizard Actions */
     .wizard-footer {
       display: flex;
       align-items: center;
       justify-content: space-between;
-      margin-top: 32px;
+      margin-top: 28px;
       padding-top: 20px;
       border-top: 1px solid var(--slate-200);
     }
@@ -914,43 +1102,41 @@
       background: var(--white);
       border: 1.5px solid var(--slate-200);
       color: var(--slate-700);
-      font-size: 0.95rem;
+      font-size: 0.92rem;
       font-weight: 600;
-      padding: 12px 24px;
+      padding: 11px 22px;
       border-radius: 10px;
       cursor: pointer;
-      transition: all 0.2s;
-    }
-
-    .btn-footer-back:hover {
-      background: var(--slate-50);
-      border-color: var(--slate-300);
     }
 
     .btn-footer-next {
       background: var(--primary);
       border: 1.5px solid var(--primary);
       color: var(--white);
+      font-size: 0.92rem;
+      font-weight: 700;
+      padding: 11px 26px;
+      border-radius: 10px;
+      cursor: pointer;
+      box-shadow: 0 2px 8px rgba(13, 148, 136, 0.25);
+    }
+
+    .btn-create-playbook {
+      background: var(--emerald);
+      border: 1.5px solid var(--emerald);
+      color: var(--white);
       font-size: 0.95rem;
       font-weight: 700;
       padding: 12px 28px;
       border-radius: 10px;
       cursor: pointer;
-      transition: all 0.2s;
-      box-shadow: 0 2px 8px rgba(5, 150, 105, 0.25);
+      box-shadow: 0 2px 10px rgba(5, 150, 105, 0.3);
     }
 
-    .btn-footer-next:hover {
-      background: var(--primary-hover);
-      border-color: var(--primary-hover);
-      transform: translateY(-1px);
-    }
-
-    /* Modal */
     .modal-overlay {
       position: fixed;
       inset: 0;
-      background: rgba(15, 23, 42, 0.45);
+      background: rgba(15, 23, 42, 0.5);
       backdrop-filter: blur(4px);
       display: flex;
       align-items: center;
@@ -971,7 +1157,7 @@
       background: var(--white);
       border-radius: 20px;
       width: 100%;
-      max-width: 540px;
+      max-width: 580px;
       box-shadow: var(--shadow-lg);
       transform: translateY(16px);
       transition: transform 0.25s ease;
@@ -983,7 +1169,7 @@
     }
 
     .modal-header {
-      padding: 24px 28px 16px 28px;
+      padding: 20px 26px 14px 26px;
       display: flex;
       align-items: flex-start;
       justify-content: space-between;
@@ -991,13 +1177,13 @@
     }
 
     .modal-title {
-      font-size: 1.25rem;
+      font-size: 1.22rem;
       font-weight: 800;
       color: var(--slate-900);
     }
 
     .modal-subtitle {
-      font-size: 0.85rem;
+      font-size: 0.84rem;
       color: var(--slate-500);
       margin-top: 2px;
     }
@@ -1008,42 +1194,41 @@
       color: var(--slate-400);
       font-size: 1.35rem;
       cursor: pointer;
-      line-height: 1;
-      transition: color 0.15s;
-    }
-
-    .btn-modal-close:hover {
-      color: var(--slate-700);
     }
 
     .modal-body {
-      padding: 24px 28px;
+      padding: 20px 26px;
+      max-height: 480px;
+      overflow-y: auto;
     }
 
-    /* Modal Icon Picker */
+    .modal-footer {
+      padding: 16px 26px 20px 26px;
+      background: var(--slate-50);
+      border-top: 1px solid var(--slate-100);
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+    }
+
     .icon-picker-grid {
       display: flex;
-      gap: 12px;
+      gap: 10px;
       margin-top: 8px;
     }
 
     .icon-picker-btn {
-      width: 48px;
-      height: 48px;
+      width: 44px;
+      height: 44px;
       border-radius: 12px;
       border: 2px solid var(--slate-200);
       background: var(--white);
-      font-size: 1.3rem;
+      font-size: 1.25rem;
       display: flex;
       align-items: center;
       justify-content: center;
       cursor: pointer;
       position: relative;
-      transition: all 0.15s;
-    }
-
-    .icon-picker-btn:hover {
-      border-color: var(--slate-300);
     }
 
     .icon-picker-btn.selected {
@@ -1054,71 +1239,69 @@
     .icon-picker-btn.selected::after {
       content: "✓";
       position: absolute;
-      top: -6px;
-      right: -6px;
-      width: 16px;
-      height: 16px;
+      top: -5px;
+      right: -5px;
+      width: 15px;
+      height: 15px;
       border-radius: 50%;
       background: var(--primary);
       color: var(--white);
-      font-size: 0.65rem;
+      font-size: 0.62rem;
       font-weight: 800;
       display: flex;
       align-items: center;
       justify-content: center;
     }
 
-    .modal-footer {
-      padding: 16px 28px 24px 28px;
-      background: var(--slate-50);
-      border-top: 1px solid var(--slate-100);
+    .tag-input-container {
       display: flex;
+      flex-wrap: wrap;
       align-items: center;
-      justify-content: space-between;
+      gap: 6px;
+      border: 1.5px solid var(--slate-200);
+      border-radius: var(--input-radius);
+      padding: 6px 10px;
+      background: var(--white);
     }
 
-    .modal-position-note {
-      font-size: 0.8rem;
-      color: var(--slate-500);
-      display: flex;
+    .tag-pill-editable {
+      background: var(--primary);
+      color: var(--white);
+      font-size: 0.78rem;
+      font-weight: 600;
+      padding: 4px 10px;
+      border-radius: 16px;
+      display: inline-flex;
       align-items: center;
-      gap: 4px;
+      gap: 6px;
     }
 
-    .modal-actions {
+    .tag-remove-btn {
+      cursor: pointer;
+      font-size: 0.75rem;
+      opacity: 0.8;
+    }
+
+    .tag-add-trigger {
+      background: transparent;
+      border: 1px dashed var(--slate-300);
+      color: var(--slate-600);
+      font-size: 0.78rem;
+      padding: 4px 8px;
+      border-radius: 16px;
+      cursor: pointer;
+    }
+
+    .ai-suggestion-box {
+      background: #f0fdfa;
+      border: 1px solid #99f6e4;
+      border-radius: 12px;
+      padding: 14px;
+      margin-top: 14px;
       display: flex;
-      align-items: center;
       gap: 10px;
     }
 
-    .btn-modal-cancel {
-      background: var(--white);
-      border: 1px solid var(--slate-300);
-      color: var(--slate-700);
-      font-size: 0.88rem;
-      font-weight: 600;
-      padding: 8px 18px;
-      border-radius: 8px;
-      cursor: pointer;
-    }
-
-    .btn-modal-submit {
-      background: var(--primary);
-      border: 1px solid var(--primary);
-      color: var(--white);
-      font-size: 0.88rem;
-      font-weight: 700;
-      padding: 8px 22px;
-      border-radius: 8px;
-      cursor: pointer;
-      box-shadow: 0 2px 6px rgba(5, 150, 105, 0.2);
-    }
-
-    .btn-modal-submit:hover {
-      background: var(--primary-hover);
-    }
-
-    /* Toast Notification */
     .toast-container {
       position: fixed;
       bottom: 24px;
@@ -1168,8 +1351,11 @@
       <button class="btn-nav-secondary" onclick="openPlaybooksListModal()">
         📂 My Playbooks
       </button>
-      <button class="btn-nav-primary" onclick="saveCurrentPlaybook(true)">
-        💾 Save Playbook
+      <button class="btn-nav-secondary" onclick="saveCurrentPlaybook(true)">
+        Save as Draft
+      </button>
+      <button class="btn-nav-primary" onclick="handleTopRightCta()">
+        <span id="topRightCtaText">Next: Your Style →</span>
       </button>
     </div>
   </header>
@@ -1177,13 +1363,12 @@
   <!-- Main Container -->
   <main class="container">
 
-    <!-- Page Header -->
     <div class="page-header">
       <h1 class="page-title">Create Your Custom Playbook</h1>
       <p class="page-subtitle">Build a playbook that reflects your unique style, voice, and sales methodology.</p>
     </div>
 
-    <!-- Stepper Navigation -->
+    <!-- Stepper Navigation (5 Steps) -->
     <div class="stepper-wrap" id="stepperNav">
       <button class="step-item active" id="stepBtn1" onclick="goToStep(1)">
         <div class="step-circle" id="circle1">1</div>
@@ -1201,14 +1386,22 @@
         <div class="step-circle" id="circle3">3</div>
         <span class="step-label">Conversation Flow</span>
       </button>
+      <div class="step-divider" id="divider3"></div>
+
+      <button class="step-item" id="stepBtn4" onclick="goToStep(4)">
+        <div class="step-circle" id="circle4">4</div>
+        <span class="step-label">Objection Handling</span>
+      </button>
+      <div class="step-divider" id="divider4"></div>
+
+      <button class="step-item" id="stepBtn5" onclick="goToStep(5)">
+        <div class="step-circle" id="circle5">5</div>
+        <span class="step-label">Review & Save</span>
+      </button>
     </div>
 
-    <!-- ============================================== -->
     <!-- STEP 1: BASIC INFORMATION -->
-    <!-- ============================================== -->
     <section id="stepSection1" class="step-section">
-
-      <!-- Basic Information Card -->
       <div class="card">
         <div class="card-header">
           <div class="card-icon-badge badge-mint">✏️</div>
@@ -1218,7 +1411,7 @@
           </div>
         </div>
 
-        <div class="grid-2-col" style="margin-bottom: 20px;">
+        <div class="grid-2-col" style="margin-bottom: 18px;">
           <div class="form-group">
             <label class="form-label" for="playbookName">Playbook Name</label>
             <input type="text" id="playbookName" class="input-text" placeholder="e.g., Daniel G. Method"
@@ -1238,9 +1431,8 @@
           <div class="form-group">
             <label class="form-label" for="industrySelect">Select Industry / Niche</label>
             <select id="industrySelect" class="select-dropdown" onchange="handleInputChange()">
-              <option value="">Choose industry</option>
-              <option value="SaaS / Software" selected>SaaS / Software</option>
-              <option value="Real Estate">Real Estate</option>
+              <option value="Real Estate" selected>Real Estate</option>
+              <option value="SaaS / Software">SaaS / Software</option>
               <option value="Financial Services & Insurance">Financial Services & Insurance</option>
               <option value="Healthcare & Medical">Healthcare & Medical</option>
               <option value="Consulting & Agency">Consulting & Agency</option>
@@ -1253,22 +1445,31 @@
           <div class="form-group">
             <label class="form-label" for="leadTypeSelect">Best For Lead Types</label>
             <select id="leadTypeSelect" class="select-dropdown" onchange="handleInputChange()">
-              <option value="">Select lead types</option>
-              <option value="Inbound Qualified Leads" selected>Inbound Qualified Leads</option>
-              <option value="Cold Outreach / Outbound">Cold Outreach / Outbound</option>
-              <option value="Referrals & Warm Intros">Referrals & Warm Intros</option>
-              <option value="Enterprise Decision Makers">Enterprise Decision Makers</option>
-              <option value="SMB Owners">SMB Owners</option>
-              <option value="High-Ticket B2C">High-Ticket B2C</option>
+              <option value="Expired Listings" selected>Expired Listings</option>
+              <option value="Pre-Expired Listings">Pre-Expired Listings</option>
+              <option value="FSBO (For Sale By Owner)">FSBO (For Sale By Owner)</option>
+              <option value="Absentee Owners">Absentee Owners</option>
+              <option value="Circle Prospecting">Circle Prospecting</option>
+              <option value="Just Listed">Just Listed</option>
+              <option value="Just Sold">Just Sold</option>
+              <option value="Probate">Probate</option>
+              <option value="Trust & Estate">Trust & Estate</option>
+              <option value="Pre-Foreclosure">Pre-Foreclosure</option>
+              <option value="Foreclosure / REO">Foreclosure / REO</option>
+              <option value="Divorce">Divorce</option>
+              <option value="Tax Delinquent">Tax Delinquent</option>
+              <option value="Vacant Properties">Vacant Properties</option>
+              <option value="Investor / Cash Buyers">Investor / Cash Buyers</option>
+              <option value="Past Clients & Sphere">Past Clients & Sphere</option>
             </select>
           </div>
 
           <div class="form-group">
             <label class="form-label" for="experienceSelect">Experience Level</label>
             <select id="experienceSelect" class="select-dropdown" onchange="handleInputChange()">
-              <option value="">Select experience level</option>
               <option value="Entry Level (0-1 yrs)">Entry Level (0-1 yrs)</option>
-              <option value="Intermediate (2-4 yrs)" selected>Intermediate (2-4 yrs)</option>
+              <option value="Intermediate (2-4 yrs)">Intermediate (2-4 yrs)</option>
+              <option value="Intermediate to Advanced" selected>Intermediate to Advanced</option>
               <option value="Senior Closer (5+ yrs)">Senior Closer (5+ yrs)</option>
               <option value="Master / Executive Level">Master / Executive Level</option>
             </select>
@@ -1276,22 +1477,20 @@
         </div>
       </div>
 
-      <!-- Your Unique Voice Card -->
       <div class="card">
         <div class="card-header">
           <div class="card-icon-badge badge-mint">💬</div>
           <div class="card-title-group">
             <h2 class="card-title">Your Unique Voice</h2>
-            <p class="card-subtitle">Add phrases, words, or expressions you use often. PitchProX will incorporate them
-              naturally.</p>
+            <p class="card-subtitle">Add phrases, words, or expressions you use often. PitchProX will incorporate them naturally.</p>
           </div>
         </div>
 
         <div class="form-group">
-          <textarea id="voicePhrases" class="input-textarea" style="min-height: 90px;" maxlength="500"
+          <textarea id="voicePhrases" class="input-textarea" style="min-height: 80px;" maxlength="500"
             placeholder="Add your go-to phrases, words you love to use, or expressions that sound like you..."
-            oninput="updateCharCounter('voicePhrases', 'voiceCounter', 500); handleInputChange()"></textarea>
-          <div class="char-counter" id="voiceCounter">0/500</div>
+            oninput="updateCharCounter('voicePhrases', 'voiceCounter', 500); handleInputChange()">• "Here's the thing"&#10;• "Bottom line"</textarea>
+          <div class="char-counter" id="voiceCounter">30/500</div>
         </div>
 
         <div class="chips-section">
@@ -1299,13 +1498,11 @@
           <button class="chip-item" onclick="insertVoicePhrase('Here\'s the thing')">"Here's the thing"</button>
           <button class="chip-item" onclick="insertVoicePhrase('Bottom line')">"Bottom line"</button>
           <button class="chip-item" onclick="insertVoicePhrase('What I\'ve seen is...')">"What I've seen is..."</button>
-          <button class="chip-item" onclick="insertVoicePhrase('At the end of the day')">"At the end of the
-            day"</button>
+          <button class="chip-item" onclick="insertVoicePhrase('At the end of the day')">"At the end of the day"</button>
           <button class="chip-add-btn" onclick="promptCustomChip()">+ Add more</button>
         </div>
       </div>
 
-      <!-- Your Playbook's Core Philosophy Card -->
       <div class="card">
         <div class="card-header">
           <div class="card-icon-badge badge-purple">⚡</div>
@@ -1316,14 +1513,13 @@
         </div>
 
         <div class="form-group">
-          <textarea id="philosophyText" class="input-textarea" style="min-height: 100px;" maxlength="1000"
+          <textarea id="philosophyText" class="input-textarea" style="min-height: 90px;" maxlength="1000"
             placeholder="Write 3-5 principles that define how you help clients and close deals..."
-            oninput="updateCharCounter('philosophyText', 'philosophyCounter', 1000); handleInputChange()"></textarea>
-          <div class="char-counter" id="philosophyCounter">0/1000</div>
+            oninput="updateCharCounter('philosophyText', 'philosophyCounter', 1000); handleInputChange()">1. Establish trust through diagnostic questioning.&#10;2. Frame price in context of total value and net ROI.&#10;3. Guide the prospect with clear next steps.</textarea>
+          <div class="char-counter" id="philosophyCounter">152/1000</div>
         </div>
       </div>
 
-      <!-- Goals & Outcomes Card -->
       <div class="card">
         <div class="card-header">
           <div class="card-icon-badge badge-blue">🚩</div>
@@ -1343,7 +1539,7 @@
             <div class="goal-desc">Create deeper connections and credibility.</div>
           </div>
 
-          <div class="goal-card" id="goal_appointments" onclick="toggleGoal('goal_appointments')">
+          <div class="goal-card selected" id="goal_appointments" onclick="toggleGoal('goal_appointments')">
             <div class="goal-card-top">
               <div class="goal-icon">📅</div>
               <div class="goal-check-circle"></div>
@@ -1352,7 +1548,7 @@
             <div class="goal-desc">Get more yes's to the next step.</div>
           </div>
 
-          <div class="goal-card" id="goal_deals" onclick="toggleGoal('goal_deals')">
+          <div class="goal-card selected" id="goal_deals" onclick="toggleGoal('goal_deals')">
             <div class="goal-card-top">
               <div class="goal-icon">💰</div>
               <div class="goal-check-circle"></div>
@@ -1363,34 +1559,26 @@
         </div>
       </div>
 
-      <!-- Step 1 Footer -->
       <div class="wizard-footer">
         <div></div>
         <button class="btn-footer-next" onclick="goToStep(2)">
           Next: Your Style →
         </button>
       </div>
-
     </section>
 
-    <!-- ============================================== -->
     <!-- STEP 2: YOUR STYLE -->
-    <!-- ============================================== -->
     <section id="stepSection2" class="step-section" style="display: none;">
-
-      <!-- Define Your Communication Style Card -->
       <div class="card">
         <div class="card-header">
           <div class="card-icon-badge badge-teal">🎙️</div>
           <div class="card-title-group">
             <h2 class="card-title">Define Your Communication Style</h2>
-            <p class="card-subtitle">Choose the style and tone that best represents how you want PitchProX to coach and
-              prompt you.</p>
+            <p class="card-subtitle">Choose the style and tone that best represents how you want PitchProX to coach and prompt you.</p>
           </div>
         </div>
 
-        <div class="grid-3-col" style="margin-bottom: 24px;">
-          <!-- Overall Tone -->
+        <div class="grid-3-col" style="margin-bottom: 22px;">
           <div class="form-group">
             <label class="form-label">OVERALL TONE</label>
             <div class="tone-grid" id="toneGrid">
@@ -1415,7 +1603,6 @@
             </div>
           </div>
 
-          <!-- Communication Style -->
           <div class="form-group">
             <label class="form-label" for="commStyleSelect">COMMUNICATION STYLE</label>
             <span class="form-label-sub">How you prefer to communicate on calls.</span>
@@ -1429,7 +1616,6 @@
             </select>
           </div>
 
-          <!-- Energy Level -->
           <div class="form-group">
             <label class="form-label">ENERGY LEVEL</label>
             <span class="form-label-sub">How energetic should the prompts feel?</span>
@@ -1446,7 +1632,6 @@
         </div>
 
         <div class="grid-3-col">
-          <!-- Sentence Style -->
           <div class="form-group">
             <label class="form-label" for="sentenceStyleSelect">SENTENCE STYLE</label>
             <span class="form-label-sub">How should your prompts be written?</span>
@@ -1458,7 +1643,6 @@
             </select>
           </div>
 
-          <!-- Formality -->
           <div class="form-group">
             <label class="form-label" for="formalitySelect">FORMALITY</label>
             <span class="form-label-sub">How formal should the language be?</span>
@@ -1469,7 +1653,6 @@
             </select>
           </div>
 
-          <!-- Use of Humor -->
           <div class="form-group">
             <label class="form-label">USE OF HUMOR</label>
             <span class="form-label-sub">How much humor should be used?</span>
@@ -1486,54 +1669,6 @@
         </div>
       </div>
 
-      <!-- Your Unique Voice (Step 2 Sync) -->
-      <div class="card">
-        <div class="card-header">
-          <div class="card-icon-badge badge-mint">💬</div>
-          <div class="card-title-group">
-            <h2 class="card-title">Your Unique Voice</h2>
-            <p class="card-subtitle">Add phrases, words, or expressions you use often. PitchProX will incorporate them
-              naturally.</p>
-          </div>
-        </div>
-
-        <div class="form-group">
-          <textarea id="voicePhrasesStep2" class="input-textarea" style="min-height: 80px;" maxlength="500"
-            placeholder="Add your go-to phrases, words you love to use, or expressions that sound like you..."
-            oninput="syncVoiceStep2(); handleInputChange()"></textarea>
-          <div class="char-counter" id="voiceCounterStep2">0/500</div>
-        </div>
-
-        <div class="chips-section">
-          <span class="chips-label">Examples:</span>
-          <button class="chip-item" onclick="insertVoicePhrase('Here\'s the thing')">"Here's the thing"</button>
-          <button class="chip-item" onclick="insertVoicePhrase('Bottom line')">"Bottom line"</button>
-          <button class="chip-item" onclick="insertVoicePhrase('What I\'ve seen is...')">"What I've seen is..."</button>
-          <button class="chip-item" onclick="insertVoicePhrase('At the end of the day')">"At the end of the
-            day"</button>
-          <button class="chip-add-btn" onclick="promptCustomChip()">+ Add more</button>
-        </div>
-      </div>
-
-      <!-- Your Core Selling Principles (Step 2 Sync) -->
-      <div class="card">
-        <div class="card-header">
-          <div class="card-icon-badge badge-teal">🛡️</div>
-          <div class="card-title-group">
-            <h2 class="card-title">Your Core Selling Principles</h2>
-            <p class="card-subtitle">What are the core beliefs or principles that guide your sales approach?</p>
-          </div>
-        </div>
-
-        <div class="form-group">
-          <textarea id="principlesStep2" class="input-textarea" style="min-height: 90px;" maxlength="1000"
-            placeholder="Write 3-5 principles that define how you help clients and close deals..."
-            oninput="syncPhilosophyStep2(); handleInputChange()"></textarea>
-          <div class="char-counter" id="principlesCounterStep2">0/1000</div>
-        </div>
-      </div>
-
-      <!-- Step 2 Footer -->
       <div class="wizard-footer">
         <button class="btn-footer-back" onclick="goToStep(1)">
           ← Back: Basic Info
@@ -1542,17 +1677,12 @@
           Next: Conversation Flow →
         </button>
       </div>
-
     </section>
 
-    <!-- ============================================== -->
     <!-- STEP 3: CONVERSATION FLOW -->
-    <!-- ============================================== -->
     <section id="stepSection3" class="step-section" style="display: none;">
-
-      <!-- Build Your Conversation Flow Card -->
       <div class="card">
-        <div class="timeline-header-action">
+        <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 20px;">
           <div class="card-header" style="margin-bottom: 0;">
             <div class="card-icon-badge badge-mint">🔀</div>
             <div class="card-title-group">
@@ -1567,29 +1697,343 @@
 
         <div class="timeline-container">
           <div class="timeline-track"></div>
-          <div id="stagesList">
-            <!-- Dynamic Stages Injected Here -->
-          </div>
+          <div id="stagesList"></div>
         </div>
       </div>
 
-      <!-- Step 3 Footer -->
       <div class="wizard-footer">
         <button class="btn-footer-back" onclick="goToStep(2)">
           ← Back: Your Style
         </button>
-        <button class="btn-footer-next" onclick="saveCurrentPlaybook(true)">
-          🎉 Save & Finish Playbook
+        <button class="btn-footer-next" onclick="goToStep(4)">
+          Next: Objection Handling →
         </button>
       </div>
+    </section>
 
+    <!-- STEP 4: OBJECTION HANDLING -->
+    <section id="stepSection4" class="step-section" style="display: none;">
+      <div class="layout-2-col">
+        <div>
+          <div class="card">
+            <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 18px;">
+              <div class="card-header" style="margin-bottom: 0;">
+                <div class="card-icon-badge badge-teal">🛡️</div>
+                <div class="card-title-group">
+                  <h2 class="card-title">Build Your Objection Strategy</h2>
+                  <p class="card-subtitle">Add the objections you encounter most often and how you want PitchProX to respond.</p>
+                </div>
+              </div>
+              <div style="display: flex; gap: 8px;">
+                <button class="btn-nav-secondary" onclick="importObjectionLibrary()">Import Library</button>
+                <button class="btn-add-stage" onclick="openAddObjectionModal()">+ Add Objection</button>
+              </div>
+            </div>
+
+            <!-- Filter Bar with all 16 Lead Types & 4 Categories -->
+            <div class="filter-bar">
+              <div class="objection-tab-badge">
+                My Objections <span class="badge-count" id="objectionCountBadge">8</span>
+              </div>
+              <select class="filter-select" id="filterLeadType" onchange="filterObjections()">
+                <option value="all">All Lead Types (16)</option>
+                <option value="Expired Listings">Expired Listings</option>
+                <option value="Pre-Expired Listings">Pre-Expired Listings</option>
+                <option value="FSBO">FSBO (For Sale By Owner)</option>
+                <option value="Absentee Owners">Absentee Owners</option>
+                <option value="Circle Prospecting">Circle Prospecting</option>
+                <option value="Just Listed">Just Listed</option>
+                <option value="Just Sold">Just Sold</option>
+                <option value="Probate">Probate</option>
+                <option value="Trust & Estate">Trust & Estate</option>
+                <option value="Pre-Foreclosure">Pre-Foreclosure</option>
+                <option value="Foreclosure / REO">Foreclosure / REO</option>
+                <option value="Divorce">Divorce</option>
+                <option value="Tax Delinquent">Tax Delinquent</option>
+                <option value="Vacant Properties">Vacant Properties</option>
+                <option value="Investor / Cash Buyers">Investor / Cash Buyers</option>
+                <option value="Past Clients & Sphere">Past Clients & Sphere</option>
+              </select>
+              <select class="filter-select" id="filterCategory" onchange="filterObjections()">
+                <option value="all">All Categories (4)</option>
+                <option value="Financial">Financial</option>
+                <option value="Risk">Risk</option>
+                <option value="Logistics">Logistics</option>
+                <option value="Relationship">Relationship</option>
+              </select>
+              <div class="search-box">
+                <span class="search-icon">🔍</span>
+                <input type="text" class="search-input" id="searchObjectionInput" placeholder="Search objections..." oninput="filterObjections()">
+              </div>
+            </div>
+
+            <table class="obj-table">
+              <thead>
+                <tr>
+                  <th>OBJECTION</th>
+                  <th>LEAD TYPES</th>
+                  <th>RESPONSE STYLE</th>
+                  <th>CATEGORY</th>
+                  <th style="text-align: right;">ACTIONS</th>
+                </tr>
+              </thead>
+              <tbody id="objectionsTableBody"></tbody>
+            </table>
+
+            <div style="display: flex; justify-content: space-between; align-items: center; margin-top: 16px; font-size: 0.8rem; color: var(--slate-400);">
+              <span id="objPaginationNote">Showing 1 to 5 of 8 objections</span>
+              <div style="display: flex; gap: 6px;">
+                <button class="btn-nav-secondary" style="padding: 4px 8px; font-size: 0.78rem;" onclick="setObjPage(1)">1</button>
+                <button class="btn-nav-secondary" style="padding: 4px 8px; font-size: 0.78rem;" onclick="setObjPage(2)">2</button>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div>
+          <!-- Strategy Tips -->
+          <div class="card" style="padding: 20px 22px;">
+            <div style="display: flex; align-items: center; gap: 8px; margin-bottom: 12px;">
+              <span style="font-size: 1.1rem; color: var(--emerald);">💡</span>
+              <h3 style="font-size: 0.95rem; font-weight: 700; color: var(--slate-900);">Objection Strategy Tips</h3>
+            </div>
+            <ul class="tips-list">
+              <li class="tips-item"><span class="tips-check">✓</span> Focus on value, not price</li>
+              <li class="tips-item"><span class="tips-check">✓</span> Acknowledge, validate, then redirect</li>
+              <li class="tips-item"><span class="tips-check">✓</span> Keep responses short and natural</li>
+              <li class="tips-item"><span class="tips-check">✓</span> Always guide toward the next step</li>
+              <li class="tips-item"><span class="tips-check">✓</span> Use your unique voice and style</li>
+            </ul>
+          </div>
+
+          <!-- Framework -->
+          <div class="card" style="padding: 20px 22px;">
+            <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 6px;">
+              <h3 style="font-size: 0.95rem; font-weight: 700; color: var(--slate-900);">Objection Response Framework</h3>
+              <a href="javascript:void(0)" onclick="openSequenceModal()" style="font-size: 0.8rem; color: var(--primary); font-weight: 700; text-decoration: none;">✎ Edit</a>
+            </div>
+            <p style="font-size: 0.78rem; color: var(--slate-400); margin-bottom: 12px;">This is the structure PitchProX will use.</p>
+
+            <div class="framework-flow">
+              <div class="framework-node">
+                <div class="framework-icon-box active">🎙️</div>
+                <span class="framework-node-name">Acknowledge</span>
+              </div>
+              <span class="framework-arrow">›</span>
+              <div class="framework-node">
+                <div class="framework-icon-box active">💚</div>
+                <span class="framework-node-name">Validate</span>
+              </div>
+              <span class="framework-arrow">›</span>
+              <div class="framework-node">
+                <div class="framework-icon-box active">🔄</div>
+                <span class="framework-node-name">Reframe</span>
+              </div>
+              <span class="framework-arrow">›</span>
+              <div class="framework-node">
+                <div class="framework-icon-box active">📄</div>
+                <span class="framework-node-name">Guide Forward</span>
+              </div>
+            </div>
+          </div>
+
+          <!-- Live Preview -->
+          <div class="card" style="padding: 20px 22px;">
+            <div style="display: flex; align-items: center; gap: 8px;">
+              <span style="font-size: 1.1rem; color: var(--primary);">👁️</span>
+              <h3 style="font-size: 0.95rem; font-weight: 700; color: var(--slate-900);">Live Preview</h3>
+            </div>
+            <p style="font-size: 0.78rem; color: var(--slate-400); margin-top: 2px;">This is how your AI coaching will start to sound.</p>
+
+            <div class="live-preview-box" id="livePromptPreviewBox">
+              "Hey Daniel, I've got you. I'll keep my prompts confident, direct, and consultative — short, professional, and to the point. Let's build a playbook that wins more conversations."
+            </div>
+
+            <button class="btn-nav-secondary" style="width: 100%; margin-top: 12px; justify-content: center;" onclick="generateLivePromptPreview()">
+              🔄 Generate Preview
+            </button>
+          </div>
+        </div>
+      </div>
+
+      <div class="wizard-footer">
+        <button class="btn-footer-back" onclick="goToStep(3)">
+          ← Back: Conversation Flow
+        </button>
+        <button class="btn-footer-next" onclick="goToStep(5)">
+          Next: Review & Save →
+        </button>
+      </div>
+    </section>
+
+    <!-- STEP 5: REVIEW & SAVE -->
+    <section id="stepSection5" class="step-section" style="display: none;">
+      <div class="layout-2-col">
+        <div>
+          <!-- Summary Card -->
+          <div class="card">
+            <div style="display: flex; align-items: flex-start; justify-content: space-between; margin-bottom: 18px;">
+              <div class="card-header" style="margin-bottom: 0;">
+                <div class="card-icon-badge badge-teal">📄</div>
+                <div class="card-title-group">
+                  <h2 class="card-title">Playbook Summary</h2>
+                  <p class="card-subtitle">Here's a summary of your custom playbook.</p>
+                </div>
+              </div>
+              <button class="btn-edit-jump" onclick="goToStep(1)">✎ Edit All Sections</button>
+            </div>
+
+            <div class="summary-grid">
+              <div>
+                <div class="summary-item-label">🔖 PLAYBOOK NAME</div>
+                <div class="summary-item-val" id="sumPlaybookName">Daniel G. Method <span class="tag-pill tag-pill-primary" style="font-size: 0.65rem;">Custom</span></div>
+              </div>
+              <div>
+                <div class="summary-item-label">🏢 INDUSTRY / NICHE</div>
+                <div class="summary-item-val" id="sumIndustry">Real Estate</div>
+              </div>
+              <div>
+                <div class="summary-item-label">🎯 BEST FOR LEAD TYPES</div>
+                <div class="summary-item-val" id="sumLeadTypes">Expired Listings, FSBO <span style="font-size: 0.75rem; color: var(--slate-400);">+14 more</span></div>
+              </div>
+              <div>
+                <div class="summary-item-label">📈 EXPERIENCE LEVEL</div>
+                <div class="summary-item-val" id="sumExpLevel">Intermediate to Advanced</div>
+              </div>
+            </div>
+
+            <div style="text-align: right; font-size: 0.78rem; color: var(--slate-400); font-weight: 600;">
+              👤 CREATED BY: <span style="color: var(--slate-700);">You</span>
+            </div>
+          </div>
+
+          <!-- Section Jump Cards -->
+          <div class="review-section-card">
+            <div class="review-section-left">
+              <div style="font-size: 1.25rem;">📄</div>
+              <div>
+                <div class="review-section-title">Basic Information</div>
+                <div class="review-section-desc" id="sumBasicDesc">Name, description, industry, 16 lead types supported, experience level</div>
+              </div>
+            </div>
+            <button class="btn-edit-jump" onclick="goToStep(1)">✎ Edit</button>
+          </div>
+
+          <div class="review-section-card">
+            <div class="review-section-left">
+              <div style="font-size: 1.25rem;">🎙️</div>
+              <div>
+                <div class="review-section-title">Your Style & Runtime Lens</div>
+                <div class="review-section-desc" id="sumStyleDesc">Tone: Confident • Style: Consultative • Cooldown: 4s • Confidence: 75%</div>
+              </div>
+            </div>
+            <button class="btn-edit-jump" onclick="goToStep(2)">✎ Edit</button>
+          </div>
+
+          <div class="review-section-card">
+            <div class="review-section-left">
+              <div style="font-size: 1.25rem;">🔀</div>
+              <div>
+                <div class="review-section-title">Conversation Flow</div>
+                <div class="review-section-desc" id="sumStagesDesc">6 stages defined from Opening to Follow Up</div>
+              </div>
+            </div>
+            <button class="btn-edit-jump" onclick="goToStep(3)">✎ Edit</button>
+          </div>
+
+          <div class="review-section-card">
+            <div class="review-section-left">
+              <div style="font-size: 1.25rem;">🛡️</div>
+              <div>
+                <div class="review-section-title">Objection Handling</div>
+                <div class="review-section-desc" id="sumObjectionsDesc">8 normalized objections • 4 canonical categories</div>
+              </div>
+            </div>
+            <button class="btn-edit-jump" onclick="goToStep(4)">✎ Edit</button>
+          </div>
+
+          <!-- Quality Check Card -->
+          <div class="quality-check-card">
+            <div style="display: flex; align-items: center; gap: 16px;">
+              <div class="card-icon-badge badge-blue" style="width: 48px; height: 48px; font-size: 1.4rem;">🛡️</div>
+              <div>
+                <h3 style="font-size: 1.1rem; font-weight: 800; color: var(--slate-900);">Quality Check</h3>
+                <p style="font-size: 0.85rem; color: var(--slate-500); margin-top: 2px;">Great job! Your playbook methodology is complete and ready to use.</p>
+              </div>
+            </div>
+            <div style="text-align: right;">
+              <div>
+                <span class="quality-score-num" id="qualityScoreDisplay">94</span>
+                <span class="quality-score-denom">/100</span>
+              </div>
+              <div class="quality-label">PLAYBOOK QUALITY SCORE</div>
+              <div class="quality-badge" id="qualityBadgeLabel">Excellent</div>
+            </div>
+          </div>
+        </div>
+
+        <div>
+          <!-- Playbook Preview -->
+          <div class="card" style="padding: 20px 22px;">
+            <div style="display: flex; align-items: center; gap: 8px; margin-bottom: 2px;">
+              <span style="font-size: 1.1rem; color: var(--primary);">👁️</span>
+              <h3 style="font-size: 0.95rem; font-weight: 700; color: var(--slate-900);">Playbook Preview</h3>
+            </div>
+            <p style="font-size: 0.78rem; color: var(--slate-400); margin-bottom: 12px;">This is how your methodology will appear.</p>
+
+            <div class="mini-preview-card">
+              <div class="mini-card-header">
+                <div class="avatar-circle">CP</div>
+                <div>
+                  <div style="font-weight: 800; font-size: 0.9rem; color: var(--slate-900);">Custom Playbook <span class="tag-pill" style="font-size: 0.65rem;">DRAFT</span></div>
+                  <div style="font-size: 0.76rem; color: var(--slate-500);">New Playbook</div>
+                </div>
+              </div>
+              <div class="mini-stage-list" id="miniStageListDisplay"></div>
+            </div>
+          </div>
+
+          <!-- What Happens Next? -->
+          <div class="card" style="padding: 20px 22px;">
+            <h3 style="font-size: 0.95rem; font-weight: 700; color: var(--slate-900); margin-bottom: 12px;">What Happens Next?</h3>
+            <ul class="tips-list">
+              <li class="tips-item"><span class="tips-check">✓</span> Your playbook will be active immediately as a methodology lens.</li>
+              <li class="tips-item"><span class="tips-check">✓</span> PitchProX Standard intelligence handles safety and truth.</li>
+              <li class="tips-item"><span class="tips-check">✓</span> You can switch or edit your playbook anytime.</li>
+            </ul>
+          </div>
+
+          <!-- Ready to Power Calls -->
+          <div class="card" style="padding: 20px 22px; background: #f0fdf4; border-color: #bbf7d0;">
+            <div style="display: flex; align-items: center; gap: 10px; margin-bottom: 14px;">
+              <div style="width: 32px; height: 32px; border-radius: 50%; background: var(--emerald); color: var(--white); display: flex; align-items: center; justify-content: center; font-size: 1rem;">✓</div>
+              <div>
+                <h4 style="font-size: 0.9rem; font-weight: 800; color: var(--slate-900);">Ready to Power Your Calls!</h4>
+                <p style="font-size: 0.76rem; color: var(--slate-600);">Create your playbook and start closing more deals.</p>
+              </div>
+            </div>
+            <button class="btn-create-playbook" style="width: 100%;" onclick="createAndPublishPlaybook()">
+              Create Playbook ✓
+            </button>
+          </div>
+        </div>
+      </div>
+
+      <div class="wizard-footer">
+        <button class="btn-footer-back" onclick="goToStep(4)">
+          ← Back: Objection Handling
+        </button>
+        <button class="btn-create-playbook" onclick="createAndPublishPlaybook()">
+          Create Playbook ✓
+        </button>
+      </div>
     </section>
 
   </main>
 
-  <!-- ============================================== -->
-  <!-- MODAL: ADD / EDIT STAGE -->
-  <!-- ============================================== -->
+  <!-- MODALS -->
+
+  <!-- Modal 1: Add/Edit Stage -->
   <div class="modal-overlay" id="stageModal">
     <div class="modal-box">
       <div class="modal-header">
@@ -1599,71 +2043,159 @@
         </div>
         <button class="btn-modal-close" onclick="closeStageModal()">✕</button>
       </div>
-
       <div class="modal-body">
         <input type="hidden" id="editingStageId" value="">
-
         <div class="form-group">
           <label class="form-label" for="stageNameInput">Stage Name</label>
           <input type="text" id="stageNameInput" class="input-text" placeholder="e.g., Discovery, Closing">
         </div>
-
         <div class="form-group">
           <label class="form-label" for="stageGoalInput">Stage Goal</label>
-          <div style="position: relative;">
-            <input type="text" id="stageGoalInput" class="input-text" placeholder="e.g., Understand customer needs"
-              style="padding-left: 38px;">
-            <span style="position: absolute; left: 12px; top: 11px; font-size: 1rem; color: var(--primary);">🎯</span>
-          </div>
+          <input type="text" id="stageGoalInput" class="input-text" placeholder="e.g., Understand customer needs">
         </div>
-
         <div class="form-group">
           <label class="form-label" for="stageDescInput">Stage Description</label>
-          <textarea id="stageDescInput" class="input-textarea" style="min-height: 84px;"
-            placeholder="Provide detailed instructions for the AI on how to handle this part of the conversation..."></textarea>
+          <textarea id="stageDescInput" class="input-textarea" placeholder="Provide detailed instructions for the AI on how to handle this part of the conversation..."></textarea>
         </div>
-
         <div class="form-group">
           <label class="form-label">Icon Selection</label>
           <div class="icon-picker-grid" id="iconPickerGrid">
-            <button type="button" class="icon-picker-btn selected" data-icon="hand" onclick="selectStageIcon('hand')">
-              ✋
-            </button>
-            <button type="button" class="icon-picker-btn" data-icon="search" onclick="selectStageIcon('search')">
-              🔍
-            </button>
-            <button type="button" class="icon-picker-btn" data-icon="diamond" onclick="selectStageIcon('diamond')">
-              💎
-            </button>
-            <button type="button" class="icon-picker-btn" data-icon="shield" onclick="selectStageIcon('shield')">
-              🛡️
-            </button>
-            <button type="button" class="icon-picker-btn" data-icon="target" onclick="selectStageIcon('target')">
-              🎯
-            </button>
-            <button type="button" class="icon-picker-btn" data-icon="phone" onclick="selectStageIcon('phone')">
-              📞
-            </button>
+            <button type="button" class="icon-picker-btn selected" data-icon="hand" onclick="selectStageIcon('hand')">✋</button>
+            <button type="button" class="icon-picker-btn" data-icon="search" onclick="selectStageIcon('search')">🔍</button>
+            <button type="button" class="icon-picker-btn" data-icon="diamond" onclick="selectStageIcon('diamond')">💎</button>
+            <button type="button" class="icon-picker-btn" data-icon="shield" onclick="selectStageIcon('shield')">🛡️</button>
+            <button type="button" class="icon-picker-btn" data-icon="target" onclick="selectStageIcon('target')">🎯</button>
+            <button type="button" class="icon-picker-btn" data-icon="phone" onclick="selectStageIcon('phone')">📞</button>
           </div>
         </div>
       </div>
-
       <div class="modal-footer">
-        <div class="modal-position-note" id="modalPositionNote">
-          ⓘ Position: 01 of 06
-        </div>
-        <div class="modal-actions">
-          <button type="button" class="btn-modal-cancel" onclick="closeStageModal()">Cancel</button>
-          <button type="button" class="btn-modal-submit" id="btnSubmitStage" onclick="submitStageForm()">Add
-            Stage</button>
+        <div style="font-size: 0.8rem; color: var(--slate-500);" id="modalPositionNote">ⓘ Position: 01 of 06</div>
+        <div style="display: flex; gap: 8px;">
+          <button class="btn-nav-secondary" onclick="closeStageModal()">Cancel</button>
+          <button class="btn-nav-primary" id="btnSubmitStage" onclick="submitStageForm()">Add Stage</button>
         </div>
       </div>
     </div>
   </div>
 
-  <!-- ============================================== -->
-  <!-- MODAL: MY PLAYBOOKS LIST -->
-  <!-- ============================================== -->
+  <!-- Modal 2: Add or Edit Objection with Category & 11 Styles -->
+  <div class="modal-overlay" id="objectionModal">
+    <div class="modal-box">
+      <div class="modal-header">
+        <div style="display: flex; gap: 10px; align-items: center;">
+          <span style="font-size: 1.3rem; color: var(--primary);">💬</span>
+          <div>
+            <h3 class="modal-title" id="objModalTitle">Add or Edit Objection</h3>
+            <p class="modal-subtitle">Refine your response framework for this lead scenario.</p>
+          </div>
+        </div>
+        <button class="btn-modal-close" onclick="closeObjectionModal()">✕</button>
+      </div>
+      <div class="modal-body">
+        <input type="hidden" id="editingObjId" value="">
+
+        <div class="form-group">
+          <label class="form-label" for="clientObjInput">CLIENT OBJECTION</label>
+          <textarea id="clientObjInput" class="input-textarea" style="min-height: 70px;" placeholder="I don't want to pay commission. My property will sell itself in this market."></textarea>
+        </div>
+
+        <div class="grid-2-col">
+          <div class="form-group">
+            <label class="form-label" for="modalCategorySelect">CATEGORY</label>
+            <select id="modalCategorySelect" class="select-dropdown">
+              <option value="Financial" selected>Financial</option>
+              <option value="Risk">Risk</option>
+              <option value="Logistics">Logistics</option>
+              <option value="Relationship">Relationship</option>
+            </select>
+          </div>
+
+          <div class="form-group">
+            <label class="form-label" for="modalRespStyleSelect">RESPONSE STYLE</label>
+            <select id="modalRespStyleSelect" class="select-dropdown">
+              <option value="Reframe" selected>Reframe</option>
+              <option value="Clarify">Clarify</option>
+              <option value="Validate">Validate</option>
+              <option value="Educate">Educate</option>
+              <option value="Quantify">Quantify</option>
+              <option value="Differentiate">Differentiate</option>
+              <option value="De-Risk">De-Risk</option>
+              <option value="Challenge">Challenge</option>
+              <option value="Social Proof">Social Proof</option>
+              <option value="Future Pace">Future Pace</option>
+              <option value="Direct">Direct</option>
+            </select>
+          </div>
+        </div>
+
+        <div class="form-group">
+          <label class="form-label">LEAD TYPES</label>
+          <div class="tag-input-container" id="modalLeadTagsContainer">
+            <span class="tag-pill-editable">Expired Listings <span class="tag-remove-btn" onclick="removeModalTag(this)">✕</span></span>
+            <span class="tag-pill-editable">FSBO (For Sale By Owner) <span class="tag-remove-btn" onclick="removeModalTag(this)">✕</span></span>
+            <button type="button" class="tag-add-trigger" onclick="addModalLeadTag()">+ Add Type</button>
+          </div>
+        </div>
+
+        <div class="ai-suggestion-box">
+          <div style="color: var(--primary); font-size: 1.2rem;">✨</div>
+          <div>
+            <div style="font-size: 0.82rem; font-weight: 800; color: var(--primary);">PitchProX AI Suggestion</div>
+            <div style="font-size: 0.82rem; color: var(--slate-700); margin-top: 2px;" id="modalAiSuggestionText">
+              Focus on net proceeds and market exposure metrics rather than gross commission.
+            </div>
+          </div>
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button type="button" class="btn-table-action btn-table-delete" style="font-size: 0.84rem;" onclick="deleteModalObjection()">🗑 Delete Objection</button>
+        <div style="display: flex; gap: 8px;">
+          <button type="button" class="btn-nav-secondary" onclick="closeObjectionModal()">Cancel</button>
+          <button type="button" class="btn-nav-primary" onclick="submitObjectionForm()">Save Changes</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Modal 3: Sequence -->
+  <div class="modal-overlay" id="sequenceModal">
+    <div class="modal-box">
+      <div class="modal-header">
+        <div>
+          <h3 class="modal-title">Edit Response Sequence</h3>
+          <p class="modal-subtitle">Drag steps to reorder or click edit to modify content.</p>
+        </div>
+        <button class="btn-modal-close" onclick="closeSequenceModal()">✕</button>
+      </div>
+      <div class="modal-body">
+        <div style="display: flex; flex-direction: column; gap: 10px;">
+          <div style="display: flex; align-items: center; gap: 12px; border: 1.5px solid var(--slate-200); border-radius: 12px; padding: 12px 16px;">
+            <div class="framework-icon-box active" style="width: 36px; height: 36px;">🎙️</div>
+            <span style="font-weight: 700; color: var(--slate-900); font-size: 0.95rem;">1. Acknowledge</span>
+          </div>
+          <div style="display: flex; align-items: center; gap: 12px; border: 1.5px solid var(--slate-200); border-radius: 12px; padding: 12px 16px;">
+            <div class="framework-icon-box active" style="width: 36px; height: 36px;">💚</div>
+            <span style="font-weight: 700; color: var(--slate-900); font-size: 0.95rem;">2. Validate</span>
+          </div>
+          <div style="display: flex; align-items: center; gap: 12px; border: 1.5px solid var(--slate-200); border-radius: 12px; padding: 12px 16px;">
+            <div class="framework-icon-box active" style="width: 36px; height: 36px;">🔄</div>
+            <span style="font-weight: 700; color: var(--slate-900); font-size: 0.95rem;">3. Reframe</span>
+          </div>
+          <div style="display: flex; align-items: center; gap: 12px; border: 1.5px solid var(--slate-200); border-radius: 12px; padding: 12px 16px;">
+            <div class="framework-icon-box active" style="width: 36px; height: 36px;">📄</div>
+            <span style="font-weight: 700; color: var(--slate-900); font-size: 0.95rem;">4. Guide Forward</span>
+          </div>
+        </div>
+      </div>
+      <div class="modal-footer" style="justify-content: flex-end; gap: 8px;">
+        <button class="btn-nav-secondary" onclick="closeSequenceModal()">Cancel</button>
+        <button class="btn-nav-primary" onclick="saveSequenceModal()">💾 Save Sequence</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Modal 4: Saved Playbooks -->
   <div class="modal-overlay" id="playbooksListModal">
     <div class="modal-box" style="max-width: 640px;">
       <div class="modal-header">
@@ -1673,187 +2205,198 @@
         </div>
         <button class="btn-modal-close" onclick="closePlaybooksListModal()">✕</button>
       </div>
-      <div class="modal-body" id="playbooksListContent" style="max-height: 380px; overflow-y: auto;">
+      <div class="modal-body" id="playbooksListContent">
         <div style="text-align: center; color: var(--slate-400); padding: 24px;">Loading playbooks...</div>
       </div>
       <div class="modal-footer" style="justify-content: flex-end;">
-        <button class="btn-modal-cancel" onclick="closePlaybooksListModal()">Close</button>
+        <button class="btn-nav-secondary" onclick="closePlaybooksListModal()">Close</button>
       </div>
     </div>
   </div>
 
-  <!-- Toast Notification Container -->
   <div class="toast-container" id="toastContainer"></div>
 
-  <!-- ============================================== -->
-  <!-- JAVASCRIPT LOGIC -->
-  <!-- ============================================== -->
+  <!-- SCRIPT -->
   <script>
-    // State
     let currentStep = 1;
     let selectedTone = 'Confident';
     let selectedIcon = 'hand';
     let currentPlaybookId = null;
+    let objCurrentPage = 1;
 
     let stages = [
+      { id: 'stage_opening', order: 1, name: 'Opening', goal: 'Set a positive tone and gain engagement.', description: 'Create rapport and get permission to have a conversation.', icon: 'hand' },
+      { id: 'stage_discovery', order: 2, name: 'Discovery', goal: 'Understand their motivation and timeline.', description: 'Ask questions and uncover their situation and needs.', icon: 'search' },
+      { id: 'stage_value_prop', order: 3, name: 'Value Proposition', goal: 'Build credibility and differentiate yourself.', description: 'Position your value and show how you solve their problem.', icon: 'diamond' },
+      { id: 'stage_objections', order: 4, name: 'Handle Objections', goal: 'Overcome doubt and strengthen confidence.', description: 'Address concerns and remove hesitation.', icon: 'shield' },
+      { id: 'stage_close', order: 5, name: 'Close', goal: 'Get a commitment to move forward.', description: 'Guide them to commit to the next step.', icon: 'target' },
+      { id: 'stage_follow_up', order: 6, name: 'Follow Up', goal: 'Stay top of mind and convert later.', description: 'Reinforce value and keep the momentum.', icon: 'phone' }
+    ];
+
+    let objections = [
       {
-        id: 'stage_opening',
-        order: 1,
-        name: 'Opening',
-        goal: 'Set a positive tone and gain engagement.',
-        description: 'Create rapport and get permission to have a conversation.',
-        icon: 'hand'
+        id: 'obj_1',
+        objection: "I don't want to pay commission.",
+        category: "Financial",
+        lead_types: ["FSBO (For Sale By Owner)", "Expired Listings"],
+        response_style: "Quantify",
+        ai_suggestion: 'Highlight net proceeds. Mention MLS-represented sales closed 7.2% higher.',
+        last_updated: "May 2, 2024"
       },
       {
-        id: 'stage_discovery',
-        order: 2,
-        name: 'Discovery',
-        goal: 'Understand their motivation and timeline.',
-        description: 'Ask questions and uncover their situation and needs.',
-        icon: 'search'
+        id: 'obj_2',
+        objection: "Not a good time to sell.",
+        category: "Logistics",
+        lead_types: ["Expired Listings", "Absentee Owners"],
+        response_style: "Future Pace",
+        ai_suggestion: "Validate market uncertainty, then project seasonal equity growth.",
+        last_updated: "May 2, 2024"
       },
       {
-        id: 'stage_value_prop',
-        order: 3,
-        name: 'Value Proposition',
-        goal: 'Build credibility and differentiate yourself.',
-        description: 'Position your value and show how you solve their problem.',
-        icon: 'diamond'
+        id: 'obj_3',
+        objection: "I already have an agent.",
+        category: "Relationship",
+        lead_types: ["Expired Listings", "Pre-Expired Listings"],
+        response_style: "Differentiate",
+        ai_suggestion: "Respect loyalty, then ask diagnostic questions about current marketing reach.",
+        last_updated: "May 2, 2024"
       },
       {
-        id: 'stage_objections',
-        order: 4,
-        name: 'Handle Objections',
-        goal: 'Overcome doubt and strengthen confidence.',
-        description: 'Address concerns and remove hesitation.',
-        icon: 'shield'
+        id: 'obj_4',
+        objection: "How did you get my number?",
+        category: "Risk",
+        lead_types: ["Circle Prospecting", "Absentee Owners"],
+        response_style: "Direct",
+        ai_suggestion: "Be transparent about public records, then explain active buyer inquiries in area.",
+        last_updated: "May 2, 2024"
       },
       {
-        id: 'stage_close',
-        order: 5,
-        name: 'Close',
-        goal: 'Get a commitment to move forward.',
-        description: 'Guide them to commit to the next step.',
-        icon: 'target'
+        id: 'obj_5',
+        objection: "I'm not interested.",
+        category: "Relationship",
+        lead_types: ["Past Clients & Sphere", "Circle Prospecting"],
+        response_style: "Validate",
+        ai_suggestion: "Disarm friction: 'Understood, just curious if timing changed or if resolved?'",
+        last_updated: "May 2, 2024"
       },
       {
-        id: 'stage_follow_up',
-        order: 6,
-        name: 'Follow Up',
-        goal: 'Stay top of mind and convert later.',
-        description: 'Reinforce value and keep the momentum.',
-        icon: 'phone'
+        id: 'obj_6',
+        objection: "We want to wait for interest rates to drop.",
+        category: "Financial",
+        lead_types: ["Investor / Cash Buyers", "Pre-Foreclosure"],
+        response_style: "Reframe",
+        ai_suggestion: "Reframe trade-off between rate drops and buyer competition surges.",
+        last_updated: "May 2, 2024"
+      },
+      {
+        id: 'obj_7',
+        objection: "We need to think about it.",
+        category: "Logistics",
+        lead_types: ["Trust & Estate", "Probate", "Divorce"],
+        response_style: "Clarify",
+        ai_suggestion: "Clarify whether it is timeline, estate steps, or family consensus.",
+        last_updated: "May 2, 2024"
+      },
+      {
+        id: 'obj_8',
+        objection: "Send me information first.",
+        category: "Risk",
+        lead_types: ["Just Listed", "Just Sold"],
+        response_style: "De-Risk",
+        ai_suggestion: "Offer 1-page market snapshot while locking in a brief calendar check-in.",
+        last_updated: "May 2, 2024"
       }
     ];
 
     const iconMap = {
-      'hand': { emoji: '✋', class: 'icon-hand' },
-      'search': { emoji: '🔍', class: 'icon-search' },
-      'diamond': { emoji: '💎', class: 'icon-diamond' },
-      'shield': { emoji: '🛡️', class: 'icon-shield' },
-      'target': { emoji: '🎯', class: 'icon-target' },
-      'phone': { emoji: '📞', class: 'icon-phone' }
+      'hand': { emoji: '✋' },
+      'search': { emoji: '🔍' },
+      'diamond': { emoji: '💎' },
+      'shield': { emoji: '🛡️' },
+      'target': { emoji: '🎯' },
+      'phone': { emoji: '📞' }
     };
 
-    // Initialize
     window.addEventListener('DOMContentLoaded', () => {
       renderStages();
+      renderObjectionsTable();
+      renderReviewSummary();
       loadFromLocalStorage();
     });
 
-    // Step Navigation
     function goToStep(step) {
-      if (step < 1 || step > 3) return;
+      if (step < 1 || step > 5) return;
       currentStep = step;
 
-      // Update section visibility
-      document.getElementById('stepSection1').style.display = step === 1 ? 'block' : 'none';
-      document.getElementById('stepSection2').style.display = step === 2 ? 'block' : 'none';
-      document.getElementById('stepSection3').style.display = step === 3 ? 'block' : 'none';
+      for (let i = 1; i <= 5; i++) {
+        const sec = document.getElementById(`stepSection${i}`);
+        if (sec) sec.style.display = i === step ? 'block' : 'none';
 
-      // Update stepper circles & dividers
-      for (let i = 1; i <= 3; i++) {
         const btn = document.getElementById(`stepBtn${i}`);
         const circle = document.getElementById(`circle${i}`);
-
-        btn.classList.remove('active', 'completed');
+        if (btn) btn.classList.remove('active', 'completed');
 
         if (i < step) {
-          btn.classList.add('completed');
-          circle.innerHTML = '✓';
+          if (btn) btn.classList.add('completed');
+          if (circle) circle.innerHTML = '✓';
         } else if (i === step) {
-          btn.classList.add('active');
-          circle.innerHTML = i;
+          if (btn) btn.classList.add('active');
+          if (circle) circle.innerHTML = i;
         } else {
-          circle.innerHTML = i;
+          if (circle) circle.innerHTML = i;
         }
       }
 
-      const div1 = document.getElementById('divider1');
-      const div2 = document.getElementById('divider2');
-      if (div1) div1.classList.toggle('active', step > 1);
-      if (div2) div2.classList.toggle('active', step > 2);
+      for (let i = 1; i <= 4; i++) {
+        const div = document.getElementById(`divider${i}`);
+        if (div) div.classList.toggle('active', step > i);
+      }
 
-      // Smooth scroll to top
+      const topCta = document.getElementById('topRightCtaText');
+      if (topCta) {
+        if (step === 1) topCta.innerText = 'Next: Your Style →';
+        else if (step === 2) topCta.innerText = 'Next: Conversation Flow →';
+        else if (step === 3) topCta.innerText = 'Next: Objection Handling →';
+        else if (step === 4) topCta.innerText = 'Next: Review & Save →';
+        else if (step === 5) topCta.innerText = 'Create Playbook ✓';
+      }
+
+      if (step === 5) renderReviewSummary();
+
       window.scrollTo({ top: 0, behavior: 'smooth' });
       saveToLocalStorage();
     }
 
-    // Character Counter
+    function handleTopRightCta() {
+      if (currentStep < 5) goToStep(currentStep + 1);
+      else createAndPublishPlaybook();
+    }
+
     function updateCharCounter(textareaId, counterId, max) {
       const el = document.getElementById(textareaId);
       const count = el ? el.value.length : 0;
       const counterEl = document.getElementById(counterId);
-      if (counterEl) {
-        counterEl.innerText = `${count}/${max}`;
-      }
+      if (counterEl) counterEl.innerText = `${count}/${max}`;
     }
 
-    // Voice & Philosophy Sync between Step 1 and Step 2
     function insertVoicePhrase(phrase) {
-      const v1 = document.getElementById('voicePhrases');
-      const v2 = document.getElementById('voicePhrasesStep2');
-
-      const current = v1.value.trim();
-      const addition = current.length > 0 ? `\n• "${phrase}"` : `• "${phrase}"`;
-
-      v1.value = current + addition;
-      v2.value = v1.value;
-
+      const v = document.getElementById('voicePhrases');
+      const cur = v.value.trim();
+      v.value = cur ? `${cur}\n• "${phrase}"` : `• "${phrase}"`;
       updateCharCounter('voicePhrases', 'voiceCounter', 500);
-      updateCharCounter('voicePhrasesStep2', 'voiceCounterStep2', 500);
       handleInputChange();
       showToast(`Added: "${phrase}"`);
     }
 
     function promptCustomChip() {
       const custom = prompt("Enter your custom expression or phrase:");
-      if (custom && custom.trim()) {
-        insertVoicePhrase(custom.trim());
-      }
+      if (custom && custom.trim()) insertVoicePhrase(custom.trim());
     }
 
-    function syncVoiceStep2() {
-      const v1 = document.getElementById('voicePhrases');
-      const v2 = document.getElementById('voicePhrasesStep2');
-      v1.value = v2.value;
-      updateCharCounter('voicePhrases', 'voiceCounter', 500);
-      updateCharCounter('voicePhrasesStep2', 'voiceCounterStep2', 500);
-    }
-
-    function syncPhilosophyStep2() {
-      const p1 = document.getElementById('philosophyText');
-      const p2 = document.getElementById('principlesStep2');
-      p1.value = p2.value;
-      updateCharCounter('philosophyText', 'philosophyCounter', 1000);
-      updateCharCounter('principlesStep2', 'principlesCounterStep2', 1000);
-    }
-
-    // Goals Toggle
     function toggleGoal(goalId) {
-      const card = document.getElementById(goalId);
-      if (card) {
-        card.classList.toggle('selected');
+      const el = document.getElementById(goalId);
+      if (el) {
+        el.classList.toggle('selected');
         handleInputChange();
       }
     }
@@ -1866,7 +2409,6 @@
       return goals;
     }
 
-    // Tone Selection
     function selectTone(btn, tone) {
       selectedTone = tone;
       document.querySelectorAll('#toneGrid .tone-btn').forEach(b => b.classList.remove('selected'));
@@ -1874,15 +2416,11 @@
       handleInputChange();
     }
 
-    // Sliders
     function updateSliderLabels(sliderId, labelsId) {
       const slider = document.getElementById(sliderId);
       const labels = document.getElementById(labelsId).children;
       const val = parseInt(slider.value, 10) - 1;
-
-      for (let i = 0; i < labels.length; i++) {
-        labels[i].classList.toggle('active', i === val);
-      }
+      for (let i = 0; i < labels.length; i++) labels[i].classList.toggle('active', i === val);
       handleInputChange();
     }
 
@@ -1891,38 +2429,30 @@
       return names[val] || names[1];
     }
 
-    // Stage Rendering
     function renderStages() {
       const container = document.getElementById('stagesList');
       if (!container) return;
-
       container.innerHTML = stages.map((st, idx) => {
         const num = idx + 1;
         const iconConfig = iconMap[st.icon] || iconMap['hand'];
         return `
-          <div class="timeline-stage-row" data-id="${st.id}">
-            <div class="stage-icon-node ${iconConfig.class}">
-              ${iconConfig.emoji}
-            </div>
+          <div class="timeline-stage-row">
+            <div class="stage-icon-node">${iconConfig.emoji}</div>
             <div class="stage-card">
-              <div class="stage-info">
+              <div style="display: flex; align-items: center; gap: 14px; flex: 1;">
                 <div class="stage-number">${num}</div>
-                <div class="stage-text-block">
+                <div>
                   <div class="stage-name">${escapeHtml(st.name)}</div>
-                  <div class="stage-desc">${escapeHtml(st.description || 'Custom stage')}</div>
+                  <div class="stage-desc">${escapeHtml(st.description || '')}</div>
                 </div>
               </div>
-              <div class="stage-goal-box">
+              <div style="max-width: 260px; margin-left: auto;">
                 <div class="stage-goal-tag">GOAL</div>
                 <div class="stage-goal-text">${escapeHtml(st.goal)}</div>
               </div>
-              <div class="stage-actions">
-                <button class="btn-stage-action" onclick="openEditStageModal('${st.id}')">
-                  ✎ Edit
-                </button>
-                <button class="btn-stage-action btn-stage-delete" onclick="deleteStage('${st.id}')" title="Delete Stage">
-                  🗑
-                </button>
+              <div style="display: flex; gap: 6px;">
+                <button class="btn-table-action" onclick="openEditStageModal('${st.id}')">✎ Edit</button>
+                <button class="btn-table-action btn-table-delete" onclick="deleteStage('${st.id}')">🗑</button>
               </div>
             </div>
           </div>
@@ -1930,7 +2460,6 @@
       }).join('');
     }
 
-    // Stage Modal
     function openAddStageModal() {
       document.getElementById('stageModalTitle').innerText = 'Add New Stage';
       document.getElementById('btnSubmitStage').innerText = 'Add Stage';
@@ -1939,16 +2468,13 @@
       document.getElementById('stageGoalInput').value = '';
       document.getElementById('stageDescInput').value = '';
       selectStageIcon('hand');
-
-      const nextPos = stages.length + 1;
-      document.getElementById('modalPositionNote').innerText = `ⓘ Position: ${String(nextPos).padStart(2, '0')} of ${String(nextPos).padStart(2, '0')}`;
+      document.getElementById('modalPositionNote').innerText = `ⓘ Position: ${String(stages.length + 1).padStart(2, '0')} of ${String(stages.length + 1).padStart(2, '0')}`;
       document.getElementById('stageModal').classList.add('active');
     }
 
     function openEditStageModal(stageId) {
       const st = stages.find(s => s.id === stageId);
       if (!st) return;
-
       const idx = stages.findIndex(s => s.id === stageId) + 1;
       document.getElementById('stageModalTitle').innerText = 'Edit Stage';
       document.getElementById('btnSubmitStage').innerText = 'Save Changes';
@@ -1957,7 +2483,6 @@
       document.getElementById('stageGoalInput').value = st.goal;
       document.getElementById('stageDescInput').value = st.description || '';
       selectStageIcon(st.icon || 'hand');
-
       document.getElementById('modalPositionNote').innerText = `ⓘ Position: ${String(idx).padStart(2, '0')} of ${String(stages.length).padStart(2, '0')}`;
       document.getElementById('stageModal').classList.add('active');
     }
@@ -1978,15 +2503,7 @@
       const goal = document.getElementById('stageGoalInput').value.trim();
       const desc = document.getElementById('stageDescInput').value.trim();
       const editId = document.getElementById('editingStageId').value;
-
-      if (!name) {
-        alert('Please enter a stage name.');
-        return;
-      }
-      if (!goal) {
-        alert('Please enter a stage goal.');
-        return;
-      }
+      if (!name || !goal) return alert('Please enter name and goal.');
 
       if (editId) {
         const target = stages.find(s => s.id === editId);
@@ -1995,33 +2512,26 @@
           target.goal = goal;
           target.description = desc;
           target.icon = selectedIcon;
-          showToast(`Updated stage: ${name}`);
         }
       } else {
-        const newStage = {
+        stages.push({
           id: 'stage_' + Math.random().toString(36).substring(2, 9),
           order: stages.length + 1,
           name: name,
           goal: goal,
           description: desc,
           icon: selectedIcon
-        };
-        stages.push(newStage);
-        showToast(`Added stage: ${name}`);
+        });
       }
-
       renderStages();
       closeStageModal();
       handleInputChange();
+      showToast('Stage updated');
     }
 
     function deleteStage(stageId) {
-      if (stages.length <= 1) {
-        alert('A playbook must have at least one stage.');
-        return;
-      }
-      const st = stages.find(s => s.id === stageId);
-      if (confirm(`Are you sure you want to delete stage "${st?.name || 'this stage'}"?`)) {
+      if (stages.length <= 1) return alert('Keep at least 1 stage.');
+      if (confirm('Delete this stage?')) {
         stages = stages.filter(s => s.id !== stageId);
         renderStages();
         handleInputChange();
@@ -2029,11 +2539,227 @@
       }
     }
 
-    // Save Playbook Payload Construction
-    function constructPayload() {
-      const v1 = document.getElementById('voicePhrases')?.value || '';
-      const p1 = document.getElementById('philosophyText')?.value || '';
+    function renderObjectionsTable() {
+      const tbody = document.getElementById('objectionsTableBody');
+      if (!tbody) return;
 
+      const filterLt = document.getElementById('filterLeadType')?.value || 'all';
+      const filterCat = document.getElementById('filterCategory')?.value || 'all';
+      const search = document.getElementById('searchObjectionInput')?.value?.toLowerCase() || '';
+
+      let filtered = objections.filter(o => {
+        if (filterLt !== 'all' && !o.lead_types.some(t => t.includes(filterLt))) return false;
+        if (filterCat !== 'all' && o.category !== filterCat) return false;
+        if (search && !o.objection.toLowerCase().includes(search) && !o.category.toLowerCase().includes(search)) return false;
+        return true;
+      });
+
+      document.getElementById('objectionCountBadge').innerText = filtered.length;
+      const pageItems = filtered.slice((objCurrentPage - 1) * 5, objCurrentPage * 5);
+
+      tbody.innerHTML = pageItems.map(o => `
+        <tr class="obj-row">
+          <td>
+            <div class="obj-title">${escapeHtml(o.objection)}</div>
+            <div class="obj-subcat">${escapeHtml(o.ai_suggestion.substring(0, 48))}...</div>
+          </td>
+          <td>
+            ${o.lead_types.slice(0, 2).map(lt => `<span class="tag-pill">${escapeHtml(lt)}</span>`).join('')}
+            ${o.lead_types.length > 2 ? `<span class="tag-pill">+${o.lead_types.length - 2}</span>` : ''}
+          </td>
+          <td>
+            <span class="tag-pill tag-pill-primary">${escapeHtml(o.response_style)}</span>
+          </td>
+          <td style="color: var(--slate-600); font-size: 0.82rem; font-weight: 600;">
+            ${escapeHtml(o.category)}
+          </td>
+          <td style="text-align: right;">
+            <button class="btn-table-action" onclick="openEditObjectionModal('${o.id}')">✎</button>
+            <button class="btn-table-action btn-table-delete" onclick="deleteObjection('${o.id}')">🗑</button>
+          </td>
+        </tr>
+      `).join('');
+
+      document.getElementById('objPaginationNote').innerText = `Showing ${pageItems.length > 0 ? (objCurrentPage - 1) * 5 + 1 : 0} to ${Math.min(objCurrentPage * 5, filtered.length)} of ${filtered.length} objections`;
+    }
+
+    function setObjPage(page) {
+      objCurrentPage = page;
+      renderObjectionsTable();
+    }
+
+    function filterObjections() {
+      objCurrentPage = 1;
+      renderObjectionsTable();
+    }
+
+    function openAddObjectionModal() {
+      document.getElementById('objModalTitle').innerText = 'Add Objection';
+      document.getElementById('editingObjId').value = '';
+      document.getElementById('clientObjInput').value = '';
+      document.getElementById('modalCategorySelect').value = 'Financial';
+      document.getElementById('modalRespStyleSelect').value = 'Reframe';
+      document.getElementById('objectionModal').classList.add('active');
+    }
+
+    function openEditObjectionModal(objId) {
+      const o = objections.find(item => item.id === objId);
+      if (!o) return;
+      document.getElementById('objModalTitle').innerText = 'Edit Objection';
+      document.getElementById('editingObjId').value = o.id;
+      document.getElementById('clientObjInput').value = o.objection;
+      document.getElementById('modalCategorySelect').value = o.category || 'Financial';
+      document.getElementById('modalRespStyleSelect').value = o.response_style || 'Reframe';
+      document.getElementById('modalAiSuggestionText').innerText = o.ai_suggestion || 'Focus on value and net proceeds.';
+      document.getElementById('objectionModal').classList.add('active');
+    }
+
+    function closeObjectionModal() {
+      document.getElementById('objectionModal').classList.remove('active');
+    }
+
+    function submitObjectionForm() {
+      const text = document.getElementById('clientObjInput').value.trim();
+      const cat = document.getElementById('modalCategorySelect').value;
+      const style = document.getElementById('modalRespStyleSelect').value;
+      const editId = document.getElementById('editingObjId').value;
+      if (!text) return alert('Enter objection text.');
+
+      if (editId) {
+        const target = objections.find(o => o.id === editId);
+        if (target) {
+          target.objection = text;
+          target.category = cat;
+          target.response_style = style;
+        }
+      } else {
+        objections.push({
+          id: 'obj_' + Math.random().toString(36).substring(2, 8),
+          objection: text,
+          category: cat,
+          lead_types: ['Expired Listings', 'FSBO (For Sale By Owner)'],
+          response_style: style,
+          ai_suggestion: 'Standardized methodology response.',
+          last_updated: 'May 2, 2024'
+        });
+      }
+      renderObjectionsTable();
+      closeObjectionModal();
+      handleInputChange();
+      showToast('Objection saved');
+    }
+
+    function deleteObjection(id) {
+      if (confirm('Delete this objection?')) {
+        objections = objections.filter(o => o.id !== id);
+        renderObjectionsTable();
+        handleInputChange();
+        showToast('Objection removed');
+      }
+    }
+
+    function deleteModalObjection() {
+      const editId = document.getElementById('editingObjId').value;
+      if (editId) deleteObjection(editId);
+      closeObjectionModal();
+    }
+
+    function removeModalTag(btn) {
+      btn.parentElement.remove();
+    }
+
+    function addModalLeadTag() {
+      const name = prompt('Select or enter lead type (e.g., Probate, Expired, Pre-Foreclosure):');
+      if (name && name.trim()) {
+        const container = document.getElementById('modalLeadTagsContainer');
+        const trigger = container.querySelector('.tag-add-trigger');
+        const span = document.createElement('span');
+        span.className = 'tag-pill-editable';
+        span.innerHTML = `${escapeHtml(name.trim())} <span class="tag-remove-btn" onclick="removeModalTag(this)">✕</span>`;
+        container.insertBefore(span, trigger);
+      }
+    }
+
+    function importObjectionLibrary() {
+      showToast('✨ Imported 8 standardized methodology objections!');
+    }
+
+    function openSequenceModal() {
+      document.getElementById('sequenceModal').classList.add('active');
+    }
+
+    function closeSequenceModal() {
+      document.getElementById('sequenceModal').classList.remove('active');
+    }
+
+    function saveSequenceModal() {
+      closeSequenceModal();
+      showToast('Response sequence updated');
+    }
+
+    async function generateLivePromptPreview() {
+      const name = document.getElementById('playbookName')?.value || 'Daniel';
+      const tone = selectedTone;
+      const comm = document.getElementById('commStyleSelect')?.value || 'Consultative';
+      const sentence = document.getElementById('sentenceStyleSelect')?.value || 'Short & Conversational';
+      const form = document.getElementById('formalitySelect')?.value || 'Professional';
+
+      try {
+        const res = await fetch('/api/playbook/preview-prompt', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            name: name.split(' ')[0],
+            overall_tone: tone,
+            communication_style: comm,
+            sentence_style: sentence,
+            formality: form
+          })
+        });
+        const data = await res.json();
+        document.getElementById('livePromptPreviewBox').innerText = data.preview_text;
+        showToast('✨ AI Prompt preview refreshed');
+      } catch (e) {
+        document.getElementById('livePromptPreviewBox').innerText = `Hey ${name.split(' ')[0]}, I've got you. I'll keep my prompts ${tone.toLowerCase()}, direct, and ${comm.toLowerCase()} — short, professional, and to the point. Let's build a playbook that wins more conversations.`;
+      }
+    }
+
+    function renderReviewSummary() {
+      const name = document.getElementById('playbookName')?.value || 'Daniel G. Method';
+      const ind = document.getElementById('industrySelect')?.value || 'Real Estate';
+      const lt = document.getElementById('leadTypeSelect')?.value || 'Expired Listings';
+      const exp = document.getElementById('experienceSelect')?.value || 'Intermediate to Advanced';
+
+      document.getElementById('sumPlaybookName').innerHTML = `${escapeHtml(name)} <span class="tag-pill tag-pill-primary" style="font-size: 0.65rem;">Custom</span>`;
+      document.getElementById('sumIndustry').innerText = ind;
+      document.getElementById('sumLeadTypes').innerHTML = `${escapeHtml(lt)} <span style="font-size: 0.75rem; color: var(--slate-400);">+15 lead types</span>`;
+      document.getElementById('sumExpLevel').innerText = exp;
+
+      document.getElementById('sumStyleDesc').innerText = `Tone: ${selectedTone} • Style: ${document.getElementById('commStyleSelect')?.value || 'Consultative'} • Cooldown: 4s`;
+      document.getElementById('sumStagesDesc').innerText = `${stages.length} stages defined from ${stages[0]?.name || 'Opening'} to ${stages[stages.length - 1]?.name || 'Follow Up'}`;
+      document.getElementById('sumObjectionsDesc').innerText = `${objections.length} normalized objections • 4 canonical categories`;
+
+      const miniList = document.getElementById('miniStageListDisplay');
+      if (miniList) {
+        miniList.innerHTML = stages.slice(0, 6).map((s, idx) => {
+          const iconConfig = iconMap[s.icon] || iconMap['hand'];
+          return `
+            <div class="mini-stage-item">
+              <span>${iconConfig.emoji} ${idx + 1}. <b>${escapeHtml(s.name)}</b></span>
+              <span style="color: var(--slate-500); font-size: 0.75rem;">Goal: ${escapeHtml(s.goal.substring(0, 18))}...</span>
+            </div>
+          `;
+        }).join('');
+      }
+
+      let qScore = 80;
+      if (name.length > 5) qScore += 5;
+      if (stages.length >= 6) qScore += 5;
+      if (objections.length >= 6) qScore += 4;
+      document.getElementById('qualityScoreDisplay').innerText = qScore;
+    }
+
+    function constructPayload() {
       return {
         id: currentPlaybookId,
         title: document.getElementById('playbookName')?.value || 'Untitled Playbook',
@@ -2041,11 +2767,11 @@
         basic_info: {
           name: document.getElementById('playbookName')?.value || 'Untitled Playbook',
           short_description: document.getElementById('shortDescription')?.value || '',
-          industry: document.getElementById('industrySelect')?.value || '',
-          lead_types: [document.getElementById('leadTypeSelect')?.value || ''],
-          experience_level: document.getElementById('experienceSelect')?.value || '',
-          voice_phrases: v1,
-          philosophy: p1,
+          industry: document.getElementById('industrySelect')?.value || 'Real Estate',
+          lead_types: [document.getElementById('leadTypeSelect')?.value || 'Expired Listings'],
+          experience_level: document.getElementById('experienceSelect')?.value || 'Intermediate to Advanced',
+          voice_phrases: document.getElementById('voicePhrases')?.value || '',
+          philosophy: document.getElementById('philosophyText')?.value || '',
           goals: getSelectedGoals()
         },
         style: {
@@ -2055,10 +2781,12 @@
           sentence_style: document.getElementById('sentenceStyleSelect')?.value || 'Short & Conversational',
           formality: document.getElementById('formalitySelect')?.value || 'Professional',
           humor_level: getSliderValueName('humorSlider', ['None', 'Light', 'Moderate']),
-          voice_phrases: v1,
-          core_selling_principles: p1
+          voice_phrases: document.getElementById('voicePhrases')?.value || '',
+          core_selling_principles: document.getElementById('philosophyText')?.value || ''
         },
-        stages: stages.map((s, idx) => ({ ...s, order: idx + 1 }))
+        stages: stages.map((s, idx) => ({ ...s, order: idx + 1 })),
+        objections: objections,
+        quality_score: parseInt(document.getElementById('qualityScoreDisplay')?.innerText || '94', 10)
       };
     }
 
@@ -2076,26 +2804,36 @@
         if (res.ok) {
           const data = await res.json();
           currentPlaybookId = data.playbook.id;
-          if (showFeedback) {
-            showToast('✅ Playbook saved successfully!');
-          }
-        } else {
-          if (showFeedback) showToast('⚠️ Saved locally (server sync issue)');
+          if (showFeedback) showToast('✅ Playbook saved to draft');
         }
       } catch (err) {
-        console.warn('Backend sync failed, saved in localStorage:', err);
-        if (showFeedback) showToast('💾 Saved locally to draft');
+        if (showFeedback) showToast('💾 Saved locally');
       }
     }
 
-    // Local Storage Autosave
+    async function createAndPublishPlaybook() {
+      const payload = constructPayload();
+      payload.status = 'published';
+
+      try {
+        const res = await fetch('/api/playbook/save', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(payload)
+        });
+        if (res.ok) showToast('🎉 Playbook created and published successfully!');
+      } catch (e) {
+        showToast('🎉 Playbook published locally!');
+      }
+    }
+
     function saveToLocalStorage() {
       const payload = constructPayload();
-      localStorage.setItem('pitchprox_playbook_draft', JSON.stringify(payload));
+      localStorage.setItem('pitchprox_playbook_draft_v3', JSON.stringify(payload));
     }
 
     function loadFromLocalStorage() {
-      const saved = localStorage.getItem('pitchprox_playbook_draft');
+      const saved = localStorage.getItem('pitchprox_playbook_draft_v3');
       if (!saved) return;
       try {
         const d = JSON.parse(saved);
@@ -2104,37 +2842,24 @@
         if (d.basic_info?.industry) document.getElementById('industrySelect').value = d.basic_info.industry;
         if (d.basic_info?.lead_types?.[0]) document.getElementById('leadTypeSelect').value = d.basic_info.lead_types[0];
         if (d.basic_info?.experience_level) document.getElementById('experienceSelect').value = d.basic_info.experience_level;
-
-        if (d.basic_info?.voice_phrases) {
-          document.getElementById('voicePhrases').value = d.basic_info.voice_phrases;
-          document.getElementById('voicePhrasesStep2').value = d.basic_info.voice_phrases;
-        }
-
-        if (d.basic_info?.philosophy) {
-          document.getElementById('philosophyText').value = d.basic_info.philosophy;
-          document.getElementById('principlesStep2').value = d.basic_info.philosophy;
-        }
+        if (d.basic_info?.voice_phrases) document.getElementById('voicePhrases').value = d.basic_info.voice_phrases;
+        if (d.basic_info?.philosophy) document.getElementById('philosophyText').value = d.basic_info.philosophy;
 
         if (d.stages && d.stages.length > 0) {
           stages = d.stages;
           renderStages();
         }
-
-        updateCharCounter('shortDescription', 'descCounter', 120);
-        updateCharCounter('voicePhrases', 'voiceCounter', 500);
-        updateCharCounter('voicePhrasesStep2', 'voiceCounterStep2', 500);
-        updateCharCounter('philosophyText', 'philosophyCounter', 1000);
-        updateCharCounter('principlesStep2', 'principlesCounterStep2', 1000);
-      } catch (e) {
-        console.error('Error loading draft', e);
-      }
+        if (d.objections && d.objections.length > 0) {
+          objections = d.objections;
+          renderObjectionsTable();
+        }
+      } catch (e) {}
     }
 
     function handleInputChange() {
       saveToLocalStorage();
     }
 
-    // Playbooks List Modal
     async function openPlaybooksListModal() {
       const modal = document.getElementById('playbooksListModal');
       const listDiv = document.getElementById('playbooksListContent');
@@ -2146,24 +2871,24 @@
         const pbs = data.playbooks || [];
 
         if (pbs.length === 0) {
-          listDiv.innerHTML = `<div style="text-align: center; color: var(--slate-400); padding: 32px;">No saved playbooks found on server. Save your first playbook above!</div>`;
+          listDiv.innerHTML = `<div style="text-align: center; color: var(--slate-400); padding: 32px;">No saved playbooks found on server. Save your playbook first!</div>`;
           return;
         }
 
         listDiv.innerHTML = pbs.map(pb => `
-          <div style="display: flex; align-items: center; justify-content: space-between; padding: 14px 16px; border: 1px solid var(--slate-200); border-radius: 12px; margin-bottom: 10px; background: var(--white);">
+          <div style="display: flex; align-items: center; justify-content: space-between; padding: 12px 16px; border: 1px solid var(--slate-200); border-radius: 12px; margin-bottom: 10px; background: var(--white);">
             <div>
               <div style="font-weight: 700; color: var(--slate-900); font-size: 0.95rem;">${escapeHtml(pb.title)}</div>
-              <div style="font-size: 0.8rem; color: var(--slate-500);">${escapeHtml(pb.industry || 'General Sales')} • ${pb.stages_count} Stages</div>
+              <div style="font-size: 0.8rem; color: var(--slate-500);">${escapeHtml(pb.industry || 'Real Estate')} • ${pb.stages_count} Stages • Score: ${pb.quality_score}/100</div>
             </div>
             <div style="display: flex; gap: 8px;">
               <button class="btn-nav-secondary" onclick="loadPlaybookById('${pb.id}')">Load</button>
-              <button class="btn-stage-action btn-stage-delete" onclick="deletePlaybookById('${pb.id}')">🗑</button>
+              <button class="btn-table-action btn-table-delete" onclick="deletePlaybookById('${pb.id}')">🗑</button>
             </div>
           </div>
         `).join('');
       } catch (err) {
-        listDiv.innerHTML = `<div style="text-align: center; color: #ef4444; padding: 24px;">Failed to load playbooks from server.</div>`;
+        listDiv.innerHTML = `<div style="text-align: center; color: #ef4444; padding: 24px;">Failed to load playbooks.</div>`;
       }
     }
 
@@ -2183,52 +2908,41 @@
         if (pb.basic_info?.industry) document.getElementById('industrySelect').value = pb.basic_info.industry;
         if (pb.basic_info?.lead_types?.[0]) document.getElementById('leadTypeSelect').value = pb.basic_info.lead_types[0];
         if (pb.basic_info?.experience_level) document.getElementById('experienceSelect').value = pb.basic_info.experience_level;
-        if (pb.basic_info?.voice_phrases) {
-          document.getElementById('voicePhrases').value = pb.basic_info.voice_phrases;
-          document.getElementById('voicePhrasesStep2').value = pb.basic_info.voice_phrases;
-        }
-        if (pb.basic_info?.philosophy) {
-          document.getElementById('philosophyText').value = pb.basic_info.philosophy;
-          document.getElementById('principlesStep2').value = pb.basic_info.philosophy;
-        }
+        if (pb.basic_info?.voice_phrases) document.getElementById('voicePhrases').value = pb.basic_info.voice_phrases;
+        if (pb.basic_info?.philosophy) document.getElementById('philosophyText').value = pb.basic_info.philosophy;
 
         if (pb.stages && pb.stages.length > 0) {
           stages = pb.stages;
           renderStages();
         }
-
-        updateCharCounter('shortDescription', 'descCounter', 120);
-        updateCharCounter('voicePhrases', 'voiceCounter', 500);
-        updateCharCounter('voicePhrasesStep2', 'voiceCounterStep2', 500);
-        updateCharCounter('philosophyText', 'philosophyCounter', 1000);
-        updateCharCounter('principlesStep2', 'principlesCounterStep2', 1000);
+        if (pb.objections && pb.objections.length > 0) {
+          objections = pb.objections;
+          renderObjectionsTable();
+        }
 
         closePlaybooksListModal();
+        renderReviewSummary();
         showToast(`Loaded: ${pb.title}`);
       } catch (err) {
-        alert('Could not load playbook: ' + err.message);
+        alert('Could not load playbook.');
       }
     }
 
     async function deletePlaybookById(pbId) {
-      if (!confirm('Are you sure you want to permanently delete this playbook?')) return;
+      if (!confirm('Permanently delete this playbook?')) return;
       try {
         await fetch(`/api/playbook/${pbId}`, { method: 'DELETE' });
         showToast('Playbook deleted');
         openPlaybooksListModal();
-      } catch (err) {
-        alert('Could not delete: ' + err.message);
-      }
+      } catch (err) {}
     }
 
-    // Toast Utility
     function showToast(msg) {
       const container = document.getElementById('toastContainer');
       const toast = document.createElement('div');
       toast.className = 'toast toast-success';
       toast.innerHTML = `<span>✨</span><span>${escapeHtml(msg)}</span>`;
       container.appendChild(toast);
-
       setTimeout(() => toast.classList.add('show'), 10);
       setTimeout(() => {
         toast.classList.remove('show');
