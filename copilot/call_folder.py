@@ -324,10 +324,12 @@ def load_latest_calibration_profile() -> tuple[Dict[str, Any], str]:
             with open(latest_file, "r", encoding="utf-8") as f:
                 data = json.load(f)
             wpm = data.get("wpm") or 145
-            pacing_score = data.get("score_breakdown", {}).get("pacing", 80)
+            p_level = data.get("prompting_level", {})
+            level_name = p_level.get("name", "Prompting Level: Balanced")
+            level_directive = p_level.get("directive", "Moderate sentence length, natural conversational transitions.")
             summary = (
-                f"Pacing: {wpm} WPM (Pacing Score: {pacing_score}/100) | "
-                f"Tone: Natural & Confident | Delivery: Keep responses concise and avoid filler words."
+                f"{level_name} | Pacing: {wpm} WPM | "
+                f"Teleprompter Directive: {level_directive}"
             )
             return data, summary
         except Exception as e:
@@ -336,9 +338,14 @@ def load_latest_calibration_profile() -> tuple[Dict[str, Any], str]:
     fallback = {
         "user_id": "sales_rep",
         "wpm": 140,
-        "score_breakdown": {"pacing": 85, "word_choice": 90, "sentiment": 85},
+        "prompting_level": {
+            "level_id": "balanced",
+            "name": "Prompting Level: Balanced",
+            "directive": "Moderate sentence length, natural conversational transitions, standard lead time.",
+        },
+        "score_breakdown": {"speaking_pace": 80, "vocabulary_complexity": 85, "pause_pattern": 85},
     }
-    return fallback, "Pacing: 140 WPM (Optimal Enterprise Cadence) | Delivery: Crisp, confident, zero fillers."
+    return fallback, "Prompting Level: Balanced | Pacing: 140 WPM | Teleprompter Directive: Moderate sentence length, natural conversational transitions."
 
 
 def build_pre_call_folder(

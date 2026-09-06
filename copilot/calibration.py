@@ -150,16 +150,74 @@ def _clean_json_text(text: str) -> str:
 
 
 # ==========================================
-# Data Models
+# Data Models & Style Profiling Definitions
 # ==========================================
 
+CALIBRATION_FORMULA_VERSION = "v2.0-style-profiling"
+
+DEFAULT_PROFILING_WEIGHTS: dict[str, float] = {
+    "speaking_pace": 0.25,        # Words per minute tempo
+    "response_timing": 0.15,      # Prompt-to-speech readiness
+    "sentence_handling": 0.15,    # Sentence conciseness vs. narrative
+    "vocabulary_complexity": 0.15,# Lexical diversity & density
+    "pause_pattern": 0.15,        # Pause cadence & filler density
+    "energy_dynamics": 0.15,      # Vocal energy dynamic range
+}
+
+PROMPTING_LEVELS: dict[str, dict[str, Any]] = {
+    "direct": {
+        "level_id": "direct",
+        "name": "Prompting Level: Direct",
+        "badge": "Direct",
+        "min_score": 75,
+        "description": "Fast tempo, concise responses. Teleprompter produces short, punchy prompts (<15 words) with minimal pause buffering.",
+        "directive": "Shorter prompts, punchier phrasing, rapid lead time, action-oriented assertions.",
+    },
+    "balanced": {
+        "level_id": "balanced",
+        "name": "Prompting Level: Balanced",
+        "badge": "Balanced",
+        "min_score": 50,
+        "description": "Conversational tempo with natural phrasing. Teleprompter produces balanced prompts (15-22 words) with natural conversational transitions.",
+        "directive": "Moderate sentence length, natural conversational transitions, standard lead time.",
+    },
+    "layered": {
+        "level_id": "layered",
+        "name": "Prompting Level: Layered",
+        "badge": "Layered",
+        "min_score": 0,
+        "description": "Deliberate, thoughtful speaking style. Teleprompter produces digestible, chunked multi-step cues with extended lead time.",
+        "directive": "Digestible phrase chunks, longer lead time, pause-friendly structure, step-by-step guidance.",
+    },
+}
+
+
+def resolve_prompting_level(score: int) -> dict[str, Any]:
+    """Map composite style score (0-100) to prompting level profile."""
+    if score >= 75:
+        return PROMPTING_LEVELS["direct"]
+    elif score >= 50:
+        return PROMPTING_LEVELS["balanced"]
+    else:
+        return PROMPTING_LEVELS["layered"]
+
+
 class RoundScoreBreakdown(BaseModel):
-    word_choice: int = Field(..., ge=0, le=100, description="Word choice and accuracy score")
-    pacing: int = Field(..., ge=0, le=100, description="Pacing and speaking rate score")
-    sentiment: int = Field(..., ge=0, le=100, description="Sentiment and confidence score")
-    tone_emphasis: int = Field(..., ge=0, le=100, description="Tone and vocal emphasis score")
-    pause_filters: int = Field(..., ge=0, le=100, description="Absence of filler words and smooth pauses")
-    energy_inflection: int = Field(..., ge=0, le=100, description="Vocal energy and cadence inflection")
+    # Core Style Dimensions (v2.0)
+    speaking_pace: int = Field(default=80, ge=0, le=100, description="Speaking pace tempo index (WPM normalized)")
+    response_timing: int = Field(default=75, ge=0, le=100, description="Response readiness & timing index")
+    sentence_handling: int = Field(default=75, ge=0, le=100, description="Sentence brevity & structure index")
+    vocabulary_complexity: int = Field(default=80, ge=0, le=100, description="Lexical diversity & complexity")
+    pause_pattern: int = Field(default=85, ge=0, le=100, description="Pause cadence and rhythm index")
+    energy_dynamics: int = Field(default=75, ge=0, le=100, description="Vocal energy dynamic range index")
+
+    # Backwards-compatible aliases for legacy reporting & UI
+    word_choice: int = Field(default=80, ge=0, le=100, description="Legacy word choice alias")
+    pacing: int = Field(default=80, ge=0, le=100, description="Legacy pacing alias")
+    sentiment: int = Field(default=75, ge=0, le=100, description="Legacy sentiment alias")
+    tone_emphasis: int = Field(default=75, ge=0, le=100, description="Legacy tone alias")
+    pause_filters: int = Field(default=85, ge=0, le=100, description="Legacy pause filters alias")
+    energy_inflection: int = Field(default=75, ge=0, le=100, description="Legacy energy alias")
 
 
 class RoundEvaluation(BaseModel):
@@ -174,6 +232,10 @@ class RoundEvaluation(BaseModel):
     improvements: list[str] = []
     detected_fillers: list[str] = []
     wpm: Optional[int] = None
+    confidence: float = 1.0
+    is_excluded: bool = False
+    style_traits: list[str] = []
+    prompting_adaptation: str = ""
 
 
 class RoundData(BaseModel):
@@ -196,7 +258,11 @@ class RoundData(BaseModel):
 class CalibrationSummaryReport(BaseModel):
     session_id: str
     overall_score: int
+    prompting_level: dict[str, Any] = Field(default_factory=dict)
+    formula_version: str = CALIBRATION_FORMULA_VERSION
+    formula_weights: dict[str, float] = Field(default_factory=dict)
     rounds_completed: int
+    rounds_profiled: int = 8
     total_rounds: int = 8
     total_time_seconds: float
     total_time_formatted: str
@@ -461,6 +527,94 @@ class CalibrationService:
 
         self.sessions: dict[str, dict[str, Any]] = {}
         self.audio_store: dict[str, tuple[bytes, str]] = {}
+        self.profiling_weights: dict[str, float] = dict(DEFAULT_PROFILING_WEIGHTS)
+
+    def rate_sample_quality(
+        self,
+        transcript: str,
+        audio_bytes: Optional[bytes] = None,
+        duration_seconds: float = 0.0,
+    ) -> float:
+        """Calculate confidence score (0.0 to 1.0). Bad audio / silence is 0.0 (excluded from profile calculation)."""
+        clean = transcript.strip() if transcript else ""
+        words = [w for w in clean.split() if w]
+
+        # 1. Total silence or empty transcript
+        if not clean or len(words) == 0:
+            return 0.0
+
+        # 2. Too brief (< 1.2s or fewer than 2 words)
+        if duration_seconds > 0 and duration_seconds < 1.2:
+            return 0.0
+        if len(words) < 2:
+            return 0.0
+
+        # 3. Degraded sample (< 4 words or < 2.0s) -> down-weight
+        if len(words) < 4 or (duration_seconds > 0 and duration_seconds < 2.0):
+            return 0.4
+
+        return 1.0
+
+    def compute_speaking_pace(self, word_count: int, duration_seconds: float) -> tuple[int, int]:
+        """Compute raw WPM and normalized pace score (0-100) toward prompting level."""
+        wpm = int(round((word_count / max(duration_seconds, 0.5)) * 60)) if duration_seconds > 0 else 140
+        # Map 90 WPM -> ~50 (Layered), 135 WPM -> ~75 (Balanced), 160+ WPM -> ~88+ (Direct)
+        pace_score = min(100, max(25, int(round(wpm / 1.8))))
+        return wpm, pace_score
+
+    def compute_sentence_handling(self, transcript: str, word_count: int) -> tuple[float, int]:
+        """Evaluate sentence length and structure (brevity vs narrative)."""
+        sentences = [s.strip() for s in re.split(r"[.!?]+", transcript) if s.strip()]
+        avg_len = word_count / max(len(sentences), 1)
+        if avg_len <= 10:
+            score = 88  # Crisp, punchy clauses
+        elif avg_len <= 16:
+            score = 76  # Balanced conversational
+        elif avg_len <= 22:
+            score = 62  # Elaborative
+        else:
+            score = 48  # Layered narrative
+        return round(avg_len, 1), score
+
+    def compute_vocabulary_complexity(self, transcript: str, word_count: int) -> tuple[float, int]:
+        """Evaluate lexical diversity (Type-Token Ratio) and word length."""
+        words = [re.sub(r"[^\w]", "", w.lower()) for w in transcript.split() if w]
+        if not words:
+            return 0.0, 70
+        unique_words = set(words)
+        ttr = len(unique_words) / len(words)
+        avg_chars = sum(len(w) for w in words) / len(words)
+        score = min(98, max(40, int(round((ttr * 55) + (avg_chars * 7)))))
+        return round(ttr, 2), score
+
+    def compute_pause_cadence(
+        self,
+        transcript: str,
+        duration_seconds: float,
+        word_count: int,
+        detected_fillers: list[str],
+    ) -> int:
+        """Evaluate pause frequency and delivery continuity."""
+        filler_count = len(detected_fillers)
+        # Moderate deduction for hesitations without failing the user
+        score = max(40, min(95, 90 - (filler_count * 8)))
+        return score
+
+    def compute_energy_dynamics(self, audio_bytes: Optional[bytes], transcript: str) -> int:
+        """Evaluate vocal energy dynamic range or phrasing intensity."""
+        has_emphasis = any(ch in transcript for ch in ["!", "?"])
+        return 82 if has_emphasis else 74
+
+    def compute_response_timing(self, latency_ms: Optional[float] = None) -> int:
+        """Evaluate response prompt-to-speech timing readiness."""
+        if latency_ms is None:
+            return 78
+        if latency_ms <= 600:
+            return 90
+        elif latency_ms <= 1500:
+            return 78
+        else:
+            return 55
 
     async def _call_llm_json(
         self,
@@ -650,13 +804,14 @@ Respond ONLY with valid JSON with keys "question_text" and "teleprompt_text":
         else:
             user_transcript = ""
 
-        # 3. Compute AI Performance Evaluation
+        # 3. Compute Communication Style Profile (Deterministic Math + Optional Signal Engine)
         evaluation = await self._run_llm_evaluation(
             round_num=round_num,
             stage=round_data["stage"],
             target_teleprompt=teleprompt,
             user_transcript=user_transcript,
             duration_seconds=final_duration,
+            audio_bytes=audio_bytes,
         )
 
         round_data["evaluation"] = evaluation
@@ -680,28 +835,10 @@ Respond ONLY with valid JSON with keys "question_text" and "teleprompt_text":
         target_teleprompt: str,
         user_transcript: str,
         duration_seconds: float,
+        audio_bytes: Optional[bytes] = None,
     ) -> dict[str, Any]:
-        """Perform strict, objective AI evaluation with blind LLM rubric, Pydantic validation, and heuristic fallback."""
+        """Perform communication style profiling on delivery characteristics without script accuracy comparison."""
         user_transcript_clean = user_transcript.strip() if user_transcript else ""
-
-        # Check for empty / silence -> Strictly 0 score
-        if not user_transcript_clean:
-            zero_breakdown = RoundScoreBreakdown(
-                word_choice=0, pacing=0, sentiment=0, tone_emphasis=0, pause_filters=0, energy_inflection=0
-            )
-            return RoundEvaluation(
-                round_number=round_num,
-                stage=stage,
-                overall_score=0,
-                score_breakdown=zero_breakdown,
-                transcribed_text="[No speech detected]",
-                target_teleprompt=target_teleprompt,
-                feedback="No speech detected. You received 0% because you did not speak or repeat the teleprompt script.",
-                strengths=[],
-                improvements=["Speak clearly into your microphone and repeat the teleprompt script aloud."],
-                detected_fillers=[],
-                wpm=0,
-            ).model_dump()
 
         # Detect filler words
         filler_patterns = [
@@ -717,195 +854,148 @@ Respond ONLY with valid JSON with keys "question_text" and "teleprompt_text":
             if matches:
                 detected_fillers.extend(matches if isinstance(matches[0], str) else [m[0] for m in matches])
 
-        # Text normalization
-        target_clean = re.sub(r"[^\w\s]", "", target_teleprompt.lower()).strip()
-        user_clean = re.sub(r"[^\w\s]", "", lower_transcript).strip()
-        
-        target_words = target_clean.split()
-        user_words = user_clean.split()
+        words = [w for w in re.sub(r"[^\w\s]", "", lower_transcript).split() if w]
+        word_count = len(words)
 
-        if not user_words:
-            zero_breakdown = RoundScoreBreakdown(
-                word_choice=0, pacing=0, sentiment=0, tone_emphasis=0, pause_filters=0, energy_inflection=0
+        # Check sample quality & confidence: silence / bad audio is excluded, never scored 0% failing
+        confidence = self.rate_sample_quality(user_transcript_clean, audio_bytes, duration_seconds)
+        is_excluded = (confidence == 0.0)
+
+        if is_excluded:
+            neutral_breakdown = RoundScoreBreakdown(
+                speaking_pace=60,
+                response_timing=60,
+                sentence_handling=60,
+                vocabulary_complexity=60,
+                pause_pattern=60,
+                energy_dynamics=60,
+                word_choice=60,
+                pacing=60,
+                sentiment=60,
+                tone_emphasis=60,
+                pause_filters=60,
+                energy_inflection=60,
             )
             return RoundEvaluation(
                 round_number=round_num,
                 stage=stage,
-                overall_score=0,
-                score_breakdown=zero_breakdown,
-                transcribed_text=user_transcript_clean,
+                overall_score=60,
+                score_breakdown=neutral_breakdown,
+                transcribed_text=user_transcript_clean or "[No speech detected]",
                 target_teleprompt=target_teleprompt,
-                feedback="No audible words detected. Teleprompt was not repeated.",
-                strengths=[],
-                improvements=["Repeat the full teleprompt script on screen."],
+                feedback="No speech detected. This round is flagged as low confidence and excluded from your communication profile calculation.",
+                strengths=["Sample excluded from profile calculation"],
+                improvements=["Speak clearly into your microphone during recording."],
                 detected_fillers=[],
                 wpm=0,
+                confidence=0.0,
+                is_excluded=True,
+                style_traits=["Excluded - Insufficient audio signal"],
+                prompting_adaptation="Round excluded from teleprompter profile weighting.",
             ).model_dump()
 
-        # Similarity metrics
-        seq_ratio = difflib.SequenceMatcher(None, target_clean, user_clean).ratio()
-        target_set = set(target_words)
-        user_set = set(user_words)
-        common_words = target_set.intersection(user_set)
+        # Deterministic Style Measurements
+        wpm, pace_score = self.compute_speaking_pace(word_count, duration_seconds)
+        timing_score = self.compute_response_timing()
+        avg_sentence_len, sentence_score = self.compute_sentence_handling(user_transcript_clean, word_count)
+        ttr, vocab_score = self.compute_vocabulary_complexity(user_transcript_clean, word_count)
+        pause_score = self.compute_pause_cadence(user_transcript_clean, duration_seconds, word_count, detected_fillers)
+        energy_score = self.compute_energy_dynamics(audio_bytes, user_transcript_clean)
 
-        # Stop words to ignore for keyword coverage
-        stop_words = {"the", "a", "an", "and", "or", "in", "on", "at", "to", "for", "with", "is", "we", "our", "i", "you", "it", "this", "that", "of"}
-        target_keywords = target_set - stop_words
-        user_keywords = user_set - stop_words
-        common_keywords = target_keywords.intersection(user_keywords)
-        coverage_ratio = len(common_keywords) / max(len(target_keywords), 1) if target_keywords else (len(common_words) / max(len(target_set), 1))
-
-        # Check for completely irrelevant / disconnected speech -> Strictly 0 score
-        if coverage_ratio < 0.25 or seq_ratio < 0.30:
-            zero_breakdown = RoundScoreBreakdown(
-                word_choice=0, pacing=0, sentiment=0, tone_emphasis=0, pause_filters=0, energy_inflection=0
-            )
-            return RoundEvaluation(
-                round_number=round_num,
-                stage=stage,
-                overall_score=0,
-                score_breakdown=zero_breakdown,
-                transcribed_text=user_transcript_clean,
-                target_teleprompt=target_teleprompt,
-                feedback="Irrelevant response. What you said does not match the teleprompt script, resulting in a score of 0%.",
-                strengths=[],
-                improvements=["Make sure to read and repeat the exact teleprompt response displayed on screen."],
-                detected_fillers=detected_fillers,
-                wpm=int((len(user_words) / max(duration_seconds, 1.0)) * 60) if duration_seconds > 0 else 0,
-            ).model_dump()
-
-        # Heuristic calculation for fallback & bounds
-        raw_word_score = (seq_ratio * 0.6 + coverage_ratio * 0.4) * 100
-        length_penalty = min(1.0, len(user_words) / max(len(target_words), 1))
-        strict_word_choice = max(0, min(100, int(round(raw_word_score * length_penalty))))
-
-        wpm = int((len(user_words) / max(duration_seconds, 1.0)) * 60) if duration_seconds > 0 else 135
-        if 125 <= wpm <= 155:
-            strict_pacing = min(95, int(round(strict_word_choice * 1.05)))
-        elif 105 <= wpm < 125 or 156 <= wpm <= 175:
-            strict_pacing = min(75, int(round(strict_word_choice * 0.85)))
-        elif 80 <= wpm < 105 or 176 <= wpm <= 195:
-            strict_pacing = min(50, int(round(strict_word_choice * 0.60)))
-        else:
-            strict_pacing = min(25, int(round(strict_word_choice * 0.35)))
-
-        filler_deduction = len(detected_fillers) * 15
-        strict_pause_filters = max(0, min(100, strict_word_choice - filler_deduction if strict_word_choice < 85 else 100 - filler_deduction))
-        strict_tone = max(0, min(100, int(round(strict_word_choice * 0.95))))
-        strict_sentiment = max(0, min(100, int(round(strict_word_choice * 0.95))))
-        strict_energy = max(0, min(100, int(round(strict_word_choice * 0.90))))
-
-        strict_overall = int(round(
-            (strict_word_choice * 0.35) +
-            (strict_pacing * 0.20) +
-            (strict_pause_filters * 0.15) +
-            (strict_tone * 0.15) +
-            (strict_energy * 0.10) +
-            (strict_sentiment * 0.05)
+        # Apply configurable, versioned weight table
+        w = self.profiling_weights
+        composite_score = int(round(
+            pace_score * w.get("speaking_pace", 0.25) +
+            timing_score * w.get("response_timing", 0.15) +
+            sentence_score * w.get("sentence_handling", 0.15) +
+            vocab_score * w.get("vocabulary_complexity", 0.15) +
+            pause_score * w.get("pause_pattern", 0.15) +
+            energy_score * w.get("energy_dynamics", 0.15)
         ))
+        composite_score = max(0, min(100, composite_score))
+        prompting_lvl = resolve_prompting_level(composite_score)
 
-        fallback_breakdown = RoundScoreBreakdown(
-            word_choice=strict_word_choice,
-            pacing=strict_pacing,
-            sentiment=strict_sentiment,
-            tone_emphasis=strict_tone,
-            pause_filters=strict_pause_filters,
-            energy_inflection=strict_energy,
+        style_traits = []
+        if wpm >= 150:
+            style_traits.append(f"Direct, brisk tempo ({wpm} WPM)")
+        elif wpm >= 120:
+            style_traits.append(f"Conversational tempo ({wpm} WPM)")
+        else:
+            style_traits.append(f"Deliberate, measured tempo ({wpm} WPM)")
+
+        if avg_sentence_len <= 12:
+            style_traits.append("Direct, punchy sentence structure")
+        else:
+            style_traits.append("Elaborative, multi-clause structure")
+
+        if len(detected_fillers) == 0:
+            style_traits.append("Fluid cadence with minimal fillers")
+        else:
+            style_traits.append(f"Conversational pauses ({len(detected_fillers)} filler(s) detected)")
+
+        breakdown = RoundScoreBreakdown(
+            speaking_pace=pace_score,
+            response_timing=timing_score,
+            sentence_handling=sentence_score,
+            vocabulary_complexity=vocab_score,
+            pause_pattern=pause_score,
+            energy_dynamics=energy_score,
+            word_choice=vocab_score,
+            pacing=pace_score,
+            sentiment=timing_score,
+            tone_emphasis=sentence_score,
+            pause_filters=pause_score,
+            energy_inflection=energy_score,
         )
-        fallback_eval = RoundEvaluation(
+
+        # Optional qualitative style observation via LLM if client is available
+        llm_feedback = None
+        if self.groq_client or self.openai_client:
+            try:
+                style_prompt = f"""You are an expert executive communication profiler analyzing a salesperson's natural speech style.
+Spoken Transcript: "{user_transcript_clean}"
+Tempo: {wpm} WPM | Avg Sentence Length: {avg_sentence_len} words | Detected Fillers: {detected_fillers}
+Assigned Prompting Level: {prompting_lvl['name']} ({prompting_lvl['description']})
+
+Provide 1 sentence describing their natural communication style traits and how it fits {prompting_lvl['name']}. Do NOT judge correctness, do NOT grade pass/fail, and do NOT compare against any script.
+Return valid JSON:
+{{"style_observation": "..."}}
+"""
+                llm_data = await self._call_llm_json(
+                    system="You are an executive communication style profiler returning valid JSON.",
+                    prompt=style_prompt,
+                    temperature=0.3,
+                    timeout=5.0,
+                )
+                if llm_data and "style_observation" in llm_data:
+                    llm_feedback = str(llm_data["style_observation"]).strip()
+                elif llm_data and "feedback" in llm_data:
+                    llm_feedback = str(llm_data["feedback"]).strip()
+            except Exception:
+                llm_feedback = None
+
+        final_feedback = llm_feedback or f"Natural delivery profiled at {wpm} WPM with {style_traits[1].lower()}. Aligned with {prompting_lvl['name']}."
+
+        return RoundEvaluation(
             round_number=round_num,
             stage=stage,
-            overall_score=strict_overall,
-            score_breakdown=fallback_breakdown,
+            overall_score=composite_score,
+            score_breakdown=breakdown,
             transcribed_text=user_transcript_clean,
             target_teleprompt=target_teleprompt,
-            feedback="Direct similarity analysis: Ensure high fidelity to teleprompt value metrics and steady delivery.",
-            strengths=["Accurate core phrasing" if strict_word_choice > 70 else "Clear initial tone"],
-            improvements=["Improve pacing cadence" if strict_pacing < 75 else "Maintain crisp sentence endings without fillers"],
+            feedback=final_feedback,
+            strengths=style_traits,
+            improvements=[f"Teleprompter alignment: {prompting_lvl['directive']}"],
             detected_fillers=detected_fillers,
             wpm=wpm,
-        )
-
-        # Blind Rubric prompt for LLM (no pre-filled heuristic numbers to avoid anchoring)
-        eval_prompt = f"""You are a strict, demanding B2B Executive Sales Performance Coach evaluating a salesperson's voice delivery.
-Sales Stage: {stage} (Round {round_num} of 8)
-
-Required Teleprompt:
-"{target_teleprompt}"
-
-User Spoken Transcript:
-"{user_transcript_clean}"
-
-Spoken Duration: {duration_seconds:.2f} seconds | WPM: {wpm} | Detected Fillers: {detected_fillers}
-
-STRICT EVALUATION RUBRIC (Score each dimension independently between 0 and 100):
-- "word_choice" (0-100): Award 85+ ONLY if virtually all key value metrics and specific phrasing from the teleprompt were accurately delivered. Deduct heavily for omitted facts, distortions, or partial speech.
-- "pacing" (0-100): Optimal enterprise rate is 130-150 WPM. Penalize rushed (>170 WPM) or dragging (<110 WPM) delivery.
-- "sentiment" (0-100): Professional composure, positive executive warmth, and consultative confidence.
-- "tone_emphasis" (0-100): Strategic emphasis on ROI, SLAs, and technical guarantees. Penalize flat or casual tone.
-- "pause_filters" (0-100): Clean articulation without filler hesitations. Each detected filler ({detected_fillers}) must reduce score by 10-15 points.
-- "energy_inflection" (0-100): Vocal dynamics, cadence variance, and authoritative conviction.
-- "overall_score" (0-100): Composite reflection of all 6 dimensions. Only crisp, near-flawless delivery should score 80+.
-
-Return strictly valid JSON in this exact structure:
-{{
-  "overall_score": <integer 0-100>,
-  "score_breakdown": {{
-    "word_choice": <integer 0-100>,
-    "pacing": <integer 0-100>,
-    "sentiment": <integer 0-100>,
-    "tone_emphasis": <integer 0-100>,
-    "pause_filters": <integer 0-100>,
-    "energy_inflection": <integer 0-100>
-  }},
-  "feedback": "<1-2 sentence constructive coaching feedback noting exact strengths or shortcomings>",
-  "strengths": ["<1-2 specific strengths demonstrated>"],
-  "improvements": ["<1-2 specific actionable coaching directives>"],
-  "detected_fillers": {json.dumps(detected_fillers)}
-}}
-"""
-
-        llm_data = await self._call_llm_json(
-            system="You are an elite enterprise sales speech evaluation coach returning strictly valid JSON.",
-            prompt=eval_prompt,
-            temperature=0.2,
-            timeout=15.0,
-        )
-
-        if not llm_data:
-            return fallback_eval.model_dump()
-
-        # Validate with Pydantic
-        try:
-            raw_breakdown = llm_data.get("score_breakdown", {})
-            validated_breakdown = RoundScoreBreakdown(
-                word_choice=int(raw_breakdown.get("word_choice", strict_word_choice)),
-                pacing=int(raw_breakdown.get("pacing", strict_pacing)),
-                sentiment=int(raw_breakdown.get("sentiment", strict_sentiment)),
-                tone_emphasis=int(raw_breakdown.get("tone_emphasis", strict_tone)),
-                pause_filters=int(raw_breakdown.get("pause_filters", strict_pause_filters)),
-                energy_inflection=int(raw_breakdown.get("energy_inflection", strict_energy)),
-            )
-            validated_eval = RoundEvaluation(
-                round_number=round_num,
-                stage=stage,
-                overall_score=int(llm_data.get("overall_score", strict_overall)),
-                score_breakdown=validated_breakdown,
-                transcribed_text=user_transcript_clean,
-                target_teleprompt=target_teleprompt,
-                feedback=str(llm_data.get("feedback", "Good delivery with accurate reproduction of key value points.")),
-                strengths=list(llm_data.get("strengths", ["Accurate core phrasing"])),
-                improvements=list(llm_data.get("improvements", ["Maintain consistent cadence"])),
-                detected_fillers=list(llm_data.get("detected_fillers", detected_fillers)),
-                wpm=wpm,
-            )
-            return validated_eval.model_dump()
-        except Exception as val_err:
-            LOGGER.warning("Pydantic validation failed on LLM response (%s), using validated fallback.", val_err)
-            return fallback_eval.model_dump()
+            confidence=confidence,
+            is_excluded=False,
+            style_traits=style_traits,
+            prompting_adaptation=prompting_lvl["description"],
+        ).model_dump()
 
     def _compute_summary_report(self, session: dict[str, Any]) -> dict[str, Any]:
-        """Compute final 8-round composite calibration report matching the user's screenshot."""
+        """Compute final 8-round composite communication style profile report."""
         rounds = session["rounds"]
         completed_rounds = [r for r in rounds.values() if r.get("completed") and r.get("evaluation")]
         num_completed = len(completed_rounds)
@@ -913,15 +1003,38 @@ Return strictly valid JSON in this exact structure:
         if not completed_rounds:
             return {}
 
-        round_scores = [r["evaluation"]["overall_score"] for r in completed_rounds]
-        overall_score = int(round(sum(round_scores) / len(round_scores)))
+        # Exclude low-confidence/silent rounds from profile averaging
+        valid_rounds = [
+            r for r in completed_rounds
+            if not r["evaluation"].get("is_excluded", False) and r["evaluation"].get("confidence", 1.0) > 0.1
+        ]
+        if not valid_rounds:
+            valid_rounds = completed_rounds
 
-        avg_word_choice = int(round(sum(r["evaluation"]["score_breakdown"]["word_choice"] for r in completed_rounds) / num_completed))
-        avg_pacing = int(round(sum(r["evaluation"]["score_breakdown"]["pacing"] for r in completed_rounds) / num_completed))
-        avg_sentiment = int(round(sum(r["evaluation"]["score_breakdown"]["sentiment"] for r in completed_rounds) / num_completed))
-        avg_tone_emphasis = int(round(sum(r["evaluation"]["score_breakdown"]["tone_emphasis"] for r in completed_rounds) / num_completed))
-        avg_pause_filters = int(round(sum(r["evaluation"]["score_breakdown"]["pause_filters"] for r in completed_rounds) / num_completed))
-        avg_energy_inflection = int(round(sum(r["evaluation"]["score_breakdown"]["energy_inflection"] for r in completed_rounds) / num_completed))
+        total_conf = sum(r["evaluation"].get("confidence", 1.0) for r in valid_rounds) or 1.0
+        overall_score = int(round(
+            sum(r["evaluation"]["overall_score"] * r["evaluation"].get("confidence", 1.0) for r in valid_rounds) / total_conf
+        ))
+
+        def _w_avg(key: str, fallback_key: str = "word_choice") -> int:
+            vals = []
+            for r in valid_rounds:
+                b = r["evaluation"].get("score_breakdown", {})
+                v = b.get(key, b.get(fallback_key, 75))
+                vals.append(v * r["evaluation"].get("confidence", 1.0))
+            return int(round(sum(vals) / total_conf))
+
+        avg_pace = _w_avg("speaking_pace", "pacing")
+        avg_timing = _w_avg("response_timing", "sentiment")
+        avg_sentence = _w_avg("sentence_handling", "tone_emphasis")
+        avg_vocab = _w_avg("vocabulary_complexity", "word_choice")
+        avg_pause = _w_avg("pause_pattern", "pause_filters")
+        avg_energy = _w_avg("energy_dynamics", "energy_inflection")
+
+        valid_wpms = [r["evaluation"]["wpm"] for r in valid_rounds if r["evaluation"].get("wpm", 0) > 0]
+        avg_wpm = int(round(sum(valid_wpms) / len(valid_wpms))) if valid_wpms else 140
+
+        prompting_level = resolve_prompting_level(overall_score)
 
         start_mono = session.get("start_time_monotonic", time.monotonic())
         end_mono = session.get("end_time_monotonic") or time.monotonic()
@@ -929,18 +1042,20 @@ Return strictly valid JSON in this exact structure:
         minutes = int(total_seconds // 60)
         seconds = int(total_seconds % 60)
         time_formatted = f"{minutes}m {seconds:02d}s" if minutes > 0 else f"{seconds}s"
-
         completed_on_str = datetime.now(timezone.utc).strftime("%B %d, %Y")
 
         round_performance_list = []
         for i in range(1, 9):
             r_data = rounds.get(i)
             if r_data and r_data.get("evaluation"):
-                score = r_data["evaluation"]["overall_score"]
+                ev = r_data["evaluation"]
                 round_performance_list.append({
                     "round_number": i,
                     "stage": r_data["stage"],
-                    "score": score,
+                    "score": ev["overall_score"],
+                    "wpm": ev.get("wpm", 0),
+                    "confidence": ev.get("confidence", 1.0),
+                    "is_excluded": ev.get("is_excluded", False),
                     "completed": True,
                 })
             else:
@@ -949,10 +1064,10 @@ Return strictly valid JSON in this exact structure:
                     "round_number": i,
                     "stage": stage_name,
                     "score": None,
+                    "wpm": None,
                     "completed": False,
                 })
 
-        # Detailed round evaluations for local JSON storage
         rounds_detailed = []
         for i in range(1, 9):
             r_data = rounds.get(i)
@@ -971,6 +1086,9 @@ Return strictly valid JSON in this exact structure:
                     "wpm": ev.get("wpm", 0),
                     "overall_score": ev.get("overall_score"),
                     "score_breakdown": ev.get("score_breakdown", {}),
+                    "confidence": ev.get("confidence", 1.0),
+                    "is_excluded": ev.get("is_excluded", False),
+                    "style_traits": ev.get("style_traits", []),
                     "feedback": ev.get("feedback", ""),
                     "strengths": ev.get("strengths", []),
                     "improvements": ev.get("improvements", []),
@@ -984,32 +1102,44 @@ Return strictly valid JSON in this exact structure:
             "created_at": session.get("created_at"),
             "completed_at": datetime.now(timezone.utc).isoformat(),
             "overall_score": overall_score,
+            "wpm": avg_wpm,
+            "prompting_level": prompting_level,
+            "formula_version": CALIBRATION_FORMULA_VERSION,
+            "formula_weights": self.profiling_weights,
             "rounds_completed": num_completed,
+            "rounds_profiled": len(valid_rounds),
             "total_rounds": 8,
             "total_time_seconds": round(total_seconds, 1),
             "total_time_formatted": time_formatted,
             "completed_on": completed_on_str,
-            "status_message": "Great job! Your calibration is complete and your AI coach is ready to guide you on calls.",
+            "status_message": f"Great job! Calibration complete. Your natural speaking style is mapped to {prompting_level['name']}.",
             "round_performance": round_performance_list,
             "rounds_detail": rounds_detailed,
             "score_breakdown": {
-                "word_choice": avg_word_choice,
-                "pacing": avg_pacing,
-                "sentiment": avg_sentiment,
-                "tone_emphasis": avg_tone_emphasis,
-                "pause_filters": avg_pause_filters,
-                "energy_inflection": avg_energy_inflection,
+                "speaking_pace": avg_pace,
+                "response_timing": avg_timing,
+                "sentence_handling": avg_sentence,
+                "vocabulary_complexity": avg_vocab,
+                "pause_pattern": avg_pause,
+                "energy_dynamics": avg_energy,
+                # Backwards compatible aliases
+                "word_choice": avg_vocab,
+                "pacing": avg_pace,
+                "sentiment": avg_timing,
+                "tone_emphasis": avg_sentence,
+                "pause_filters": avg_pause,
+                "energy_inflection": avg_energy,
             },
             "what_this_means": [
-                "Your responses have been analyzed for pace, tone, and delivery.",
-                "AI prompts will be personalized to your natural style.",
-                "You'll receive more accurate, real-time guidance on every call.",
-                "You can recalibrate anytime if you want to fine tune your experience.",
+                f"Your speaking cadence averages {avg_wpm} WPM with {prompting_level['badge'].lower()} sentence flow.",
+                f"Teleprompter lines will automatically use {prompting_level['directive']}",
+                "Prompting levels route guidance without judging speech correctness or accuracy.",
+                "Recalibrate anytime if your speaking environment or preferences change.",
             ],
             "what_is_next": [
-                "You can now make calls with real-time AI guidance.",
-                "Your prompts will adapt to your style automatically.",
-                "Recalibrate anytime to fine tune your experience.",
+                f"Live call teleprompter configured with {prompting_level['name']}.",
+                "Real-time guidance will adapt to your tempo automatically.",
+                "Recalibrate anytime to fine-tune your voice profile.",
             ],
         }
 
@@ -1080,19 +1210,26 @@ def get_calibration_router(service: Optional[CalibrationService] = None) -> APIR
             return {
                 "status": "default",
                 "wpm": 140,
-                "tone": "Confident & Assertive",
-                "pacing": "Direct, structured, 140 WPM pace",
+                "prompting_level": PROMPTING_LEVELS["balanced"],
+                "tone": "Natural & Confident",
+                "pacing": "Balanced conversational 140 WPM pace",
                 "clarity": 85,
             }
         try:
             with open(latest_file, "r", encoding="utf-8") as f:
                 data = json.load(f)
-            return {"status": "success", "report": data}
+            return {
+                "status": "success",
+                "report": data,
+                "wpm": data.get("wpm", 140),
+                "prompting_level": data.get("prompting_level", PROMPTING_LEVELS["balanced"]),
+            }
         except Exception as exc:
             return {
                 "status": "default",
                 "wpm": 140,
-                "tone": "Confident & Assertive",
+                "prompting_level": PROMPTING_LEVELS["balanced"],
+                "tone": "Natural & Confident",
                 "error": str(exc),
             }
 

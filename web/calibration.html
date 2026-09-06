@@ -1164,14 +1164,17 @@
               <circle id="gaugeCircleFill" class="gauge-fill" cx="70" cy="70" r="60"></circle>
             </svg>
             <div class="gauge-content">
-              <div class="gauge-label">Overall Score</div>
-              <div class="gauge-value" id="resOverallScoreVal">86%</div>
+              <div class="gauge-label">Style Index</div>
+              <div class="gauge-value" id="resOverallScoreVal">86</div>
             </div>
           </div>
 
           <div class="score-details" style="flex: 1;">
-            <h3 id="resHeading">Great job!</h3>
-            <p id="resStatusMsg">Your calibration is complete and your AI coach is ready to guide you on calls.</p>
+            <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 6px; flex-wrap: wrap; gap: 8px;">
+              <h3 id="resHeading" style="margin: 0;">Profile calibrated</h3>
+              <span id="resPromptingBadge" class="nav-badge" style="background: #ccfbf1; color: #0f766e; font-size: 0.78rem;">Prompting Level: Balanced</span>
+            </div>
+            <p id="resStatusMsg">Your calibration is complete and your teleprompter profile is ready to guide you on calls.</p>
 
             <div class="stat-list">
               <div class="stat-item">
@@ -1179,7 +1182,7 @@
                   <!-- <span class="stat-icon">🎯</span> -->
                   <span id="resRoundsCompleted">8</span>
                 </div>
-                <div class="stat-right">Rounds completed</div>
+                <div class="stat-right">Rounds profiled</div>
               </div>
 
               <div class="stat-item">
@@ -1212,15 +1215,15 @@
             <ul class="info-bullets" id="whatThisMeansList">
               <li>
                 <div class="check-icon">✓</div>
-                <span>Your responses have been analyzed for pace, tone, and delivery.</span>
+                <span>Your responses have been profiled for pace, tone, and sentence cadence.</span>
               </li>
               <li>
                 <div class="check-icon">✓</div>
-                <span>AI prompts will be personalized to your natural style.</span>
+                <span>AI teleprompter prompts will be formatted to match your natural style.</span>
               </li>
               <li>
                 <div class="check-icon">✓</div>
-                <span>You'll receive more accurate, real-time guidance on every call.</span>
+                <span>Prompting levels route guidance without judging speech correctness or accuracy.</span>
               </li>
               <li>
                 <div class="check-icon">✓</div>
@@ -1238,7 +1241,7 @@
 
       <!-- Middle Card: Round Performance Stepper -->
       <div class="card stepper-card">
-        <h3 class="card-title">Round performance</h3>
+        <h3 class="card-title">Round profile summary</h3>
 
         <div class="stepper-track-container">
           <div class="stepper-line" id="stepperLine"></div>
@@ -1253,37 +1256,21 @@
 
         <!-- Score Breakdown with 6 metrics (Exact Screenshot Match) -->
         <div class="card">
-          <h3 class="card-title">Score breakdown</h3>
+          <h3 class="card-title">Communication style breakdown</h3>
 
           <div class="breakdown-grid">
 
             <!-- Column 1 -->
             <div style="display: flex; flex-direction: column; gap: 20px;">
               
-              <!-- Word Choice -->
-              <div class="metric-row">
-                <div class="metric-header">
-                  <div class="metric-title">
-                    <div class="metric-icon-box">
-                      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"></path></svg>
-                    </div>
-                    <span class="metric-name">Word choice</span>
-                  </div>
-                  <span class="metric-val" id="metricWordChoiceVal">80%</span>
-                </div>
-                <div class="progress-bar-bg">
-                  <div class="progress-bar-fill" id="metricWordChoiceBar" style="width: 80%;"></div>
-                </div>
-              </div>
-
-              <!-- Pacing -->
+              <!-- Speaking Pace -->
               <div class="metric-row">
                 <div class="metric-header">
                   <div class="metric-title">
                     <div class="metric-icon-box">
                       <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"></circle><polyline points="12 6 12 12 16 14"></polyline></svg>
                     </div>
-                    <span class="metric-name">Pacing</span>
+                    <span class="metric-name">Speaking pace</span>
                   </div>
                   <span class="metric-val" id="metricPacingVal">84%</span>
                 </div>
@@ -1292,14 +1279,14 @@
                 </div>
               </div>
 
-              <!-- Sentiment -->
+              <!-- Response Timing -->
               <div class="metric-row">
                 <div class="metric-header">
                   <div class="metric-title">
                     <div class="metric-icon-box">
                       <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"></circle><path d="M8 14s1.5 2 4 2 4-2 4-2"></path><line x1="9" y1="9" x2="9.01" y2="9"></line><line x1="15" y1="9" x2="15.01" y2="9"></line></svg>
                     </div>
-                    <span class="metric-name">Sentiment</span>
+                    <span class="metric-name">Response timing</span>
                   </div>
                   <span class="metric-val" id="metricSentimentVal">82%</span>
                 </div>
@@ -1307,19 +1294,15 @@
                   <div class="progress-bar-fill" id="metricSentimentBar" style="width: 82%;"></div>
                 </div>
               </div>
-            </div>
 
-            <!-- Column 2 -->
-            <div style="display: flex; flex-direction: column; gap: 20px;">
-              
-              <!-- Tone / Emphasis -->
+              <!-- Sentence Structure -->
               <div class="metric-row">
                 <div class="metric-header">
                   <div class="metric-title">
                     <div class="metric-icon-box">
                       <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 18v-6a9 9 0 0 1 18 0v6"></path><path d="M21 19a2 2 0 0 1-2 2h-1a2 2 0 0 1-2-2v-3a2 2 0 0 1 2-2h3zM3 19a2 2 0 0 0 2 2h1a2 2 0 0 0 2-2v-3a2 2 0 0 0-2-2H3z"></path></svg>
                     </div>
-                    <span class="metric-name">Tone/Emphasis</span>
+                    <span class="metric-name">Sentence structure</span>
                   </div>
                   <span class="metric-val" id="metricToneVal">86%</span>
                 </div>
@@ -1327,15 +1310,35 @@
                   <div class="progress-bar-fill" id="metricToneBar" style="width: 86%;"></div>
                 </div>
               </div>
+            </div>
 
-              <!-- Pause / Filters -->
+            <!-- Column 2 -->
+            <div style="display: flex; flex-direction: column; gap: 20px;">
+              
+              <!-- Vocabulary Complexity -->
+              <div class="metric-row">
+                <div class="metric-header">
+                  <div class="metric-title">
+                    <div class="metric-icon-box">
+                      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"></path></svg>
+                    </div>
+                    <span class="metric-name">Vocabulary complexity</span>
+                  </div>
+                  <span class="metric-val" id="metricWordChoiceVal">80%</span>
+                </div>
+                <div class="progress-bar-bg">
+                  <div class="progress-bar-fill" id="metricWordChoiceBar" style="width: 80%;"></div>
+                </div>
+              </div>
+
+              <!-- Pause Cadence -->
               <div class="metric-row">
                 <div class="metric-header">
                   <div class="metric-title">
                     <div class="metric-icon-box">
                       <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="6" y="4" width="4" height="16"></rect><rect x="14" y="4" width="4" height="16"></rect></svg>
                     </div>
-                    <span class="metric-name">Pause/Filters</span>
+                    <span class="metric-name">Pause cadence</span>
                   </div>
                   <span class="metric-val" id="metricPauseVal">83%</span>
                 </div>
@@ -1344,14 +1347,14 @@
                 </div>
               </div>
 
-              <!-- Energy / Inflection -->
+              <!-- Energy Dynamics -->
               <div class="metric-row">
                 <div class="metric-header">
                   <div class="metric-title">
                     <div class="metric-icon-box">
                       <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"></polygon></svg>
                     </div>
-                    <span class="metric-name">Energy/Inflection</span>
+                    <span class="metric-name">Energy dynamics</span>
                   </div>
                   <span class="metric-val" id="metricEnergyVal">85%</span>
                 </div>
@@ -1409,22 +1412,21 @@
     <div class="modal-content">
       <div style="text-align: center; margin-bottom: 20px;">
         <!-- <div style="font-size: 2.2rem; margin-bottom: 6px;">🎉</div> -->
-        <h2 style="font-size: 1.4rem; font-weight: 800; color: var(--slate-900);" id="modalRoundTitle">Round 1
-          Evaluation</h2>
-        <div style="font-size: 2.4rem; font-weight: 800; color: var(--primary); margin: 8px 0;" id="modalScoreVal">88%
-        </div>
-        <p style="color: var(--slate-600); font-size: 0.9rem;" id="modalFeedbackText">Great pace and confident delivery.
-        </p>
+        <h2 style="font-size: 1.4rem; font-weight: 800; color: var(--slate-900);" id="modalRoundTitle">Round 1 Profile</h2>
+        <div style="font-size: 2.4rem; font-weight: 800; color: var(--primary); margin: 8px 0;" id="modalScoreVal">88</div>
+        <p style="color: var(--slate-600); font-size: 0.9rem;" id="modalFeedbackText">Great pace and confident delivery.</p>
       </div>
 
       <div style="background: var(--slate-50); border-radius: 12px; padding: 16px; margin-bottom: 24px;">
-        <div style="font-size: 0.82rem; font-weight: 700; color: var(--slate-700); margin-bottom: 8px;">Key Strengths &
-          Coaching:</div>
+        <div style="font-size: 0.82rem; font-weight: 700; color: var(--slate-700); margin-bottom: 8px;">Observed Delivery Traits:</div>
         <ul id="modalStrengthsList"
           style="font-size: 0.85rem; color: var(--slate-600); padding-left: 20px; line-height: 1.5;">
-          <li>Clear articulation of value proposition</li>
-          <li>Steady speaking rate (142 WPM)</li>
+          <li>Conversational delivery tempo (142 WPM)</li>
+          <li>Structured sentence cadence</li>
         </ul>
+        <div id="modalPromptingNote" style="margin-top: 12px; font-size: 0.82rem; color: #0f766e; background: #ccfbf1; padding: 10px 14px; border-radius: 8px; font-weight: 600; line-height: 1.4;">
+          🎯 Configures live teleprompter delivery.
+        </div>
       </div>
 
       <div style="display: flex; justify-content: flex-end; gap: 12px;">
@@ -1772,20 +1774,34 @@
       const roundEval = data.round_data.evaluation;
 
       // Populate Modal
-      document.getElementById("modalRoundTitle").textContent = `Round ${currentRoundNumber} Evaluation`;
-      document.getElementById("modalScoreVal").textContent = `${roundEval.overall_score}%`;
+      document.getElementById("modalRoundTitle").textContent = `Round ${currentRoundNumber} Profile`;
+      document.getElementById("modalScoreVal").textContent = `${roundEval.overall_score}`;
       document.getElementById("modalFeedbackText").textContent = roundEval.feedback;
 
       const listEl = document.getElementById("modalStrengthsList");
       listEl.innerHTML = "";
-      (roundEval.strengths || ["Crisp delivery"]).forEach(s => {
+      const traits = roundEval.style_traits && roundEval.style_traits.length ? roundEval.style_traits : (roundEval.strengths || ["Conversational delivery"]);
+      traits.forEach(s => {
         const li = document.createElement("li");
         li.textContent = s;
         listEl.appendChild(li);
       });
 
+      const noteEl = document.getElementById("modalPromptingNote");
+      if (noteEl) {
+        if (roundEval.is_excluded) {
+          noteEl.textContent = "ℹ️ Low speech signal detected in this round. It is excluded from your final profile calculation.";
+          noteEl.style.background = "#fef3c7";
+          noteEl.style.color = "#92400e";
+        } else {
+          noteEl.textContent = `🎯 ${roundEval.prompting_adaptation || "Configures live teleprompter delivery."}`;
+          noteEl.style.background = "#ccfbf1";
+          noteEl.style.color = "#0f766e";
+        }
+      }
+
       if (data.is_session_completed) {
-        document.getElementById("modalBtnNext").textContent = "🏆 View Final Calibration Results";
+        document.getElementById("modalBtnNext").textContent = "🏆 View Final Communication Profile";
         document.getElementById("modalBtnNext").onclick = () => {
           closeModal();
           showResultsDashboard(data.summary_report);
@@ -1826,7 +1842,7 @@
 
     let lastSummaryReport = null;
 
-    // 6. Final Calibration Results Display (1:1 Screenshot Match)
+    // 6. Final Calibration Results Display (Style Fingerprint)
     function showResultsDashboard(report) {
       lastSummaryReport = report;
       clearInterval(timerInterval);
@@ -1834,11 +1850,11 @@
       document.getElementById("resultsView").classList.remove("hidden");
       document.getElementById("resultsView").classList.add("results-active");
 
-      setNavStatus("Calibration Complete • 100%");
+      setNavStatus("Calibration Complete • Profile Ready");
 
       // Gauge Score
-      const score = report.overall_score || 86;
-      document.getElementById("resOverallScoreVal").textContent = `${score}%`;
+      const score = report.overall_score || 78;
+      document.getElementById("resOverallScoreVal").textContent = `${score}`;
 
       // Animate SVG circular progress
       const circle = document.getElementById("gaugeCircleFill");
@@ -1847,9 +1863,15 @@
       const offset = circumference - (score / 100) * circumference;
       circle.style.strokeDashoffset = offset;
 
-      document.getElementById("resHeading").textContent = "Great job!";
-      document.getElementById("resStatusMsg").textContent = report.status_message || "Your calibration is complete and your AI coach is ready to guide you on calls.";
-      document.getElementById("resRoundsCompleted").textContent = report.rounds_completed || 8;
+      const pLevel = report.prompting_level || { name: "Prompting Level: Balanced", badge: "Balanced" };
+      const badgeEl = document.getElementById("resPromptingBadge");
+      if (badgeEl) {
+        badgeEl.textContent = pLevel.name || "Prompting Level: Balanced";
+      }
+
+      document.getElementById("resHeading").textContent = "Profile calibrated";
+      document.getElementById("resStatusMsg").textContent = report.status_message || "Your communication profile is complete and ready for live call teleprompter steering.";
+      document.getElementById("resRoundsCompleted").textContent = `${report.rounds_profiled || report.rounds_completed || 8} of ${report.total_rounds || 8}`;
       document.getElementById("resTotalTime").textContent = report.total_time_formatted || "8m 24s";
       document.getElementById("resCompletedOn").textContent = report.completed_on || "May 16, 2025";
 
@@ -1861,25 +1883,26 @@
       perfList.forEach(p => {
         const stepDiv = document.createElement("div");
         stepDiv.className = "step-node";
+        const wpmText = p.wpm ? `${p.wpm} WPM` : (p.is_excluded ? "Excluded" : `${p.score || 75}`);
         stepDiv.innerHTML = `
-          <div class="step-circle">✓</div>
+          <div class="step-circle">${p.is_excluded ? "•" : "✓"}</div>
           <div class="step-label">Round ${p.round_number}</div>
-          <div class="step-score">${p.score || 85}%</div>
+          <div class="step-score">${wpmText}</div>
         `;
         stepperContainer.appendChild(stepDiv);
       });
 
       // Render 6 Metric Breakdown Bars
       const b = report.score_breakdown || {
-        word_choice: 80, pacing: 84, sentiment: 82, tone_emphasis: 86, pause_filters: 83, energy_inflection: 85
+        speaking_pace: 80, response_timing: 78, sentence_handling: 76, vocabulary_complexity: 82, pause_pattern: 85, energy_dynamics: 78
       };
 
-      setBar("metricWordChoiceVal", "metricWordChoiceBar", b.word_choice || 80);
-      setBar("metricPacingVal", "metricPacingBar", b.pacing || 84);
-      setBar("metricSentimentVal", "metricSentimentBar", b.sentiment || 82);
-      setBar("metricToneVal", "metricToneBar", b.tone_emphasis || 86);
-      setBar("metricPauseVal", "metricPauseBar", b.pause_filters || 83);
-      setBar("metricEnergyVal", "metricEnergyBar", b.energy_inflection || 85);
+      setBar("metricPacingVal", "metricPacingBar", b.speaking_pace || b.pacing || 80);
+      setBar("metricSentimentVal", "metricSentimentBar", b.response_timing || b.sentiment || 78);
+      setBar("metricToneVal", "metricToneBar", b.sentence_handling || b.tone_emphasis || 76);
+      setBar("metricWordChoiceVal", "metricWordChoiceBar", b.vocabulary_complexity || b.word_choice || 82);
+      setBar("metricPauseVal", "metricPauseBar", b.pause_pattern || b.pause_filters || 85);
+      setBar("metricEnergyVal", "metricEnergyBar", b.energy_dynamics || b.energy_inflection || 78);
     }
 
     function downloadJSONReport() {
