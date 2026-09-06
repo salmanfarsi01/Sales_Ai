@@ -2315,15 +2315,19 @@ Avoid: 'cheap', 'hurry up', 'standard commission'</textarea>
 
           <!-- Quality Check Card -->
           <div class="quality-check-card">
-            <div style="display: flex; align-items: center; gap: 16px;">
-              <div class="card-icon-badge badge-blue" style="width: 48px; height: 48px; font-size: 1.4rem;">🛡️</div>
-              <div>
-                <h3 style="font-size: 1.1rem; font-weight: 800; color: var(--slate-900);">Quality Check</h3>
-                <p id="qualityCheckSummary" style="font-size: 0.85rem; color: var(--slate-500); margin-top: 2px;">Great job! Your playbook methodology is complete and ready to use.</p>
-                <div id="qualityBenchmarkDetail" style="font-size: 0.76rem; color: var(--slate-400); margin-top: 4px; font-style: italic;"></div>
+            <div style="display: flex; align-items: flex-start; gap: 16px; flex: 1;">
+              <div class="card-icon-badge badge-blue" style="width: 48px; height: 48px; font-size: 1.4rem; flex-shrink: 0;">🛡️</div>
+              <div style="flex: 1;">
+                <div style="display: flex; align-items: center; gap: 8px;">
+                  <h3 style="font-size: 1.1rem; font-weight: 800; color: var(--slate-900); margin: 0;">Quality Check</h3>
+                  <span id="qualitySourceBadge" class="tag-pill" style="font-size: 0.68rem; font-weight: 700; background: #e0f2fe; color: #0369a1; border: 1px solid #bae6fd;">AI-Reviewed</span>
+                </div>
+                <p id="qualityCheckSummary" style="font-size: 0.85rem; color: var(--slate-500); margin-top: 4px; margin-bottom: 2px;">Great job! Your playbook methodology is complete and ready to use.</p>
+                <div id="qualityBenchmarkDetail" style="font-size: 0.76rem; color: var(--slate-400); margin-top: 2px; font-style: italic;"></div>
+                <div id="qualityLlmFeedback" style="margin-top: 8px; font-size: 0.8rem; color: #334155; line-height: 1.4; display: none; background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 6px; padding: 8px 12px;"></div>
               </div>
             </div>
-            <div style="text-align: right;">
+            <div style="text-align: right; flex-shrink: 0;">
               <div>
                 <span class="quality-score-num" id="qualityScoreDisplay">94</span>
                 <span class="quality-score-denom">/100</span>
@@ -3237,32 +3241,25 @@ Avoid: 'cheap', 'hurry up', 'standard commission'</textarea>
     }
 
     async function generateLivePromptPreview() {
-      const name = document.getElementById('playbookName')?.value || 'Daniel';
-      const tone = selectedTone;
-      const comm = document.getElementById('commStyleSelect')?.value || 'Consultative';
-      const sentence = document.getElementById('sentenceStyleSelect')?.value || 'Short & Conversational';
-      const form = document.getElementById('formalitySelect')?.value || 'Professional';
+      const payload = constructPayload();
+
+      document.getElementById('livePromptPreviewBox').innerText = 'Compiling methodology lens...';
 
       try {
-        const res = await fetch('/api/playbook/preview-prompt', {
+        const res = await fetch('/api/playbook/simulate-runtime-prompt', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
-            name: name.split(' ')[0],
-            overall_tone: tone,
-            communication_style: comm,
-            sentence_style: sentence,
-            formality: form
+            playbook_id: currentPlaybookId || null,
+            playbook: payload,
+            trust_score: null,
+            detected_objection: null
           })
         });
         const data = await res.json();
-        document.getElementById('livePromptPreviewBox').innerText = data.preview_text;
+        document.getElementById('livePromptPreviewBox').innerText = data.methodology_prompt;
       } catch (e) {
-        document.getElementById('livePromptPreviewBox').innerText = 
-          `Hey ${name.split(' ')[0]}, I've got you.\n\n` +
-          `I'll keep my prompts ${tone.toLowerCase()}, direct, and ${comm.toLowerCase()} — ` +
-          `short, professional, and to the point.\n\n` +
-          `Let's build a playbook that wins more conversations.`;
+        document.getElementById('livePromptPreviewBox').innerText = 'Preview unavailable — check connection.';
       }
     }
 
@@ -3308,6 +3305,23 @@ Avoid: 'cheap', 'hurry up', 'standard commission'</textarea>
 
     async function refreshQualityBenchmark() {
       const payload = constructPayload();
+      const scoreEl = document.getElementById('qualityScoreDisplay');
+      const badgeEl = document.getElementById('qualityBadgeLabel');
+      const summaryEl = document.getElementById('qualityCheckSummary');
+      const benchEl = document.getElementById('qualityBenchmarkDetail');
+      const srcBadge = document.getElementById('qualitySourceBadge');
+      const feedbackEl = document.getElementById('qualityLlmFeedback');
+
+      if (scoreEl) scoreEl.innerText = '--';
+      if (badgeEl) badgeEl.innerText = 'Evaluating...';
+      if (summaryEl) summaryEl.innerText = 'Analyzing playbook methodology with LLM and industry cohort benchmarks...';
+      if (srcBadge) {
+        srcBadge.innerText = '⏳ AI Reviewing...';
+        srcBadge.style.background = '#f1f5f9';
+        srcBadge.style.color = '#475569';
+        srcBadge.style.borderColor = '#cbd5e1';
+      }
+
       try {
         const res = await fetch('/api/playbook/evaluate-quality', {
           method: 'POST',
@@ -3317,16 +3331,54 @@ Avoid: 'cheap', 'hurry up', 'standard commission'</textarea>
         if (res.ok) {
           const data = await res.json();
           lastEvaluatedQualityScore = data.quality_score;
-          if (data.quality_score) document.getElementById('qualityScoreDisplay').innerText = data.quality_score;
-          if (data.rating) document.getElementById('qualityBadgeLabel').innerText = data.rating;
-          if (data.summary && document.getElementById('qualityCheckSummary')) {
-            document.getElementById('qualityCheckSummary').innerText = data.summary;
+          if (scoreEl && data.quality_score) scoreEl.innerText = data.quality_score;
+          if (badgeEl && data.rating) badgeEl.innerText = data.rating;
+          if (summaryEl && data.summary) summaryEl.innerText = data.summary;
+          if (benchEl && data.benchmark_comparison) benchEl.innerText = data.benchmark_comparison;
+
+          if (srcBadge) {
+            if (data.quality_source === 'ai_llm') {
+              srcBadge.innerText = '✨ AI-Reviewed';
+              srcBadge.style.background = '#f5f3ff';
+              srcBadge.style.color = '#6d28d9';
+              srcBadge.style.borderColor = '#ddd6fe';
+            } else {
+              srcBadge.innerText = '📊 Structural Estimate (AI unavailable)';
+              srcBadge.style.background = '#fffbeb';
+              srcBadge.style.color = '#b45309';
+              srcBadge.style.borderColor = '#fde68a';
+            }
           }
-          if (data.benchmark_comparison && document.getElementById('qualityBenchmarkDetail')) {
-            document.getElementById('qualityBenchmarkDetail').innerText = data.benchmark_comparison;
+
+          if (feedbackEl) {
+            if (data.llm_evaluation) {
+              let fbHtml = '';
+              if (data.llm_evaluation.coherence_feedback) {
+                fbHtml += `<div style="font-weight: 700; color: #1e293b; margin-bottom: 4px;">🧠 Assessment: ${escapeHtml(data.llm_evaluation.coherence_feedback)}</div>`;
+              }
+              if (data.llm_evaluation.strengths && data.llm_evaluation.strengths.length > 0) {
+                fbHtml += `<div style="color: #065f46; font-size: 0.78rem;"><strong>✓ Strengths:</strong> ${data.llm_evaluation.strengths.map(s => escapeHtml(s)).join(' • ')}</div>`;
+              }
+              if (data.llm_evaluation.gaps && data.llm_evaluation.gaps.length > 0) {
+                fbHtml += `<div style="color: #b45309; font-size: 0.78rem; margin-top: 2px;"><strong>⚠️ Opportunities:</strong> ${data.llm_evaluation.gaps.map(g => escapeHtml(g)).join(' • ')}</div>`;
+              }
+              feedbackEl.innerHTML = fbHtml;
+              feedbackEl.style.display = 'block';
+            } else {
+              feedbackEl.style.display = 'none';
+            }
+          }
+        } else {
+          if (summaryEl) summaryEl.innerText = 'Quality evaluation service unavailable.';
+          if (srcBadge) {
+            srcBadge.innerText = '⚠️ Offline';
+            srcBadge.style.background = '#fef2f2';
+            srcBadge.style.color = '#dc2626';
           }
         }
-      } catch (e) {}
+      } catch (e) {
+        if (summaryEl) summaryEl.innerText = 'Quality evaluation error: ' + e.message;
+      }
     }
 
     function renderReviewSummary() {

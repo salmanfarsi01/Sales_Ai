@@ -32,7 +32,7 @@ from typing import Any, Dict, List, Optional, Tuple, Union
 
 from fastapi import APIRouter, FastAPI, HTTPException
 from fastapi.responses import FileResponse
-from pydantic import BaseModel, Field, field_validator, model_validator
+from pydantic import BaseModel, Field, PrivateAttr, field_validator, model_validator
 
 LOGGER = logging.getLogger("copilot.playbook")
 WORKSPACE_DIR = Path(__file__).resolve().parent.parent
@@ -870,22 +870,90 @@ def get_cohort_benchmark_stats(
     }
 
 
-def calculate_playbook_quality_score(pb: Playbook) -> int:
-    """Backward-compatible alias for evaluate_playbook_quality_benchmark."""
-    res = evaluate_playbook_quality_benchmark(pb)
-    return res["quality_score"]
+async def ai_evaluate_playbook_quality(pb: Playbook) -> Optional[Dict[str, Any]]:
+    """LLM reads the actual playbook content and judges methodology quality."""
+    objections_summary = "\n".join([
+        f"- \"{o.objection}\" ({', '.join(o.category) if isinstance(o.category, list) else o.category}) -> {o.response_style}"
+        for o in pb.objections
+    ])
+    stages_summary = "\n".join([
+        f"- {s.name}: {s.goal}" for s in pb.stages
+    ])
+
+    prompt = f"""You are an expert sales methodology reviewer for PitchProX.
+Evaluate this custom sales playbook on real methodology quality — not just field completeness.
+
+Philosophy: {pb.basic_info.philosophy or "Not specified"}
+Communication Style: {pb.style.communication_style}, Tone: {pb.style.overall_tone}
+Trust-Building Style: {pb.style.trust_building_style}
+Objection Tone: {pb.style.objection_tone}
+
+Conversation Stages:
+{stages_summary}
+
+Objection Library:
+{objections_summary}
+
+Judge on:
+1. Does the philosophy make sense and is it actionable?
+2. Do the stages progress logically toward a close?
+3. Are the objection responses genuinely strategic (not generic)?
+4. Is there good category diversity, or gaps in coverage?
+5. Does the overall methodology feel coherent as a system, not disconnected pieces?
+
+Return ONLY valid JSON:
+{{
+  "llm_quality_score": <int 0-100>,
+  "strengths": ["...", "..."],
+  "gaps": ["...", "..."],
+  "coherence_feedback": "2-3 sentence assessment of how well this methodology hangs together as a system"
+}}
+"""
+
+    api_key_groq = os.getenv("GROQ_API_KEY")
+    if api_key_groq and not api_key_groq.startswith("mock_"):
+        try:
+            import groq
+            client = groq.Groq(api_key=api_key_groq, timeout=8.0)
+            def _call_groq():
+                resp = client.chat.completions.create(
+                    model=os.getenv("GROQ_MODEL", "llama-3.1-70b-versatile"),
+                    messages=[{"role": "user", "content": prompt}],
+                    temperature=0.3,
+                    response_format={"type": "json_object"},
+                )
+                return resp.choices[0].message.content
+            raw = await asyncio.to_thread(_call_groq)
+            return json.loads(raw)
+        except Exception as exc:
+            LOGGER.warning("Groq quality evaluation failed, falling back: %s", exc)
+
+    api_key_openai = os.getenv("OPENAI_API_KEY")
+    if api_key_openai and not api_key_openai.startswith("mock_"):
+        try:
+            import openai
+            client = openai.OpenAI(api_key=api_key_openai, timeout=8.0)
+            def _call_openai():
+                resp = client.chat.completions.create(
+                    model=os.getenv("OPENAI_MODEL", "gpt-4o-mini"),
+                    messages=[{"role": "user", "content": prompt}],
+                    temperature=0.3,
+                    response_format={"type": "json_object"},
+                )
+                return resp.choices[0].message.content
+            raw = await asyncio.to_thread(_call_openai)
+            return json.loads(raw)
+        except Exception as exc:
+            LOGGER.warning("OpenAI quality evaluation failed, falling back: %s", exc)
+
+    return None
 
 
-def evaluate_playbook_quality_benchmark(
+def evaluate_playbook_structural_quality(
     pb: Playbook,
     store: Optional[PlaybookStore] = None,
 ) -> Dict[str, Any]:
-    """Evaluates playbook structural quality and methodology coverage by comparing against
-    industry benchmark distributions and active workspace playbooks.
-
-    Measures methodology completeness, stage progression deltas, objection readiness,
-    canonical category diversity, and cohort percentile ranking.
-    """
+    """Computes structural score and cohort comparison metrics synchronously."""
     completeness = calculate_playbook_completeness_score(pb)
 
     num_stages = len(pb.stages)
@@ -924,7 +992,6 @@ def evaluate_playbook_quality_benchmark(
         else "Good foundation. Broaden category coverage to strengthen versatility."
     )
 
-    # Transparent, honest user-facing comparative description backed by real metrics
     comparison_desc = (
         f"Compared against {cohort['benchmark_name']} "
         f"(N={cohort['cohort_size']} cohort; median {cohort['median_stages']} stages, {cohort['median_objections']} objections)"
@@ -932,11 +999,13 @@ def evaluate_playbook_quality_benchmark(
 
     return {
         "quality_score": quality_score,
+        "structural_score": quality_score,
         "completeness_score": completeness,
         "rating": rating,
         "summary": summary,
         "benchmark_comparison": comparison_desc,
         "methodology_assessment": "Structural quality assessment based on methodology completeness and coverage",
+        "quality_source": "structural_fallback",
         "cohort_comparison_metrics": {
             "industry": cohort["matched_industry"],
             "cohort_name": cohort["benchmark_name"],
@@ -958,9 +1027,93 @@ def evaluate_playbook_quality_benchmark(
     }
 
 
+def calculate_playbook_quality_score(pb: Playbook) -> int:
+    """Synchronous calculation of quality score for offline/test environments."""
+    res = evaluate_playbook_structural_quality(pb)
+    return res["quality_score"]
+
+
+async def evaluate_playbook_quality_benchmark(
+    pb: Playbook,
+    store: Optional[PlaybookStore] = None,
+) -> Dict[str, Any]:
+    """Evaluates playbook quality by combining real LLM methodology judgment (60%)
+    with structural cohort benchmark analysis (40%).
+
+    Gracefully falls back to structural scoring if LLM is unavailable or offline.
+    """
+    structural_res = evaluate_playbook_structural_quality(pb, store=store)
+    structural_score = structural_res["quality_score"]
+
+    llm_result = await ai_evaluate_playbook_quality(pb)
+
+    if llm_result and "llm_quality_score" in llm_result:
+        try:
+            llm_score = int(llm_result["llm_quality_score"])
+            final_score = int(round((structural_score * 0.4) + (llm_score * 0.6)))
+            quality_source = "ai_llm"
+        except (ValueError, TypeError):
+            final_score = structural_score
+            llm_result = None
+            quality_source = "structural_fallback"
+    else:
+        final_score = structural_score
+        llm_result = None
+        quality_source = "structural_fallback"
+
+    res = dict(structural_res)
+    res["quality_score"] = final_score
+    res["structural_score"] = structural_score
+    res["llm_evaluation"] = llm_result
+    res["quality_source"] = quality_source
+
+    if llm_result:
+        if llm_result.get("coherence_feedback"):
+            res["methodology_assessment"] = llm_result.get("coherence_feedback")
+            res["summary"] = llm_result.get("coherence_feedback")
+        if llm_result.get("strengths"):
+            res["strengths"] = llm_result.get("strengths")
+        if llm_result.get("gaps"):
+            res["gaps"] = llm_result.get("gaps")
+
+    res["rating"] = "Excellent" if final_score >= 90 else ("Strong" if final_score >= 80 else "Developing")
+
+    return res
+
+
 # ==========================================
 # 5. Persistence Manager with Atomic Concurrency
 # ==========================================
+
+class AwaitablePlaybook(Playbook):
+    """Playbook wrapper that functions as an immediate Playbook and also supports awaiting for async post-save tasks."""
+    _store: Optional[Any] = PrivateAttr(default=None)
+
+    def __await__(self):
+        async def _coro():
+            if self._store:
+                try:
+                    eval_res = await evaluate_playbook_quality_benchmark(self, store=self._store)
+                    self.completeness_score = eval_res.get("completeness_score", self.completeness_score)
+                    self.quality_score = eval_res.get("quality_score", self.quality_score)
+                    self.quality_feedback = eval_res
+                    file_path = self._store._file_path(self.id)
+                    tmp_file = file_path.with_suffix(f".tmp_{uuid.uuid4().hex[:6]}")
+                    try:
+                        with open(tmp_file, "w", encoding="utf-8") as f:
+                            json.dump(self.model_dump(), f, indent=2, ensure_ascii=False)
+                        os.replace(tmp_file, file_path)
+                    finally:
+                        if tmp_file.exists():
+                            try:
+                                tmp_file.unlink()
+                            except OSError:
+                                pass
+                except Exception as e:
+                    LOGGER.warning("Async evaluation during save skipped: %s", e)
+            return self
+        return _coro().__await__()
+
 
 class PlaybookStore:
     """Manages local JSON file persistence for playbooks with atomic replace and read-only protection."""
@@ -973,7 +1126,7 @@ class PlaybookStore:
         safe_id = re.sub(r"[^\w\-]", "", playbook_id)
         return self.storage_dir / f"{safe_id}.json"
 
-    def save(self, playbook: Playbook) -> Playbook:
+    def save(self, playbook: Playbook) -> AwaitablePlaybook:
         file_path = self._file_path(playbook.id)
 
         # Enforce read-only protection on existing premium/internal playbooks
@@ -991,7 +1144,7 @@ class PlaybookStore:
         elif playbook.basic_info.name:
             playbook.title = playbook.basic_info.name
 
-        eval_res = evaluate_playbook_quality_benchmark(playbook, store=self)
+        eval_res = evaluate_playbook_structural_quality(playbook, store=self)
         playbook.completeness_score = eval_res["completeness_score"]
         playbook.quality_score = eval_res["quality_score"]
         playbook.quality_feedback = eval_res
@@ -1010,7 +1163,10 @@ class PlaybookStore:
                     pass
 
         LOGGER.info("Saved playbook %s (Quality: %s, Complete: %s) to %s", playbook.id, playbook.quality_score, playbook.completeness_score, file_path)
-        return playbook
+        
+        awaitable_pb = AwaitablePlaybook(**playbook.model_dump())
+        awaitable_pb._store = self
+        return awaitable_pb
 
     def get(self, playbook_id: str) -> Optional[Playbook]:
         file_path = self._file_path(playbook_id)
@@ -1217,7 +1373,7 @@ def get_playbook_router(store: Optional[PlaybookStore] = None) -> APIRouter:
             objections=objections_data,
             response_sequence=response_seq,
         )
-        return evaluate_playbook_quality_benchmark(pb, store=store)
+        return await evaluate_playbook_quality_benchmark(pb, store=store)
 
     @router.post("/preview-prompt")
     async def preview_ai_prompt(payload: Dict[str, Any]):
@@ -1458,7 +1614,7 @@ def get_playbook_router(store: Optional[PlaybookStore] = None) -> APIRouter:
             metadata=req.metadata or (existing.metadata if existing else {}),
         )
 
-        saved = store.save(playbook)
+        saved = await store.save(playbook)
         return {
             "status": "success",
             "message": "Playbook saved successfully",

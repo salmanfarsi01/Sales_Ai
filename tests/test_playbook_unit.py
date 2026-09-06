@@ -633,3 +633,181 @@ def test_runtime_settings_and_section3_persistence_in_api(client):
     assert rs["emotional_sensitivity"] == "High"
     assert any("DO NOT quote rates" in b for b in rs["do_dont_boundaries"])
     assert any("Always speak in terms of net client ROI." in r for r in rs["language_rules"])
+
+
+@pytest.mark.asyncio
+async def test_ai_quality_evaluation_with_mocked_llm(monkeypatch):
+    """Verify that evaluate_playbook_quality_benchmark blends 40% structural and 60% LLM score."""
+    from copilot.playbook import Playbook, PlaybookBasicInfo, evaluate_playbook_quality_benchmark
+    import copilot.playbook as pb_module
+
+    info = PlaybookBasicInfo(
+        name="AI Quality Test Playbook",
+        industry="Real Estate",
+        philosophy="Diagnostic questioning first.",
+    )
+    pb = Playbook(basic_info=info)
+
+    mock_llm_response = {
+        "llm_quality_score": 90,
+        "strengths": ["Clear stage progression", "Structured philosophy"],
+        "gaps": ["Consider adding logistics objections"],
+        "coherence_feedback": "Highly coherent strategy progressing naturally to close.",
+    }
+
+    async def mock_ai_eval(playbook):
+        return mock_llm_response
+
+    monkeypatch.setattr(pb_module, "ai_evaluate_playbook_quality", mock_ai_eval)
+
+    eval_res = await evaluate_playbook_quality_benchmark(pb)
+
+    assert eval_res["quality_source"] == "ai_llm"
+    assert eval_res["llm_evaluation"] == mock_llm_response
+    assert "strengths" in eval_res
+    assert "gaps" in eval_res
+    assert eval_res["summary"] == "Highly coherent strategy progressing naturally to close."
+
+    # Check the 40% structural / 60% LLM formula
+    structural_score = eval_res["structural_score"]
+    expected_final = int(round((structural_score * 0.4) + (90 * 0.6)))
+    assert eval_res["quality_score"] == expected_final
+
+
+@pytest.mark.asyncio
+async def test_ai_quality_evaluation_fallback_on_llm_failure(monkeypatch):
+    """Verify graceful fallback to structural estimate when LLM is unavailable or fails."""
+    from copilot.playbook import Playbook, PlaybookBasicInfo, evaluate_playbook_quality_benchmark
+    import copilot.playbook as pb_module
+
+    info = PlaybookBasicInfo(
+        name="Fallback Quality Test Playbook",
+        industry="Real Estate",
+    )
+    pb = Playbook(basic_info=info)
+
+    async def mock_ai_eval_fail(playbook):
+        return None
+
+    monkeypatch.setattr(pb_module, "ai_evaluate_playbook_quality", mock_ai_eval_fail)
+
+    eval_res = await evaluate_playbook_quality_benchmark(pb)
+
+    assert eval_res["quality_source"] == "structural_fallback"
+    assert eval_res["llm_evaluation"] is None
+    assert eval_res["quality_score"] == eval_res["structural_score"]
+    assert eval_res["quality_score"] >= 50
+
+
+def test_save_endpoint_persists_llm_quality_score_end_to_end(client, temp_store, monkeypatch):
+    """Verify that calling /api/playbook/save triggers the LLM quality evaluation end-to-end,
+    correctly blends the score via AwaitablePlaybook.__await__, returns the AI score in the API response,
+    and updates the persisted JSON file on disk.
+    """
+    import copilot.playbook as pb_module
+
+    mock_llm_result = {
+        "llm_quality_score": 96,
+        "strengths": ["Outstanding stage alignment", "Crisp objection reframes"],
+        "gaps": ["None identified"],
+        "coherence_feedback": "Masterclass methodology that hangs together into an actionable sales system.",
+    }
+
+    async def mock_ai_eval(pb):
+        return mock_llm_result
+
+    monkeypatch.setattr(pb_module, "ai_evaluate_playbook_quality", mock_ai_eval)
+
+    payload = {
+        "basic_info": {
+            "name": "End-to-End LLM Persisted Playbook",
+            "industry": "Real Estate",
+            "philosophy": "Diagnostic inquiry with rapid value positioning.",
+        },
+        "style": {
+            "overall_tone": "Confident",
+            "communication_style": "Consultative",
+        }
+    }
+
+    # 1. Post to /api/playbook/save
+    res = client.post("/api/playbook/save", json=payload)
+    assert res.status_code == 200, res.text
+    data = res.json()
+    assert data["status"] == "success"
+
+    saved_pb = data["playbook"]
+    saved_id = saved_pb["id"]
+    feedback = saved_pb["quality_feedback"]
+
+    # 2. Verify API response contains the AI-evaluated score and feedback
+    assert feedback["quality_source"] == "ai_llm"
+    assert feedback["methodology_assessment"] == mock_llm_result["coherence_feedback"]
+    assert feedback["strengths"] == mock_llm_result["strengths"]
+    
+    structural_score = feedback["structural_score"]
+    expected_blended = int(round((structural_score * 0.4) + (96 * 0.6)))
+    assert saved_pb["quality_score"] == expected_blended
+    assert feedback["quality_score"] == expected_blended
+
+    # 3. Verify disk persistence: the file on disk MUST have the updated LLM evaluation
+    persisted = temp_store.get(saved_id)
+    assert persisted is not None
+    assert persisted.quality_score == expected_blended
+    assert persisted.quality_feedback.get("quality_source") == "ai_llm"
+    assert persisted.quality_feedback.get("methodology_assessment") == mock_llm_result["coherence_feedback"]
+
+
+@pytest.mark.asyncio
+async def test_awaitable_playbook_dual_mode_and_private_attr(temp_store, monkeypatch):
+    """Verify that AwaitablePlaybook:
+    1. Functions synchronously without awaiting (immediate disk persistence with structural score).
+    2. Correctly preserves _store as a Pydantic PrivateAttr across model initialization.
+    3. Runs __await__ properly when awaited, enriching both the returned object and disk file with LLM feedback.
+    """
+    from copilot.playbook import Playbook, PlaybookBasicInfo, AwaitablePlaybook
+    import copilot.playbook as pb_module
+
+    mock_llm_result = {
+        "llm_quality_score": 92,
+        "strengths": ["Strong narrative flow"],
+        "gaps": [],
+        "coherence_feedback": "Seamless customer progression.",
+    }
+
+    async def mock_ai_eval(pb):
+        return mock_llm_result
+
+    monkeypatch.setattr(pb_module, "ai_evaluate_playbook_quality", mock_ai_eval)
+
+    info = PlaybookBasicInfo(name="Dual Mode Test Playbook", industry="SaaS / Software")
+    pb = Playbook(basic_info=info)
+
+    # 1. Synchronous save (without await)
+    sync_saved = temp_store.save(pb)
+    assert isinstance(sync_saved, Playbook)
+    assert isinstance(sync_saved, AwaitablePlaybook)
+    # Verify _store PrivateAttr is preserved and points to temp_store
+    assert sync_saved._store is temp_store
+    # Verify synchronous score is structural
+    assert sync_saved.quality_feedback.get("quality_source") == "structural_fallback"
+    initial_score = sync_saved.quality_score
+
+    # 2. Awaiting the already-created awaitable
+    async_enriched = await sync_saved
+    assert async_enriched is sync_saved
+    assert async_enriched.quality_feedback.get("quality_source") == "ai_llm"
+    expected_blended = int(round((initial_score * 0.4) + (92 * 0.6)))
+    assert async_enriched.quality_score == expected_blended
+
+    # 3. Direct async save: await temp_store.save(...)
+    pb2 = Playbook(basic_info=PlaybookBasicInfo(name="Direct Async Save", industry="Real Estate"))
+    awaited_saved = await temp_store.save(pb2)
+    assert awaited_saved._store is temp_store
+    assert awaited_saved.quality_feedback.get("quality_source") == "ai_llm"
+    assert awaited_saved.quality_feedback.get("methodology_assessment") == "Seamless customer progression."
+
+    # Check disk persistence for pb2
+    from_disk = temp_store.get(pb2.id)
+    assert from_disk.quality_score == awaited_saved.quality_score
+    assert from_disk.quality_feedback.get("quality_source") == "ai_llm"

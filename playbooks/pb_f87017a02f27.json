@@ -1,0 +1,291 @@
+{
+  "id": "pb_f87017a02f27",
+  "title": "Daniel G. Method",
+  "status": "published",
+  "current_step": 5,
+  "created_at": "2026-09-06T09:12:16.438338+00:00",
+  "updated_at": "2026-09-06T09:42:56.228406+00:00",
+  "is_readonly": false,
+  "source": "custom",
+  "basic_info": {
+    "name": "Daniel G. Method",
+    "short_description": "My approach to building trust and closing more high-value deals.",
+    "industry": "SaaS / Software",
+    "lead_types": [
+      "Expired Listings"
+    ],
+    "experience_level": "Entry Level (0-1 yrs)",
+    "voice_phrases": "• \"Here's the thing\"\n• \"Bottom line\"\n• \"What I've seen is...\"\n• \"so\"\n\"okay then\"",
+    "philosophy": "1. showing transparency to gain trust\n2. giving reliable example to justify why our service will be best\n3. needed joyful appearance to client",
+    "goals": [
+      "Build stronger trust"
+    ]
+  },
+  "style": {
+    "overall_tone": "Friendly",
+    "communication_style": "Solution-Oriented",
+    "energy_level": "Medium",
+    "sentence_style": "Detailed & Structured",
+    "formality": "Casual & Conversational",
+    "humor_level": "Moderate",
+    "trust_building_style": "Validation-First",
+    "objection_tone": "Empathetic & Resilient",
+    "discovery_style": "Diagnostic / Question-Led",
+    "closing_style": "Low-Pressure Next-Step Commitment",
+    "follow_up_style": "Value-Added Persistence",
+    "voice_phrases": "• \"Here's the thing\"\n• \"Bottom line\"\n• \"What I've seen is...\"\n• \"so\"\n\"okay then\"",
+    "core_selling_principles": "1. showing transparency to gain trust\n2. giving reliable example to justify why our service will be best\n3. needed joyful appearance to client",
+    "runtime_settings": {
+      "prompt_timing_sensitivity": "Normal",
+      "emotional_sensitivity": "High",
+      "objection_confidence_threshold": 0.75,
+      "trust_alert_threshold": 0.7,
+      "prompt_cooldown_seconds": 4,
+      "do_dont_boundaries": [
+        "Do validate emotion before offering facts.",
+        "Do keep teleprompts under 25 words.",
+        "Do not offer unauthorized price cuts.",
+        "Do not disparage competitors or existing agents."
+      ],
+      "language_rules": [
+        "Use: 'net proceeds', 'timeline clarity', 'direct buyers'",
+        "Avoid: 'cheap', 'hurry up', 'standard commission'"
+      ]
+    }
+  },
+  "stages": [
+    {
+      "id": "stage_opening",
+      "order": 1,
+      "name": "Opening",
+      "goal": "Set a positive tone and gain engagement.",
+      "description": "Create rapport and get permission to have a conversation.",
+      "tag": "",
+      "icon": "hand"
+    },
+    {
+      "id": "stage_discovery",
+      "order": 2,
+      "name": "Discovery",
+      "goal": "Understand their motivation and timeline.",
+      "description": "Ask questions and uncover their situation and needs.",
+      "tag": "",
+      "icon": "search"
+    },
+    {
+      "id": "stage_value_prop",
+      "order": 3,
+      "name": "Value Proposition",
+      "goal": "Build credibility and differentiate yourself.",
+      "description": "Position your value and show how you solve their problem.",
+      "tag": "",
+      "icon": "diamond"
+    },
+    {
+      "id": "stage_objections",
+      "order": 4,
+      "name": "Handle Objections",
+      "goal": "Overcome doubt and strengthen confidence.",
+      "description": "Address concerns and remove hesitation.",
+      "tag": "",
+      "icon": "shield"
+    },
+    {
+      "id": "stage_close",
+      "order": 5,
+      "name": "Close",
+      "goal": "Get a commitment to move forward.",
+      "description": "Guide them to commit to the next step.",
+      "tag": "",
+      "icon": "target"
+    },
+    {
+      "id": "stage_follow_up",
+      "order": 6,
+      "name": "Follow Up",
+      "goal": "Stay top of mind and convert later.",
+      "description": "Reinforce value and keep the momentum.",
+      "tag": "",
+      "icon": "phone"
+    },
+    {
+      "id": "stage_gtmjrzj",
+      "order": 7,
+      "name": "Initial meeting",
+      "goal": "Understand client requirement",
+      "description": "just tell me how can ai handle the initial situation when client not getting interested on our service",
+      "tag": "Goal: Discover",
+      "icon": "hand"
+    }
+  ],
+  "objections": [
+    {
+      "id": "obj_1",
+      "objection": "I don't want to pay commission.",
+      "category": [
+        "Financial"
+      ],
+      "lead_types": [
+        "FSBO (For Sale By Owner)",
+        "Expired Listings"
+      ],
+      "response_style": "Quantify",
+      "ai_suggestion": "Highlight net proceeds. Mention MLS-represented sales closed 7.2% higher.",
+      "last_updated": "May 2, 2024"
+    },
+    {
+      "id": "obj_2",
+      "objection": "Not a good time to sell.",
+      "category": [
+        "Logistics"
+      ],
+      "lead_types": [
+        "Expired Listings",
+        "Absentee Owners"
+      ],
+      "response_style": "Future Pace",
+      "ai_suggestion": "Validate market uncertainty, then project seasonal equity growth.",
+      "last_updated": "May 2, 2024"
+    },
+    {
+      "id": "obj_3",
+      "objection": "I already have an agent.",
+      "category": [
+        "Relationship"
+      ],
+      "lead_types": [
+        "Expired Listings",
+        "Pre-Expired Listings"
+      ],
+      "response_style": "Differentiate",
+      "ai_suggestion": "Respect loyalty, then ask diagnostic questions about current marketing reach.",
+      "last_updated": "May 2, 2024"
+    },
+    {
+      "id": "obj_4",
+      "objection": "How did you get my number?",
+      "category": [
+        "Risk"
+      ],
+      "lead_types": [
+        "Circle Prospecting",
+        "Absentee Owners"
+      ],
+      "response_style": "Direct",
+      "ai_suggestion": "Be transparent about public records, then explain active buyer inquiries in area.",
+      "last_updated": "May 2, 2024"
+    },
+    {
+      "id": "obj_5",
+      "objection": "I'm not interested.",
+      "category": [
+        "Relationship"
+      ],
+      "lead_types": [
+        "Past Clients & Sphere",
+        "Circle Prospecting"
+      ],
+      "response_style": "Validate",
+      "ai_suggestion": "Disarm friction: 'Understood, just curious if timing changed or if resolved?'",
+      "last_updated": "May 2, 2024"
+    },
+    {
+      "id": "obj_6",
+      "objection": "We want to wait for interest rates to drop.",
+      "category": [
+        "Financial"
+      ],
+      "lead_types": [
+        "Investor / Cash Buyers",
+        "Pre-Foreclosure"
+      ],
+      "response_style": "Reframe",
+      "ai_suggestion": "Reframe trade-off between rate drops and buyer competition surges.",
+      "last_updated": "May 2, 2024"
+    },
+    {
+      "id": "obj_7",
+      "objection": "We need to think about it.",
+      "category": [
+        "Logistics"
+      ],
+      "lead_types": [
+        "Trust & Estate",
+        "Probate",
+        "Divorce"
+      ],
+      "response_style": "Clarify",
+      "ai_suggestion": "Clarify whether it is timeline, estate steps, or family consensus.",
+      "last_updated": "May 2, 2024"
+    },
+    {
+      "id": "obj_8",
+      "objection": "Send me information first.",
+      "category": [
+        "Risk"
+      ],
+      "lead_types": [
+        "Just Listed",
+        "Just Sold"
+      ],
+      "response_style": "De-Risk",
+      "ai_suggestion": "Offer 1-page market snapshot while locking in a brief calendar check-in.",
+      "last_updated": "May 2, 2024"
+    }
+  ],
+  "response_sequence": [
+    {
+      "id": "seq_1",
+      "order": 1,
+      "name": "Acknowledge",
+      "icon": "mic"
+    },
+    {
+      "id": "seq_2",
+      "order": 2,
+      "name": "Validate",
+      "icon": "heart"
+    },
+    {
+      "id": "seq_3",
+      "order": 3,
+      "name": "Reframe",
+      "icon": "refresh"
+    },
+    {
+      "id": "seq_4",
+      "order": 4,
+      "name": "Guide Forward",
+      "icon": "file"
+    }
+  ],
+  "completeness_score": 100,
+  "quality_score": 98,
+  "quality_feedback": {
+    "quality_score": 98,
+    "completeness_score": 100,
+    "rating": "Excellent",
+    "summary": "Great job! Your playbook methodology is complete and ready to use.",
+    "benchmark_comparison": "Compared against Consultative B2B High-Trust Methodology Standard (N=23 cohort; median 5.3 stages, 6.8 objections)",
+    "methodology_assessment": "Structural quality assessment based on methodology completeness and coverage",
+    "cohort_comparison_metrics": {
+      "industry": "General",
+      "cohort_name": "Consultative B2B High-Trust Methodology Standard",
+      "cohort_size": 23,
+      "workspace_playbooks_analyzed": 3,
+      "cohort_median_stages": 5.3,
+      "cohort_median_objections": 6.8,
+      "stages_delta": 1.7,
+      "objections_delta": 1.2,
+      "category_coverage_ratio": "4/4",
+      "percentile_rank": 99
+    },
+    "coverage_metrics": {
+      "stages_count": 7,
+      "objections_count": 8,
+      "category_diversity": "4 of 4 categories covered",
+      "tone_calibration": "Friendly"
+    }
+  },
+  "metadata": {}
+}
