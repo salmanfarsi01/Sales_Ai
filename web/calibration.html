@@ -1137,16 +1137,6 @@
           </button>
         </div>
 
-        <!-- Fallback Manual Text Input for non-mic environments -->
-        <details
-          style="margin-top: 20px; font-size: 0.82rem; color: var(--slate-500); text-align: left; width: 100%; max-width: 500px;">
-          <summary style="cursor: pointer;">Manual / Text Input Fallback</summary>
-          <div style="margin-top: 8px; display: flex; gap: 8px;">
-            <input type="text" id="manualTranscriptInput" placeholder="Paste or type speech transcript..."
-              style="flex: 1; padding: 8px 12px; border: 1px solid var(--slate-300); border-radius: 8px; font-size: 0.85rem;">
-            <button class="btn-secondary" onclick="submitManualTranscript()">Submit Text</button>
-          </div>
-        </details>
       </div>
 
     </div>
@@ -1777,21 +1767,6 @@
       }
     }
 
-    function submitManualTranscript() {
-      const text = document.getElementById("manualTranscriptInput").value.trim();
-      if (!text) return;
-
-      const formData = new FormData();
-      formData.append("session_id", currentSessionId);
-      formData.append("round_number", currentRoundNumber);
-      formData.append("duration_seconds", "6.5");
-      formData.append("transcript_override", text);
-
-      fetch("/api/calibration/round/evaluate", { method: "POST", body: formData })
-        .then(r => r.json())
-        .then(data => handleEvaluationResult(data))
-        .catch(console.error);
-    }
 
     function handleEvaluationResult(data) {
       const roundEval = data.round_data.evaluation;
