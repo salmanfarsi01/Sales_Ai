@@ -718,6 +718,60 @@
       font-weight: 500;
     }
 
+    .flow-overview-list {
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+    }
+
+    .flow-overview-item {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+      padding: 7px 10px;
+      border-radius: 8px;
+      background: var(--white);
+      border: 1px solid var(--slate-100);
+      transition: all 0.15s ease;
+    }
+
+    .flow-overview-item:hover {
+      background: var(--slate-50);
+      border-color: var(--slate-200);
+    }
+
+    .flow-overview-left {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      font-size: 0.84rem;
+      font-weight: 700;
+      color: var(--slate-800);
+    }
+
+    .flow-stage-pill {
+      display: inline-flex;
+      align-items: center;
+      gap: 5px;
+      font-size: 0.72rem;
+      font-weight: 700;
+      padding: 3px 8px;
+      border-radius: 12px;
+      background: #f0fdf4;
+      color: #15803d;
+      border: 1px solid #bbf7d0;
+      white-space: nowrap;
+    }
+
+    .flow-stage-pill .dot {
+      width: 6px;
+      height: 6px;
+      border-radius: 50%;
+      background: #16a34a;
+      display: inline-block;
+    }
+
     .filter-bar {
       display: flex;
       align-items: center;
@@ -903,8 +957,9 @@
       padding: 16px;
       font-size: 0.88rem;
       color: var(--slate-700);
-      line-height: 1.5;
+      line-height: 1.55;
       margin-top: 12px;
+      white-space: pre-line;
     }
 
     .tips-list {
@@ -1336,6 +1391,91 @@
     .toast-success {
       border-left: 4px solid var(--primary);
     }
+
+    .runtime-lens-terminal {
+      background: #0f172a;
+      color: #38bdf8;
+      font-family: 'Consolas', 'Monaco', 'Courier New', monospace;
+      font-size: 0.8rem;
+      line-height: 1.45;
+      padding: 16px 18px;
+      border-radius: 12px;
+      overflow-x: auto;
+      white-space: pre-wrap;
+      word-break: break-word;
+      border: 1px solid #1e293b;
+      max-height: 380px;
+      box-shadow: inset 0 2px 4px rgba(0, 0, 0, 0.4);
+    }
+    .chip-sample {
+      font-size: 0.72rem;
+      font-weight: 600;
+      color: var(--slate-600);
+      background: var(--slate-100);
+      border: 1px solid var(--slate-200);
+      border-radius: 9999px;
+      padding: 4px 11px;
+      cursor: pointer;
+      transition: all 0.15s ease;
+      display: inline-flex;
+      align-items: center;
+    }
+    .chip-sample:hover {
+      background: var(--primary-light);
+      border-color: var(--primary-border);
+      color: var(--primary-dark);
+    }
+    .btn-sm-preset {
+      font-size: 0.72rem;
+      font-weight: 700;
+      color: var(--slate-600);
+      background: var(--white);
+      border: 1px solid var(--slate-200);
+      border-radius: 6px;
+      padding: 3px 8px;
+      cursor: pointer;
+      transition: all 0.15s;
+    }
+    .btn-sm-preset:hover {
+      border-color: var(--primary);
+      color: var(--primary);
+    }
+    .btn-copy-sm {
+      font-size: 0.75rem;
+      font-weight: 600;
+      color: var(--slate-600);
+      background: var(--white);
+      border: 1px solid var(--slate-200);
+      border-radius: 6px;
+      padding: 4px 10px;
+      cursor: pointer;
+      transition: all 0.15s;
+    }
+    .btn-copy-sm:hover {
+      background: var(--slate-50);
+      color: var(--slate-900);
+    }
+    .category-toggle-pill {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      padding: 8px 12px;
+      background: var(--white);
+      border: 1.5px solid var(--slate-200);
+      border-radius: 8px;
+      font-size: 0.82rem;
+      font-weight: 600;
+      color: var(--slate-700);
+      cursor: pointer;
+      transition: all 0.15s;
+    }
+    .category-toggle-pill:hover {
+      border-color: var(--primary);
+    }
+    .category-toggle-pill input:checked + span {
+      color: var(--primary-dark);
+      font-weight: 700;
+    }
   </style>
 </head>
 
@@ -1348,6 +1488,9 @@
       <div>PitchProX</div>
     </a>
     <div class="nav-actions">
+      <div id="persistenceStatusBadge" style="display: flex; align-items: center; gap: 6px; font-size: 0.76rem; font-weight: 700; color: #b45309; background: #fffbeb; border: 1px solid #fde68a; padding: 6px 12px; border-radius: 9999px;">
+        📝 Unsaved Draft Changes
+      </div>
       <button class="btn-nav-secondary" onclick="openPlaybooksListModal()">
         📂 My Playbooks
       </button>
@@ -1424,10 +1567,20 @@
               placeholder="e.g., My approach to building trust and closing more high-value deals."
               oninput="updateCharCounter('shortDescription', 'descCounter', 120); handleInputChange()">My approach to building trust and closing more high-value deals.</textarea>
             <div class="char-counter" id="descCounter">63/120</div>
-          </div>
         </div>
 
-        <div class="grid-3-col">
+        <div style="margin-bottom: 20px; padding: 12px 16px; background: var(--slate-50); border: 1.5px dashed var(--slate-200); border-radius: 12px; display: flex; align-items: center; justify-content: space-between;">
+          <div>
+            <label class="checkbox-label" style="display: flex; align-items: center; gap: 8px; font-weight: 700; font-size: 0.88rem; color: var(--slate-800); cursor: pointer;">
+              <input type="checkbox" id="isReadonlyToggle" onchange="toggleReadonlyBadge(this.checked); handleInputChange()">
+              <span>🔒 Lock as Read-Only Premium Methodology Package</span>
+            </label>
+            <p style="font-size: 0.76rem; color: var(--slate-500); margin-left: 24px; margin-top: 2px;">
+              Enforces HTTP 403 Forbidden protection on the backend against unauthorized edits or deletion.
+            </p>
+          </div>
+          <span id="readonlyBadgePreview" class="tag-pill" style="display: none; font-size: 0.72rem; background: #fef2f2; color: #b91c1c; border: 1px solid #fecaca; font-weight: 800;">🔒 READ-ONLY</span>
+        </div>
           <div class="form-group">
             <label class="form-label" for="industrySelect">Select Industry / Niche</label>
             <select id="industrySelect" class="select-dropdown" onchange="handleInputChange()">
@@ -1669,6 +1822,165 @@
         </div>
       </div>
 
+      <!-- SPEC SECTION 3 METHODOLOGY STYLES -->
+      <div class="card" style="margin-top: 20px;">
+        <div class="card-header">
+          <div class="card-icon-badge badge-teal">🎯</div>
+          <div class="card-title-group">
+            <h2 class="card-title">Spec Section 3 Methodology Components</h2>
+            <p class="card-subtitle">Configure the specific named behavioral styles applied to trust building, objection handling, discovery, and closing.</p>
+          </div>
+        </div>
+
+        <div class="grid-3-col" style="margin-bottom: 20px;">
+          <div class="form-group">
+            <label class="form-label" for="trustBuildingStyleSelect">TRUST-BUILDING STYLE</label>
+            <span class="form-label-sub">Mandatory style when trust alert fires.</span>
+            <select id="trustBuildingStyleSelect" class="select-dropdown" onchange="handleInputChange()">
+              <option value="Validation-First" selected>Validation-First</option>
+              <option value="Credibility-First">Credibility-First</option>
+              <option value="Rapport-First">Rapport-First</option>
+              <option value="Transparency-First">Transparency-First</option>
+            </select>
+          </div>
+
+          <div class="form-group">
+            <label class="form-label" for="objectionToneSelect">OBJECTION TONE</label>
+            <span class="form-label-sub">How AI shapes responses to pushback.</span>
+            <select id="objectionToneSelect" class="select-dropdown" onchange="handleInputChange()">
+              <option value="Empathetic & Resilient" selected>Empathetic & Resilient</option>
+              <option value="Assertive & Reframing">Assertive & Reframing</option>
+              <option value="Curious & Exploratory">Curious & Exploratory</option>
+              <option value="Calm & Analytical">Calm & Analytical</option>
+            </select>
+          </div>
+
+          <div class="form-group">
+            <label class="form-label" for="discoveryStyleSelect">DISCOVERY STYLE</label>
+            <span class="form-label-sub">Style for uncovering needs and motives.</span>
+            <select id="discoveryStyleSelect" class="select-dropdown" onchange="handleInputChange()">
+              <option value="Diagnostic / Question-Led" selected>Diagnostic / Question-Led</option>
+              <option value="Problem-Agitation">Problem-Agitation</option>
+              <option value="Conversational Inquiry">Conversational Inquiry</option>
+              <option value="Mutual Assessment">Mutual Assessment</option>
+            </select>
+          </div>
+        </div>
+
+        <div class="grid-2-col">
+          <div class="form-group">
+            <label class="form-label" for="closingStyleSelect">CLOSING STYLE</label>
+            <span class="form-label-sub">Framework for securing commitments.</span>
+            <select id="closingStyleSelect" class="select-dropdown" onchange="handleInputChange()">
+              <option value="Low-Pressure Next-Step Commitment" selected>Low-Pressure Next-Step Commitment</option>
+              <option value="Direct Close">Direct Close</option>
+              <option value="Alternative Choice">Alternative Choice</option>
+              <option value="Urgency-Framed">Urgency-Framed</option>
+            </select>
+          </div>
+
+          <div class="form-group">
+            <label class="form-label" for="followUpStyleSelect">FOLLOW-UP STYLE</label>
+            <span class="form-label-sub">Persistence and cadence philosophy.</span>
+            <select id="followUpStyleSelect" class="select-dropdown" onchange="handleInputChange()">
+              <option value="Value-Added Persistence" selected>Value-Added Persistence</option>
+              <option value="Multi-Touch Education">Multi-Touch Education</option>
+              <option value="Time-Sensitive Check-in">Time-Sensitive Check-in</option>
+              <option value="Relationship Nurture">Relationship Nurture</option>
+            </select>
+          </div>
+        </div>
+      </div>
+
+      <!-- RUNTIME SENSITIVITY & THRESHOLD CONTROLS -->
+      <div class="card" style="margin-top: 20px;">
+        <div class="card-header">
+          <div class="card-icon-badge badge-mint">⚙️</div>
+          <div class="card-title-group">
+            <h2 class="card-title">Runtime Sensitivity & Threshold Controls</h2>
+            <p class="card-subtitle">Configure the exact thresholds that gate objection matching and trigger trust recovery alerts during live calls.</p>
+          </div>
+        </div>
+
+        <div class="grid-3-col" style="margin-bottom: 20px;">
+          <!-- Objection Confidence Threshold -->
+          <div class="form-group">
+            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 4px;">
+              <label class="form-label" for="objConfSlider" style="margin-bottom: 0;">OBJECTION CONFIDENCE</label>
+              <span id="objConfDisplayBadge" class="tag-pill tag-pill-primary" style="font-size: 0.72rem; font-weight: 700;">75% Min Match</span>
+            </div>
+            <span class="form-label-sub">Minimum similarity score to inject objection rule.</span>
+            <input type="range" id="objConfSlider" class="range-slider" min="0.50" max="0.95" step="0.05" value="0.75"
+              oninput="document.getElementById('objConfDisplayBadge').innerText = Math.round(this.value * 100) + '% Min Match'; handleInputChange()">
+            <div style="display: flex; justify-content: space-between; font-size: 0.7rem; color: var(--slate-400); margin-top: 4px;">
+              <span>50% (Permissive)</span>
+              <span>75% (Spec Default)</span>
+              <span>95% (Strict)</span>
+            </div>
+          </div>
+
+          <!-- Trust Alert Threshold -->
+          <div class="form-group">
+            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 4px;">
+              <label class="form-label" for="trustAlertSlider" style="margin-bottom: 0;">TRUST ALERT THRESHOLD</label>
+              <span id="trustAlertDisplayBadge" class="tag-pill tag-pill-warning" style="font-size: 0.72rem; font-weight: 700;">70% Critical Alert</span>
+            </div>
+            <span class="form-label-sub">Triggers mandatory trust recovery below this score.</span>
+            <input type="range" id="trustAlertSlider" class="range-slider" min="0.50" max="0.90" step="0.05" value="0.70"
+              oninput="document.getElementById('trustAlertDisplayBadge').innerText = Math.round(this.value * 100) + '% Critical Alert'; handleInputChange(); syncSimTrustControlsToConfiguredThreshold()">
+            <div style="display: flex; justify-content: space-between; font-size: 0.7rem; color: var(--slate-400); margin-top: 4px;">
+              <span>50% (High Tolerance)</span>
+              <span>70% (Spec Default)</span>
+              <span>90% (Zero Tolerance)</span>
+            </div>
+          </div>
+
+          <!-- Prompt Cooldown Seconds -->
+          <div class="form-group">
+            <label class="form-label" for="promptCooldownInput">PROMPT COOLDOWN (SECONDS)</label>
+            <span class="form-label-sub">Minimum pause between teleprompter recommendations.</span>
+            <input type="number" id="promptCooldownInput" class="input-text" min="1" max="15" value="4"
+              oninput="handleInputChange()">
+          </div>
+        </div>
+
+        <div class="grid-2-col" style="margin-bottom: 20px;">
+          <div class="form-group">
+            <label class="form-label" for="promptTimingSelect">PROMPT TIMING SENSITIVITY</label>
+            <select id="promptTimingSelect" class="select-dropdown" onchange="handleInputChange()">
+              <option value="Normal" selected>Normal (Standard conversation pacing)</option>
+              <option value="Aggressive">Aggressive (Prompt earlier on short pauses)</option>
+              <option value="Relaxed">Relaxed (Wait for natural prospect pauses)</option>
+            </select>
+          </div>
+
+          <div class="form-group">
+            <label class="form-label" for="emotionalSensitivitySelect">EMOTIONAL SENSITIVITY</label>
+            <select id="emotionalSensitivitySelect" class="select-dropdown" onchange="handleInputChange()">
+              <option value="Normal" selected>Normal (Standard trust calibration)</option>
+              <option value="High">High (Heightened sensitivity to prospect tone changes)</option>
+              <option value="Adaptive">Adaptive (Learns from user-prospect interaction)</option>
+            </select>
+          </div>
+        </div>
+
+        <div class="grid-2-col">
+          <div class="form-group">
+            <label class="form-label" for="doDontBoundariesInput">DO / DON'T OPERATIONAL BOUNDARIES (1 PER LINE)</label>
+            <textarea id="doDontBoundariesInput" class="input-textarea" style="min-height: 90px;" oninput="handleInputChange()">Do validate emotion before offering facts.
+Do keep teleprompts under 25 words.
+Do not offer unauthorized price cuts.
+Do not disparage competitors or existing agents.</textarea>
+          </div>
+
+          <div class="form-group">
+            <label class="form-label" for="languageRulesInput">LANGUAGE RULES & PHRASES (1 PER LINE)</label>
+            <textarea id="languageRulesInput" class="input-textarea" style="min-height: 90px;" oninput="handleInputChange()">Use: 'net proceeds', 'timeline clarity', 'direct buyers'
+Avoid: 'cheap', 'hurry up', 'standard commission'</textarea>
+          </div>
+        </div>
+      </div>
+
       <div class="wizard-footer">
         <button class="btn-footer-back" onclick="goToStep(1)">
           ← Back: Basic Info
@@ -1681,23 +1993,72 @@
 
     <!-- STEP 3: CONVERSATION FLOW -->
     <section id="stepSection3" class="step-section" style="display: none;">
-      <div class="card">
-        <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 20px;">
-          <div class="card-header" style="margin-bottom: 0;">
-            <div class="card-icon-badge badge-mint">🔀</div>
-            <div class="card-title-group">
-              <h2 class="card-title">Build Your Conversation Flow</h2>
-              <p class="card-subtitle">Define the stages of your call and what you want to accomplish in each one.</p>
+      <div class="layout-2-col">
+        <div>
+          <div class="card">
+            <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 20px;">
+              <div class="card-header" style="margin-bottom: 0;">
+                <div class="card-icon-badge badge-mint">🔀</div>
+                <div class="card-title-group">
+                  <h2 class="card-title">Build Your Conversation Flow</h2>
+                  <p class="card-subtitle">Define the stages of your call and what you want to accomplish in each one.</p>
+                </div>
+              </div>
+              <button class="btn-add-stage" onclick="openAddStageModal()">
+                + Add Stage
+              </button>
+            </div>
+
+            <div class="timeline-container">
+              <div class="timeline-track"></div>
+              <div id="stagesList"></div>
             </div>
           </div>
-          <button class="btn-add-stage" onclick="openAddStageModal()">
-            + Add Stage
-          </button>
         </div>
 
-        <div class="timeline-container">
-          <div class="timeline-track"></div>
-          <div id="stagesList"></div>
+        <div>
+          <!-- Flow Overview Card (Screenshot 1) -->
+          <div class="card" style="padding: 20px 22px;">
+            <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 4px;">
+              <h3 style="font-size: 0.95rem; font-weight: 700; color: var(--slate-900);">Flow Overview</h3>
+            </div>
+            <p style="font-size: 0.78rem; color: var(--slate-400); margin-bottom: 14px;">This is the journey your AI will follow on every call.</p>
+
+            <div id="flowOverviewList" class="flow-overview-list">
+              <!-- Dynamically populated from stages with AI tags -->
+            </div>
+          </div>
+
+          <!-- Conversation Tips Card (Screenshot 1) -->
+          <div class="card" style="padding: 20px 22px;">
+            <div style="display: flex; align-items: center; gap: 8px; margin-bottom: 4px;">
+              <span style="font-size: 1.1rem; color: var(--emerald);">💡</span>
+              <h3 style="font-size: 0.95rem; font-weight: 700; color: var(--slate-900);">Conversation Tips</h3>
+            </div>
+            <p style="font-size: 0.78rem; color: var(--slate-400); margin-bottom: 14px;">Best practices for an effective flow.</p>
+            <ul class="tips-list">
+              <li class="tips-item"><span class="tips-check">✓</span> Keep your openings short and friendly</li>
+              <li class="tips-item"><span class="tips-check">✓</span> Ask open-ended questions in discovery</li>
+              <li class="tips-item"><span class="tips-check">✓</span> Always connect value to their needs</li>
+              <li class="tips-item"><span class="tips-check">✓</span> Address objections with empathy</li>
+              <li class="tips-item"><span class="tips-check">✓</span> Ask for commitment, don't assume it</li>
+              <li class="tips-item"><span class="tips-check">✓</span> Follow up consistently</li>
+            </ul>
+          </div>
+
+          <!-- Need Help Getting Started Card (Screenshot 1) -->
+          <div class="card" style="padding: 20px 22px;">
+            <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 8px;">
+              <div>
+                <h4 style="font-size: 0.88rem; font-weight: 700; color: var(--slate-900);">Need help getting started?</h4>
+                <p style="font-size: 0.76rem; color: var(--slate-500); margin-top: 2px;">Watch our quick tutorial on building your custom playbook.</p>
+              </div>
+              <div style="width: 34px; height: 34px; border-radius: 50%; background: #ecfdf5; color: var(--emerald); display: flex; align-items: center; justify-content: center; font-size: 1rem;">▶</div>
+            </div>
+            <button class="btn-nav-secondary" style="width: 100%; justify-content: center; margin-top: 10px; font-size: 0.82rem;" onclick="showToast('Launching video tutorial...')">
+              ▶ Watch Tutorial
+            </button>
+          </div>
         </div>
       </div>
 
@@ -1958,7 +2319,8 @@
               <div class="card-icon-badge badge-blue" style="width: 48px; height: 48px; font-size: 1.4rem;">🛡️</div>
               <div>
                 <h3 style="font-size: 1.1rem; font-weight: 800; color: var(--slate-900);">Quality Check</h3>
-                <p style="font-size: 0.85rem; color: var(--slate-500); margin-top: 2px;">Great job! Your playbook methodology is complete and ready to use.</p>
+                <p id="qualityCheckSummary" style="font-size: 0.85rem; color: var(--slate-500); margin-top: 2px;">Great job! Your playbook methodology is complete and ready to use.</p>
+                <div id="qualityBenchmarkDetail" style="font-size: 0.76rem; color: var(--slate-400); margin-top: 4px; font-style: italic;"></div>
               </div>
             </div>
             <div style="text-align: right;">
@@ -1968,6 +2330,75 @@
               </div>
               <div class="quality-label">PLAYBOOK QUALITY SCORE</div>
               <div class="quality-badge" id="qualityBadgeLabel">Excellent</div>
+            </div>
+          </div>
+
+          <!-- TEST RUNTIME METHODOLOGY LENS CONSOLE -->
+          <div class="card" style="border: 2px solid var(--primary-border); background: #f8fafc; padding: 22px 24px; margin-top: 18px;">
+            <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 12px;">
+              <div style="display: flex; align-items: center; gap: 10px;">
+                <span style="font-size: 1.4rem;">⚡</span>
+                <div>
+                  <h3 style="font-size: 1.05rem; font-weight: 800; color: var(--slate-900);">Test Runtime Methodology Lens</h3>
+                  <p style="font-size: 0.8rem; color: var(--slate-500);">Simulate the compiled system instruction generated for live calls, testing semantic objection matching and trust alert triggers.</p>
+                </div>
+              </div>
+              <span class="tag-pill tag-pill-primary" style="font-size: 0.72rem; font-weight: 700;">LIVE ENGINE TEST</span>
+            </div>
+
+            <div class="grid-2-col" style="gap: 16px; margin-bottom: 14px;">
+              <!-- Input 1: Simulate Prospect Objection -->
+              <div>
+                <label class="form-label" style="font-size: 0.76rem; font-weight: 700;">1. SIMULATE PROSPECT OBJECTION (TRY PARAPHRASING)</label>
+                <input type="text" id="simObjectionInput" class="input-text" 
+                  placeholder="e.g. Why would I pay you guys a commission when I can sell it myself" 
+                  value="Why would I pay you guys a commission when I can sell it myself">
+                <div style="display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px;">
+                  <span class="chip-sample" onclick="setSimObjection('Why would I pay you guys a commission when I can sell it myself')">Commission Paraphrase</span>
+                  <span class="chip-sample" onclick="setSimObjection('I already have an agent and coach helping me')">Section 8: Existing Coach</span>
+                  <span class="chip-sample" onclick="setSimObjection('We need to think about it and review numbers')">Logistics + Risk</span>
+                  <span class="chip-sample" onclick="setSimObjection('The market is too volatile right now')">Market Risk</span>
+                </div>
+              </div>
+
+              <!-- Input 2: Simulate Live Prospect Trust -->
+              <div>
+                <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 4px;">
+                  <label class="form-label" style="font-size: 0.76rem; font-weight: 700;">2. SIMULATE PROSPECT TRUST SCORE</label>
+                  <span id="simTrustBadge" class="tag-pill tag-pill-success" style="font-weight: 800; font-size: 0.75rem;">0.85 (Normal / Stable)</span>
+                </div>
+                <input type="range" id="simTrustSlider" class="range-slider" min="0.00" max="1.00" step="0.05" value="0.85"
+                  oninput="updateSimTrustDisplay(this.value)">
+                <div style="display: flex; justify-content: space-between; font-size: 0.7rem; color: var(--slate-400); margin-top: 4px;">
+                  <span>0.00 (Hostile)</span>
+                  <span id="simThresholdIndicatorLabel" style="color: #b45309; font-weight: 700;">0.70 (Alert Threshold)</span>
+                  <span>1.00 (High Trust)</span>
+                </div>
+                <div style="display: flex; gap: 6px; margin-top: 8px;">
+                  <button type="button" class="btn-sm-preset" onclick="setSimTrust(0.85)">Normal (0.85)</button>
+                  <button type="button" id="btnSimThresholdPreset" class="btn-sm-preset" onclick="setSimTrustToCurrentThreshold()">Threshold (0.70)</button>
+                  <button type="button" id="btnSimCriticalPreset" class="btn-sm-preset" style="color: #dc2626; border-color: #fecaca;" onclick="setSimTrustCritical()">Critical Alert (0.45)</button>
+                </div>
+              </div>
+            </div>
+
+            <!-- Action Trigger -->
+            <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 12px;">
+              <button type="button" class="btn-nav-primary" style="padding: 9px 20px;" onclick="runRuntimeLensSimulation()">
+                ⚡ Compile & Test Runtime Lens
+              </button>
+              <div id="simEngineStatus" style="font-size: 0.8rem; color: var(--slate-500); font-weight: 600;">
+                Click to compile live runtime methodology prompt.
+              </div>
+            </div>
+
+            <!-- Output Terminal -->
+            <div id="simResultsWrap" style="display: none;">
+              <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 8px;">
+                <div style="display: flex; gap: 8px; align-items: center; flex-wrap: wrap;" id="simStatusPills"></div>
+                <button type="button" class="btn-copy-sm" onclick="copySimPrompt()">📋 Copy Prompt</button>
+              </div>
+              <pre id="simPromptOutput" class="runtime-lens-terminal"></pre>
             </div>
           </div>
         </div>
@@ -2100,33 +2531,43 @@
           <textarea id="clientObjInput" class="input-textarea" style="min-height: 70px;" placeholder="I don't want to pay commission. My property will sell itself in this market."></textarea>
         </div>
 
-        <div class="grid-2-col">
-          <div class="form-group">
-            <label class="form-label" for="modalCategorySelect">CATEGORY</label>
-            <select id="modalCategorySelect" class="select-dropdown">
-              <option value="Financial" selected>Financial</option>
-              <option value="Risk">Risk</option>
-              <option value="Logistics">Logistics</option>
-              <option value="Relationship">Relationship</option>
-            </select>
+        <div class="form-group">
+          <label class="form-label">OBJECTION CATEGORIES (SELECT ALL APPLICABLE)</label>
+          <div style="display: grid; grid-template-columns: repeat(2, 1fr); gap: 8px; margin-top: 6px;">
+            <label class="category-toggle-pill">
+              <input type="checkbox" name="modalCatCheckbox" value="Financial" id="catCheck_Financial">
+              <span>💰 Financial</span>
+            </label>
+            <label class="category-toggle-pill">
+              <input type="checkbox" name="modalCatCheckbox" value="Risk" id="catCheck_Risk">
+              <span>🛡️ Risk</span>
+            </label>
+            <label class="category-toggle-pill">
+              <input type="checkbox" name="modalCatCheckbox" value="Logistics" id="catCheck_Logistics">
+              <span>📦 Logistics</span>
+            </label>
+            <label class="category-toggle-pill">
+              <input type="checkbox" name="modalCatCheckbox" value="Relationship" id="catCheck_Relationship">
+              <span>🤝 Relationship</span>
+            </label>
           </div>
+        </div>
 
-          <div class="form-group">
-            <label class="form-label" for="modalRespStyleSelect">RESPONSE STYLE</label>
-            <select id="modalRespStyleSelect" class="select-dropdown">
-              <option value="Reframe" selected>Reframe</option>
-              <option value="Clarify">Clarify</option>
-              <option value="Validate">Validate</option>
-              <option value="Educate">Educate</option>
-              <option value="Quantify">Quantify</option>
-              <option value="Differentiate">Differentiate</option>
-              <option value="De-Risk">De-Risk</option>
-              <option value="Challenge">Challenge</option>
-              <option value="Social Proof">Social Proof</option>
-              <option value="Future Pace">Future Pace</option>
-              <option value="Direct">Direct</option>
-            </select>
-          </div>
+        <div class="form-group" style="margin-top: 14px;">
+          <label class="form-label" for="modalRespStyleSelect">STANDARDIZED RESPONSE STYLE</label>
+          <select id="modalRespStyleSelect" class="select-dropdown">
+            <option value="Reframe" selected>Reframe</option>
+            <option value="Clarify">Clarify</option>
+            <option value="Validate">Validate</option>
+            <option value="Educate">Educate</option>
+            <option value="Quantify">Quantify</option>
+            <option value="Differentiate">Differentiate</option>
+            <option value="De-Risk">De-Risk</option>
+            <option value="Challenge">Challenge</option>
+            <option value="Social Proof">Social Proof</option>
+            <option value="Future Pace">Future Pace</option>
+            <option value="Direct">Direct</option>
+          </select>
         </div>
 
         <div class="form-group">
@@ -2214,6 +2655,35 @@
     </div>
   </div>
 
+  <!-- Modal 5: Read-Only Protection 403 Alert -->
+  <div class="modal-overlay" id="readonly403Modal">
+    <div class="modal-box" style="max-width: 520px; border-top: 4px solid #ef4444;">
+      <div class="modal-header" style="align-items: flex-start;">
+        <div style="display: flex; gap: 12px; align-items: flex-start;">
+          <div style="width: 40px; height: 40px; border-radius: 50%; background: #fef2f2; color: #dc2626; display: flex; align-items: center; justify-content: center; font-size: 1.25rem; flex-shrink: 0;">
+            🔒
+          </div>
+          <div>
+            <h3 class="modal-title" style="color: #991b1b;">Read-Only Methodology Protection (HTTP 403)</h3>
+            <p class="modal-subtitle" style="color: #64748b; margin-top: 2px;">PitchProX Core Integrity Guard</p>
+          </div>
+        </div>
+        <button class="btn-modal-close" onclick="closeReadonly403Modal()">✕</button>
+      </div>
+      <div class="modal-body" style="padding-top: 8px;">
+        <div style="background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 8px; padding: 14px 16px; margin-bottom: 12px;">
+          <p id="readonly403Detail" style="margin: 0; font-size: 0.88rem; color: #1e293b; line-height: 1.5; font-weight: 600;"></p>
+        </div>
+        <p style="font-size: 0.8rem; color: #64748b; line-height: 1.5; margin: 0;">
+          This methodology package is flagged as a protected premium product. Overwrite and deletion requests are blocked at the server API layer to preserve package integrity.
+        </p>
+      </div>
+      <div class="modal-footer" style="justify-content: flex-end;">
+        <button class="btn-nav-primary" style="background: #ef4444; border-color: #ef4444;" onclick="closeReadonly403Modal()">Understood</button>
+      </div>
+    </div>
+  </div>
+
   <div class="toast-container" id="toastContainer"></div>
 
   <!-- SCRIPT -->
@@ -2225,19 +2695,19 @@
     let objCurrentPage = 1;
 
     let stages = [
-      { id: 'stage_opening', order: 1, name: 'Opening', goal: 'Set a positive tone and gain engagement.', description: 'Create rapport and get permission to have a conversation.', icon: 'hand' },
-      { id: 'stage_discovery', order: 2, name: 'Discovery', goal: 'Understand their motivation and timeline.', description: 'Ask questions and uncover their situation and needs.', icon: 'search' },
-      { id: 'stage_value_prop', order: 3, name: 'Value Proposition', goal: 'Build credibility and differentiate yourself.', description: 'Position your value and show how you solve their problem.', icon: 'diamond' },
-      { id: 'stage_objections', order: 4, name: 'Handle Objections', goal: 'Overcome doubt and strengthen confidence.', description: 'Address concerns and remove hesitation.', icon: 'shield' },
-      { id: 'stage_close', order: 5, name: 'Close', goal: 'Get a commitment to move forward.', description: 'Guide them to commit to the next step.', icon: 'target' },
-      { id: 'stage_follow_up', order: 6, name: 'Follow Up', goal: 'Stay top of mind and convert later.', description: 'Reinforce value and keep the momentum.', icon: 'phone' }
+      { id: 'stage_opening', order: 1, name: 'Opening', goal: 'Set a positive tone and gain engagement.', description: 'Create rapport and get permission to have a conversation.', tag: 'Goal: Engage', icon: 'hand' },
+      { id: 'stage_discovery', order: 2, name: 'Discovery', goal: 'Understand their motivation and timeline.', description: 'Ask questions and uncover their situation and needs.', tag: 'Goal: Understand', icon: 'search' },
+      { id: 'stage_value_prop', order: 3, name: 'Value Proposition', goal: 'Build credibility and differentiate yourself.', description: 'Position your value and show how you solve their problem.', tag: 'Goal: Differentiate', icon: 'diamond' },
+      { id: 'stage_objections', order: 4, name: 'Handle Objections', goal: 'Overcome doubt and strengthen confidence.', description: 'Address concerns and remove hesitation.', tag: 'Goal: Resolve', icon: 'shield' },
+      { id: 'stage_close', order: 5, name: 'Close', goal: 'Get a commitment to move forward.', description: 'Guide them to commit to the next step.', tag: 'Goal: Commit', icon: 'target' },
+      { id: 'stage_follow_up', order: 6, name: 'Follow Up', goal: 'Stay top of mind and convert later.', description: 'Reinforce value and keep the momentum.', tag: 'Goal: Nurture', icon: 'phone' }
     ];
 
     let objections = [
       {
         id: 'obj_1',
         objection: "I don't want to pay commission.",
-        category: "Financial",
+        category: ["Financial"],
         lead_types: ["FSBO (For Sale By Owner)", "Expired Listings"],
         response_style: "Quantify",
         ai_suggestion: 'Highlight net proceeds. Mention MLS-represented sales closed 7.2% higher.',
@@ -2246,7 +2716,7 @@
       {
         id: 'obj_2',
         objection: "Not a good time to sell.",
-        category: "Logistics",
+        category: ["Logistics"],
         lead_types: ["Expired Listings", "Absentee Owners"],
         response_style: "Future Pace",
         ai_suggestion: "Validate market uncertainty, then project seasonal equity growth.",
@@ -2255,7 +2725,7 @@
       {
         id: 'obj_3',
         objection: "I already have an agent.",
-        category: "Relationship",
+        category: ["Relationship"],
         lead_types: ["Expired Listings", "Pre-Expired Listings"],
         response_style: "Differentiate",
         ai_suggestion: "Respect loyalty, then ask diagnostic questions about current marketing reach.",
@@ -2264,7 +2734,7 @@
       {
         id: 'obj_4',
         objection: "How did you get my number?",
-        category: "Risk",
+        category: ["Risk"],
         lead_types: ["Circle Prospecting", "Absentee Owners"],
         response_style: "Direct",
         ai_suggestion: "Be transparent about public records, then explain active buyer inquiries in area.",
@@ -2273,7 +2743,7 @@
       {
         id: 'obj_5',
         objection: "I'm not interested.",
-        category: "Relationship",
+        category: ["Relationship"],
         lead_types: ["Past Clients & Sphere", "Circle Prospecting"],
         response_style: "Validate",
         ai_suggestion: "Disarm friction: 'Understood, just curious if timing changed or if resolved?'",
@@ -2282,7 +2752,7 @@
       {
         id: 'obj_6',
         objection: "We want to wait for interest rates to drop.",
-        category: "Financial",
+        category: ["Financial"],
         lead_types: ["Investor / Cash Buyers", "Pre-Foreclosure"],
         response_style: "Reframe",
         ai_suggestion: "Reframe trade-off between rate drops and buyer competition surges.",
@@ -2291,7 +2761,7 @@
       {
         id: 'obj_7',
         objection: "We need to think about it.",
-        category: "Logistics",
+        category: ["Logistics", "Risk"],
         lead_types: ["Trust & Estate", "Probate", "Divorce"],
         response_style: "Clarify",
         ai_suggestion: "Clarify whether it is timeline, estate steps, or family consensus.",
@@ -2300,7 +2770,7 @@
       {
         id: 'obj_8',
         objection: "Send me information first.",
-        category: "Risk",
+        category: ["Risk"],
         lead_types: ["Just Listed", "Just Sold"],
         response_style: "De-Risk",
         ai_suggestion: "Offer 1-page market snapshot while locking in a brief calendar check-in.",
@@ -2322,6 +2792,7 @@
       renderObjectionsTable();
       renderReviewSummary();
       loadFromLocalStorage();
+      syncSimTrustControlsToConfiguredThreshold();
     });
 
     function goToStep(step) {
@@ -2361,7 +2832,13 @@
         else if (step === 5) topCta.innerText = 'Create Playbook ✓';
       }
 
-      if (step === 5) renderReviewSummary();
+      if (step === 3) renderFlowOverview();
+      if (step === 4) generateLivePromptPreview();
+      if (step === 5) {
+        renderReviewSummary();
+        refreshQualityBenchmark();
+        syncSimTrustControlsToConfiguredThreshold();
+      }
 
       window.scrollTo({ top: 0, behavior: 'smooth' });
       saveToLocalStorage();
@@ -2429,6 +2906,38 @@
       return names[val] || names[1];
     }
 
+    function getDefaultStageTag(name, goal) {
+      const n = (name || '').toLowerCase();
+      const g = (goal || '').toLowerCase();
+      if (n.includes('open') || g.includes('engage') || g.includes('tone') || g.includes('rapport')) return 'Goal: Engage';
+      if (n.includes('discov') || g.includes('understand') || g.includes('timeline') || g.includes('motivation')) return 'Goal: Understand';
+      if (n.includes('value') || g.includes('differentiate') || g.includes('credibility') || g.includes('position')) return 'Goal: Differentiate';
+      if (n.includes('object') || g.includes('resolve') || g.includes('doubt') || g.includes('overcome') || g.includes('hesitation')) return 'Goal: Resolve';
+      if (n.includes('close') || g.includes('commit') || g.includes('forward') || g.includes('next step')) return 'Goal: Commit';
+      if (n.includes('follow') || g.includes('nurture') || g.includes('momentum') || g.includes('top of mind')) return 'Goal: Nurture';
+      return 'Goal: Focus';
+    }
+
+    function renderFlowOverview() {
+      const container = document.getElementById('flowOverviewList');
+      if (!container) return;
+      container.innerHTML = stages.map((st, idx) => {
+        const tagText = st.tag || getDefaultStageTag(st.name, st.goal);
+        return `
+          <div class="flow-overview-item">
+            <div class="flow-overview-left">
+              <span style="color: var(--slate-400); font-size: 0.78rem; width: 14px;">${idx + 1}</span>
+              <span>${escapeHtml(st.name)}</span>
+            </div>
+            <div class="flow-stage-pill">
+              <span class="dot"></span>
+              <span>${escapeHtml(tagText)}</span>
+            </div>
+          </div>
+        `;
+      }).join('');
+    }
+
     function renderStages() {
       const container = document.getElementById('stagesList');
       if (!container) return;
@@ -2458,6 +2967,7 @@
           </div>
         `;
       }).join('');
+      renderFlowOverview();
     }
 
     function openAddStageModal() {
@@ -2498,12 +3008,25 @@
       });
     }
 
-    function submitStageForm() {
+    async function submitStageForm() {
       const name = document.getElementById('stageNameInput').value.trim();
       const goal = document.getElementById('stageGoalInput').value.trim();
       const desc = document.getElementById('stageDescInput').value.trim();
       const editId = document.getElementById('editingStageId').value;
       if (!name || !goal) return alert('Please enter name and goal.');
+
+      let tag = getDefaultStageTag(name, goal);
+      try {
+        const res = await fetch('/api/playbook/generate-stage-tag', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ goal: goal, stage_name: name })
+        });
+        if (res.ok) {
+          const data = await res.json();
+          if (data.tag) tag = data.tag;
+        }
+      } catch (e) {}
 
       if (editId) {
         const target = stages.find(s => s.id === editId);
@@ -2512,6 +3035,7 @@
           target.goal = goal;
           target.description = desc;
           target.icon = selectedIcon;
+          target.tag = tag;
         }
       } else {
         stages.push({
@@ -2520,13 +3044,14 @@
           name: name,
           goal: goal,
           description: desc,
-          icon: selectedIcon
+          icon: selectedIcon,
+          tag: tag
         });
       }
       renderStages();
       closeStageModal();
       handleInputChange();
-      showToast('Stage updated');
+      showToast(`Stage updated (${tag})`);
     }
 
     function deleteStage(stageId) {
@@ -2548,16 +3073,19 @@
       const search = document.getElementById('searchObjectionInput')?.value?.toLowerCase() || '';
 
       let filtered = objections.filter(o => {
+        const cats = Array.isArray(o.category) ? o.category : [o.category];
         if (filterLt !== 'all' && !o.lead_types.some(t => t.includes(filterLt))) return false;
-        if (filterCat !== 'all' && o.category !== filterCat) return false;
-        if (search && !o.objection.toLowerCase().includes(search) && !o.category.toLowerCase().includes(search)) return false;
+        if (filterCat !== 'all' && !cats.includes(filterCat)) return false;
+        if (search && !o.objection.toLowerCase().includes(search) && !cats.some(c => c.toLowerCase().includes(search))) return false;
         return true;
       });
 
       document.getElementById('objectionCountBadge').innerText = filtered.length;
       const pageItems = filtered.slice((objCurrentPage - 1) * 5, objCurrentPage * 5);
 
-      tbody.innerHTML = pageItems.map(o => `
+      tbody.innerHTML = pageItems.map(o => {
+        const catStr = Array.isArray(o.category) ? o.category.join(', ') : (o.category || 'Financial');
+        return `
         <tr class="obj-row">
           <td>
             <div class="obj-title">${escapeHtml(o.objection)}</div>
@@ -2571,14 +3099,15 @@
             <span class="tag-pill tag-pill-primary">${escapeHtml(o.response_style)}</span>
           </td>
           <td style="color: var(--slate-600); font-size: 0.82rem; font-weight: 600;">
-            ${escapeHtml(o.category)}
+            ${escapeHtml(catStr)}
           </td>
           <td style="text-align: right;">
             <button class="btn-table-action" onclick="openEditObjectionModal('${o.id}')">✎</button>
             <button class="btn-table-action btn-table-delete" onclick="deleteObjection('${o.id}')">🗑</button>
           </td>
         </tr>
-      `).join('');
+      `;
+      }).join('');
 
       document.getElementById('objPaginationNote').innerText = `Showing ${pageItems.length > 0 ? (objCurrentPage - 1) * 5 + 1 : 0} to ${Math.min(objCurrentPage * 5, filtered.length)} of ${filtered.length} objections`;
     }
@@ -2597,7 +3126,10 @@
       document.getElementById('objModalTitle').innerText = 'Add Objection';
       document.getElementById('editingObjId').value = '';
       document.getElementById('clientObjInput').value = '';
-      document.getElementById('modalCategorySelect').value = 'Financial';
+      document.getElementById('catCheck_Financial').checked = true;
+      document.getElementById('catCheck_Risk').checked = false;
+      document.getElementById('catCheck_Logistics').checked = false;
+      document.getElementById('catCheck_Relationship').checked = false;
       document.getElementById('modalRespStyleSelect').value = 'Reframe';
       document.getElementById('objectionModal').classList.add('active');
     }
@@ -2608,7 +3140,11 @@
       document.getElementById('objModalTitle').innerText = 'Edit Objection';
       document.getElementById('editingObjId').value = o.id;
       document.getElementById('clientObjInput').value = o.objection;
-      document.getElementById('modalCategorySelect').value = o.category || 'Financial';
+      const cats = Array.isArray(o.category) ? o.category : [o.category || 'Financial'];
+      document.getElementById('catCheck_Financial').checked = cats.includes('Financial');
+      document.getElementById('catCheck_Risk').checked = cats.includes('Risk');
+      document.getElementById('catCheck_Logistics').checked = cats.includes('Logistics');
+      document.getElementById('catCheck_Relationship').checked = cats.includes('Relationship');
       document.getElementById('modalRespStyleSelect').value = o.response_style || 'Reframe';
       document.getElementById('modalAiSuggestionText').innerText = o.ai_suggestion || 'Focus on value and net proceeds.';
       document.getElementById('objectionModal').classList.add('active');
@@ -2620,23 +3156,26 @@
 
     function submitObjectionForm() {
       const text = document.getElementById('clientObjInput').value.trim();
-      const cat = document.getElementById('modalCategorySelect').value;
       const style = document.getElementById('modalRespStyleSelect').value;
       const editId = document.getElementById('editingObjId').value;
       if (!text) return alert('Enter objection text.');
+
+      const checkedBoxes = Array.from(document.querySelectorAll('input[name="modalCatCheckbox"]:checked'));
+      if (checkedBoxes.length === 0) return alert('Please select at least one objection category.');
+      const selectedCats = checkedBoxes.map(b => b.value);
 
       if (editId) {
         const target = objections.find(o => o.id === editId);
         if (target) {
           target.objection = text;
-          target.category = cat;
+          target.category = selectedCats;
           target.response_style = style;
         }
       } else {
         objections.push({
           id: 'obj_' + Math.random().toString(36).substring(2, 8),
           objection: text,
-          category: cat,
+          category: selectedCats,
           lead_types: ['Expired Listings', 'FSBO (For Sale By Owner)'],
           response_style: style,
           ai_suggestion: 'Standardized methodology response.',
@@ -2718,10 +3257,76 @@
         });
         const data = await res.json();
         document.getElementById('livePromptPreviewBox').innerText = data.preview_text;
-        showToast('✨ AI Prompt preview refreshed');
       } catch (e) {
-        document.getElementById('livePromptPreviewBox').innerText = `Hey ${name.split(' ')[0]}, I've got you. I'll keep my prompts ${tone.toLowerCase()}, direct, and ${comm.toLowerCase()} — short, professional, and to the point. Let's build a playbook that wins more conversations.`;
+        document.getElementById('livePromptPreviewBox').innerText = 
+          `Hey ${name.split(' ')[0]}, I've got you.\n\n` +
+          `I'll keep my prompts ${tone.toLowerCase()}, direct, and ${comm.toLowerCase()} — ` +
+          `short, professional, and to the point.\n\n` +
+          `Let's build a playbook that wins more conversations.`;
       }
+    }
+
+    let lastEvaluatedQualityScore = null;
+
+    function markServerSyncState(isSynced) {
+      const badge = document.getElementById('persistenceStatusBadge');
+      if (!badge) return;
+      if (isSynced) {
+        badge.style.background = '#ecfdf5';
+        badge.style.color = '#065f46';
+        badge.style.borderColor = '#a7f3d0';
+        badge.innerHTML = '☁️ Server: In Sync';
+      } else {
+        badge.style.background = '#fffbeb';
+        badge.style.color = '#b45309';
+        badge.style.borderColor = '#fde68a';
+        badge.innerHTML = '📝 Unsaved Draft Changes';
+      }
+    }
+
+    function toggleReadonlyBadge(checked) {
+      const badge = document.getElementById('readonlyBadgePreview');
+      if (badge) badge.style.display = checked ? 'inline-flex' : 'none';
+      handleInputChange();
+    }
+
+    function showReadonly403Alert(detail) {
+      const modal = document.getElementById('readonly403Modal');
+      const detailEl = document.getElementById('readonly403Detail');
+      if (detailEl) detailEl.innerText = detail;
+      if (modal) {
+        modal.classList.add('active');
+      } else {
+        alert(`🔒 ACCESS FORBIDDEN (HTTP 403):\n\n${detail}\n\nThis confirms PitchProX Read-Only Methodology Protection is actively enforced on the server.`);
+      }
+    }
+
+    function closeReadonly403Modal() {
+      const modal = document.getElementById('readonly403Modal');
+      if (modal) modal.classList.remove('active');
+    }
+
+    async function refreshQualityBenchmark() {
+      const payload = constructPayload();
+      try {
+        const res = await fetch('/api/playbook/evaluate-quality', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(payload)
+        });
+        if (res.ok) {
+          const data = await res.json();
+          lastEvaluatedQualityScore = data.quality_score;
+          if (data.quality_score) document.getElementById('qualityScoreDisplay').innerText = data.quality_score;
+          if (data.rating) document.getElementById('qualityBadgeLabel').innerText = data.rating;
+          if (data.summary && document.getElementById('qualityCheckSummary')) {
+            document.getElementById('qualityCheckSummary').innerText = data.summary;
+          }
+          if (data.benchmark_comparison && document.getElementById('qualityBenchmarkDetail')) {
+            document.getElementById('qualityBenchmarkDetail').innerText = data.benchmark_comparison;
+          }
+        }
+      } catch (e) {}
     }
 
     function renderReviewSummary() {
@@ -2730,12 +3335,21 @@
       const lt = document.getElementById('leadTypeSelect')?.value || 'Expired Listings';
       const exp = document.getElementById('experienceSelect')?.value || 'Intermediate to Advanced';
 
-      document.getElementById('sumPlaybookName').innerHTML = `${escapeHtml(name)} <span class="tag-pill tag-pill-primary" style="font-size: 0.65rem;">Custom</span>`;
+      const isRo = Boolean(document.getElementById('isReadonlyToggle')?.checked);
+      const tagType = isRo ? 'Premium' : 'Custom';
+      const tagClass = isRo ? 'tag-pill-warning' : 'tag-pill-primary';
+
+      document.getElementById('sumPlaybookName').innerHTML = `${escapeHtml(name)} <span class="tag-pill ${tagClass}" style="font-size: 0.65rem;">${tagType}</span>`;
       document.getElementById('sumIndustry').innerText = ind;
       document.getElementById('sumLeadTypes').innerHTML = `${escapeHtml(lt)} <span style="font-size: 0.75rem; color: var(--slate-400);">+15 lead types</span>`;
       document.getElementById('sumExpLevel').innerText = exp;
 
-      document.getElementById('sumStyleDesc').innerText = `Tone: ${selectedTone} • Style: ${document.getElementById('commStyleSelect')?.value || 'Consultative'} • Cooldown: 4s`;
+      const trustStyle = document.getElementById('trustBuildingStyleSelect')?.value || 'Validation-First';
+      const objConf = Math.round((parseFloat(document.getElementById('objConfSlider')?.value || '0.75')) * 100);
+      const trustAlert = Math.round((parseFloat(document.getElementById('trustAlertSlider')?.value || '0.70')) * 100);
+      const cooldown = document.getElementById('promptCooldownInput')?.value || '4';
+
+      document.getElementById('sumStyleDesc').innerText = `Tone: ${selectedTone} • Trust: ${trustStyle} • Min Conf: ${objConf}% • Trust Alert: ${trustAlert}% • Cooldown: ${cooldown}s`;
       document.getElementById('sumStagesDesc').innerText = `${stages.length} stages defined from ${stages[0]?.name || 'Opening'} to ${stages[stages.length - 1]?.name || 'Follow Up'}`;
       document.getElementById('sumObjectionsDesc').innerText = `${objections.length} normalized objections • 4 canonical categories`;
 
@@ -2746,24 +3360,35 @@
           return `
             <div class="mini-stage-item">
               <span>${iconConfig.emoji} ${idx + 1}. <b>${escapeHtml(s.name)}</b></span>
-              <span style="color: var(--slate-500); font-size: 0.75rem;">Goal: ${escapeHtml(s.goal.substring(0, 18))}...</span>
+              <span style="color: var(--slate-500); font-size: 0.75rem;">${escapeHtml(s.tag || 'Goal: Focus')}</span>
             </div>
           `;
         }).join('');
       }
 
-      let qScore = 80;
-      if (name.length > 5) qScore += 5;
-      if (stages.length >= 6) qScore += 5;
-      if (objections.length >= 6) qScore += 4;
-      document.getElementById('qualityScoreDisplay').innerText = qScore;
+      // Display genuine score if evaluated, or clean benchmarking placeholder
+      if (lastEvaluatedQualityScore) {
+        document.getElementById('qualityScoreDisplay').innerText = lastEvaluatedQualityScore;
+      } else {
+        document.getElementById('qualityScoreDisplay').innerText = '--';
+        document.getElementById('qualityBadgeLabel').innerText = 'Benchmarking...';
+      }
+    }
+
+    function getLinesFromTextarea(elemId) {
+      const val = document.getElementById(elemId)?.value || '';
+      return val.split('\n').map(l => l.trim()).filter(l => l.length > 0);
     }
 
     function constructPayload() {
+      const isRo = Boolean(document.getElementById('isReadonlyToggle')?.checked);
       return {
         id: currentPlaybookId,
         title: document.getElementById('playbookName')?.value || 'Untitled Playbook',
+        status: 'draft',
         current_step: currentStep,
+        is_readonly: isRo,
+        source: isRo ? 'premium' : 'custom',
         basic_info: {
           name: document.getElementById('playbookName')?.value || 'Untitled Playbook',
           short_description: document.getElementById('shortDescription')?.value || '',
@@ -2781,12 +3406,26 @@
           sentence_style: document.getElementById('sentenceStyleSelect')?.value || 'Short & Conversational',
           formality: document.getElementById('formalitySelect')?.value || 'Professional',
           humor_level: getSliderValueName('humorSlider', ['None', 'Light', 'Moderate']),
+          trust_building_style: document.getElementById('trustBuildingStyleSelect')?.value || 'Validation-First',
+          objection_tone: document.getElementById('objectionToneSelect')?.value || 'Empathetic & Resilient',
+          discovery_style: document.getElementById('discoveryStyleSelect')?.value || 'Diagnostic / Question-Led',
+          closing_style: document.getElementById('closingStyleSelect')?.value || 'Low-Pressure Next-Step Commitment',
+          follow_up_style: document.getElementById('followUpStyleSelect')?.value || 'Value-Added Persistence',
           voice_phrases: document.getElementById('voicePhrases')?.value || '',
-          core_selling_principles: document.getElementById('philosophyText')?.value || ''
+          core_selling_principles: document.getElementById('philosophyText')?.value || '',
+          runtime_settings: {
+            objection_confidence_threshold: parseFloat(document.getElementById('objConfSlider')?.value || '0.75'),
+            trust_alert_threshold: parseFloat(document.getElementById('trustAlertSlider')?.value || '0.70'),
+            prompt_cooldown_seconds: parseInt(document.getElementById('promptCooldownInput')?.value || '4', 10),
+            prompt_timing_sensitivity: document.getElementById('promptTimingSelect')?.value || 'Normal',
+            emotional_sensitivity: document.getElementById('emotionalSensitivitySelect')?.value || 'Normal',
+            do_dont_boundaries: getLinesFromTextarea('doDontBoundariesInput'),
+            language_rules: getLinesFromTextarea('languageRulesInput')
+          }
         },
         stages: stages.map((s, idx) => ({ ...s, order: idx + 1 })),
         objections: objections,
-        quality_score: parseInt(document.getElementById('qualityScoreDisplay')?.innerText || '94', 10)
+        quality_score: lastEvaluatedQualityScore || 94
       };
     }
 
@@ -2801,12 +3440,20 @@
           body: JSON.stringify(payload)
         });
 
+        if (res.status === 403) {
+          const errData = await res.json();
+          showReadonly403Alert(errData.detail || "Playbook is locked as read-only and cannot be modified.");
+          return;
+        }
+
         if (res.ok) {
           const data = await res.json();
           currentPlaybookId = data.playbook.id;
-          if (showFeedback) showToast('✅ Playbook saved to draft');
+          markServerSyncState(true);
+          if (showFeedback) showToast('✅ Playbook saved to draft on server');
         }
       } catch (err) {
+        markServerSyncState(false);
         if (showFeedback) showToast('💾 Saved locally');
       }
     }
@@ -2821,7 +3468,17 @@
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify(payload)
         });
-        if (res.ok) showToast('🎉 Playbook created and published successfully!');
+
+        if (res.status === 403) {
+          const errData = await res.json();
+          showReadonly403Alert(errData.detail || "Playbook is locked as read-only and cannot be modified.");
+          return;
+        }
+
+        if (res.ok) {
+          markServerSyncState(true);
+          showToast('🎉 Playbook created and published successfully!');
+        }
       } catch (e) {
         showToast('🎉 Playbook published locally!');
       }
@@ -2845,6 +3502,34 @@
         if (d.basic_info?.voice_phrases) document.getElementById('voicePhrases').value = d.basic_info.voice_phrases;
         if (d.basic_info?.philosophy) document.getElementById('philosophyText').value = d.basic_info.philosophy;
 
+        if (d.is_readonly !== undefined) {
+          document.getElementById('isReadonlyToggle').checked = Boolean(d.is_readonly);
+          toggleReadonlyBadge(Boolean(d.is_readonly));
+        }
+
+        if (d.style?.trust_building_style) document.getElementById('trustBuildingStyleSelect').value = d.style.trust_building_style;
+        if (d.style?.objection_tone) document.getElementById('objectionToneSelect').value = d.style.objection_tone;
+        if (d.style?.discovery_style) document.getElementById('discoveryStyleSelect').value = d.style.discovery_style;
+        if (d.style?.closing_style) document.getElementById('closingStyleSelect').value = d.style.closing_style;
+        if (d.style?.follow_up_style) document.getElementById('followUpStyleSelect').value = d.style.follow_up_style;
+
+        const rs = d.style?.runtime_settings;
+        if (rs) {
+          if (rs.objection_confidence_threshold) {
+            document.getElementById('objConfSlider').value = rs.objection_confidence_threshold;
+            document.getElementById('objConfDisplayBadge').innerText = Math.round(rs.objection_confidence_threshold * 100) + '% Min Match';
+          }
+          if (rs.trust_alert_threshold) {
+            document.getElementById('trustAlertSlider').value = rs.trust_alert_threshold;
+            document.getElementById('trustAlertDisplayBadge').innerText = Math.round(rs.trust_alert_threshold * 100) + '% Critical Alert';
+          }
+          if (rs.prompt_cooldown_seconds) document.getElementById('promptCooldownInput').value = rs.prompt_cooldown_seconds;
+          if (rs.prompt_timing_sensitivity) document.getElementById('promptTimingSelect').value = rs.prompt_timing_sensitivity;
+          if (rs.emotional_sensitivity) document.getElementById('emotionalSensitivitySelect').value = rs.emotional_sensitivity;
+          if (rs.do_dont_boundaries) document.getElementById('doDontBoundariesInput').value = rs.do_dont_boundaries.join('\n');
+          if (rs.language_rules) document.getElementById('languageRulesInput').value = rs.language_rules.join('\n');
+        }
+
         if (d.stages && d.stages.length > 0) {
           stages = d.stages;
           renderStages();
@@ -2853,10 +3538,12 @@
           objections = d.objections;
           renderObjectionsTable();
         }
+        markServerSyncState(false);
       } catch (e) {}
     }
 
     function handleInputChange() {
+      markServerSyncState(false);
       saveToLocalStorage();
     }
 
@@ -2878,7 +3565,10 @@
         listDiv.innerHTML = pbs.map(pb => `
           <div style="display: flex; align-items: center; justify-content: space-between; padding: 12px 16px; border: 1px solid var(--slate-200); border-radius: 12px; margin-bottom: 10px; background: var(--white);">
             <div>
-              <div style="font-weight: 700; color: var(--slate-900); font-size: 0.95rem;">${escapeHtml(pb.title)}</div>
+              <div style="font-weight: 700; color: var(--slate-900); font-size: 0.95rem;">
+                ${escapeHtml(pb.title)}
+                ${pb.is_readonly ? '<span class="tag-pill tag-pill-warning" style="font-size: 0.65rem; margin-left: 6px;">🔒 Read-Only</span>' : ''}
+              </div>
               <div style="font-size: 0.8rem; color: var(--slate-500);">${escapeHtml(pb.industry || 'Real Estate')} • ${pb.stages_count} Stages • Score: ${pb.quality_score}/100</div>
             </div>
             <div style="display: flex; gap: 8px;">
@@ -2911,6 +3601,33 @@
         if (pb.basic_info?.voice_phrases) document.getElementById('voicePhrases').value = pb.basic_info.voice_phrases;
         if (pb.basic_info?.philosophy) document.getElementById('philosophyText').value = pb.basic_info.philosophy;
 
+        const isRo = Boolean(pb.is_readonly);
+        document.getElementById('isReadonlyToggle').checked = isRo;
+        toggleReadonlyBadge(isRo);
+
+        if (pb.style?.trust_building_style) document.getElementById('trustBuildingStyleSelect').value = pb.style.trust_building_style;
+        if (pb.style?.objection_tone) document.getElementById('objectionToneSelect').value = pb.style.objection_tone;
+        if (pb.style?.discovery_style) document.getElementById('discoveryStyleSelect').value = pb.style.discovery_style;
+        if (pb.style?.closing_style) document.getElementById('closingStyleSelect').value = pb.style.closing_style;
+        if (pb.style?.follow_up_style) document.getElementById('followUpStyleSelect').value = pb.style.follow_up_style;
+
+        const rs = pb.style?.runtime_settings;
+        if (rs) {
+          if (rs.objection_confidence_threshold) {
+            document.getElementById('objConfSlider').value = rs.objection_confidence_threshold;
+            document.getElementById('objConfDisplayBadge').innerText = Math.round(rs.objection_confidence_threshold * 100) + '% Min Match';
+          }
+          if (rs.trust_alert_threshold) {
+            document.getElementById('trustAlertSlider').value = rs.trust_alert_threshold;
+            document.getElementById('trustAlertDisplayBadge').innerText = Math.round(rs.trust_alert_threshold * 100) + '% Critical Alert';
+          }
+          if (rs.prompt_cooldown_seconds) document.getElementById('promptCooldownInput').value = rs.prompt_cooldown_seconds;
+          if (rs.prompt_timing_sensitivity) document.getElementById('promptTimingSelect').value = rs.prompt_timing_sensitivity;
+          if (rs.emotional_sensitivity) document.getElementById('emotionalSensitivitySelect').value = rs.emotional_sensitivity;
+          if (rs.do_dont_boundaries) document.getElementById('doDontBoundariesInput').value = rs.do_dont_boundaries.join('\n');
+          if (rs.language_rules) document.getElementById('languageRulesInput').value = rs.language_rules.join('\n');
+        }
+
         if (pb.stages && pb.stages.length > 0) {
           stages = pb.stages;
           renderStages();
@@ -2921,6 +3638,8 @@
         }
 
         closePlaybooksListModal();
+        saveToLocalStorage();
+        markServerSyncState(true);
         renderReviewSummary();
         showToast(`Loaded: ${pb.title}`);
       } catch (err) {
@@ -2931,10 +3650,162 @@
     async function deletePlaybookById(pbId) {
       if (!confirm('Permanently delete this playbook?')) return;
       try {
-        await fetch(`/api/playbook/${pbId}`, { method: 'DELETE' });
+        const res = await fetch(`/api/playbook/${pbId}`, { method: 'DELETE' });
+        if (res.status === 403) {
+          const errData = await res.json();
+          showReadonly403Alert(errData.detail || "This playbook is a read-only premium methodology package and cannot be deleted.");
+          return;
+        }
         showToast('Playbook deleted');
         openPlaybooksListModal();
       } catch (err) {}
+    }
+
+    // ==========================================
+    // Live Runtime Methodology Lens Simulation
+    // ==========================================
+
+    function getActiveTrustAlertThreshold() {
+      const slider = document.getElementById('trustAlertSlider');
+      return slider ? parseFloat(slider.value) : 0.70;
+    }
+
+    function syncSimTrustControlsToConfiguredThreshold() {
+      const thresh = getActiveTrustAlertThreshold();
+      const lbl = document.getElementById('simThresholdIndicatorLabel');
+      if (lbl) lbl.innerText = `${thresh.toFixed(2)} (Alert Threshold)`;
+      const btn = document.getElementById('btnSimThresholdPreset');
+      if (btn) btn.innerText = `Threshold (${thresh.toFixed(2)})`;
+      const critBtn = document.getElementById('btnSimCriticalPreset');
+      const critVal = Math.max(0.10, Math.round((thresh - 0.25) * 100) / 100);
+      if (critBtn) critBtn.innerText = `Critical Alert (${critVal.toFixed(2)})`;
+      const currentSliderVal = document.getElementById('simTrustSlider')?.value;
+      if (currentSliderVal !== undefined) updateSimTrustDisplay(currentSliderVal);
+    }
+
+    function setSimTrustToCurrentThreshold() {
+      const thresh = getActiveTrustAlertThreshold();
+      setSimTrust(thresh);
+    }
+
+    function setSimTrustCritical() {
+      const thresh = getActiveTrustAlertThreshold();
+      const critVal = Math.max(0.10, Math.round((thresh - 0.25) * 100) / 100);
+      setSimTrust(critVal);
+    }
+
+    function setSimObjection(text) {
+      document.getElementById('simObjectionInput').value = text;
+    }
+
+    function setSimTrust(val) {
+      document.getElementById('simTrustSlider').value = val;
+      updateSimTrustDisplay(val);
+    }
+
+    function updateSimTrustDisplay(val) {
+      const num = parseFloat(val);
+      const thresh = getActiveTrustAlertThreshold();
+      const badge = document.getElementById('simTrustBadge');
+      if (!badge) return;
+
+      if (num < thresh) {
+        badge.className = 'tag-pill tag-pill-danger';
+        badge.style.background = '#fef2f2';
+        badge.style.color = '#b91c1c';
+        badge.style.border = '1px solid #fecaca';
+        badge.innerText = `${num.toFixed(2)} (⚠️ Critical Alert < ${thresh.toFixed(2)})`;
+      } else if (Math.abs(num - thresh) < 0.001) {
+        badge.className = 'tag-pill tag-pill-warning';
+        badge.style.background = '#fffbeb';
+        badge.style.color = '#b45309';
+        badge.style.border = '1px solid #fde68a';
+        badge.innerText = `${num.toFixed(2)} (Threshold Border)`;
+      } else {
+        badge.className = 'tag-pill tag-pill-success';
+        badge.style.background = '#ecfdf5';
+        badge.style.color = '#065f46';
+        badge.style.border = '1px solid #a7f3d0';
+        badge.innerText = `${num.toFixed(2)} (Normal / Stable)`;
+      }
+    }
+
+    async function runRuntimeLensSimulation() {
+      const objText = document.getElementById('simObjectionInput').value.trim();
+      const trustScore = parseFloat(document.getElementById('simTrustSlider').value);
+      const statusText = document.getElementById('simEngineStatus');
+      const resultsWrap = document.getElementById('simResultsWrap');
+      const preOutput = document.getElementById('simPromptOutput');
+      const statusPills = document.getElementById('simStatusPills');
+
+      statusText.innerHTML = '<span style="color: var(--primary);">⏳ Compiling runtime lens with semantic matching...</span>';
+
+      const payload = {
+        playbook_id: currentPlaybookId,
+        playbook: constructPayload(),
+        trust_score: trustScore,
+        detected_objection: objText,
+        lead_type: document.getElementById('leadTypeSelect')?.value || 'Expired Listings'
+      };
+
+      try {
+        const res = await fetch('/api/playbook/simulate-runtime-prompt', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(payload)
+        });
+
+        if (!res.ok) {
+          statusText.innerText = '❌ Simulation request failed.';
+          return;
+        }
+
+        const data = await res.json();
+        preOutput.innerText = data.methodology_prompt;
+        resultsWrap.style.display = 'block';
+
+        let pillsHtml = '';
+        if (data.match_info) {
+          if (data.match_info.matched) {
+            const confPct = Math.round(data.match_info.confidence * 100);
+            const threshPct = Math.round(data.objection_confidence_threshold * 100);
+            const catStr = Array.isArray(data.match_info.category) ? data.match_info.category.join('+') : data.match_info.category;
+            pillsHtml += `<span class="tag-pill tag-pill-success" style="font-weight: 700; background: #ecfdf5; color: #065f46; border: 1px solid #a7f3d0;">
+              🎯 Matched: "${escapeHtml(data.match_info.objection)}" (${confPct}% &ge; ${threshPct}%) [${escapeHtml(catStr)}]
+            </span>`;
+          } else {
+            const confPct = Math.round(data.match_info.confidence * 100);
+            const threshPct = Math.round(data.objection_confidence_threshold * 100);
+            pillsHtml += `<span class="tag-pill" style="font-weight: 700; background: #fef2f2; color: #991b1b; border: 1px solid #fecaca;">
+              ⚠️ Objection Below Threshold (${confPct}% &lt; ${threshPct}%) - Rule Omitted
+            </span>`;
+          }
+        }
+
+        if (data.trust_alert_triggered) {
+          pillsHtml += `<span class="tag-pill" style="font-weight: 700; background: #fef2f2; color: #b91c1c; border: 1px solid #f87171;">
+            ⚠️ CRITICAL TRUST ALERT TRIGGERED (Trust &lt; ${Math.round(data.trust_alert_threshold * 100)}%)
+          </span>`;
+        } else {
+          pillsHtml += `<span class="tag-pill" style="font-weight: 600; background: #f1f5f9; color: #475569; border: 1px solid #cbd5e1;">
+            ✅ Trust Normal (&ge; ${Math.round(data.trust_alert_threshold * 100)}%)
+          </span>`;
+        }
+
+        statusPills.innerHTML = pillsHtml;
+        statusText.innerHTML = '<span style="color: #059669;">✅ Compiled successfully from runtime engine</span>';
+      } catch (err) {
+        statusText.innerText = '❌ Simulation error: ' + err.message;
+      }
+    }
+
+    function copySimPrompt() {
+      const text = document.getElementById('simPromptOutput').innerText;
+      navigator.clipboard.writeText(text).then(() => {
+        showToast('📋 Copied methodology prompt to clipboard');
+      }).catch(() => {
+        showToast('Failed to copy');
+      });
     }
 
     function showToast(msg) {

@@ -1,7 +1,12 @@
 """Global Pytest Configuration & Test Fixtures."""
 
 import os
+import sys
+from pathlib import Path
 import pytest
+
+# Ensure repository root is on sys.path for test imports
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 # Provide fallback environment variables for test execution
 os.environ["RAG_ENABLED"] = "false"

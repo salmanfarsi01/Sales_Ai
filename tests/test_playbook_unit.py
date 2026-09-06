@@ -261,3 +261,375 @@ def test_serialize_playbook_prompt_section():
     assert "I don't want to pay commission." in prompt_section
     assert "Quantify" in prompt_section
     assert "Do / Don't Boundaries" in prompt_section
+
+
+def test_semantic_objection_matching_paraphrased():
+    """Verify semantic matching correctly maps real paraphrased spoken objections."""
+    from copilot.playbook import match_objection_semantically, PlaybookObjection
+
+    objections = [
+        PlaybookObjection(
+            id="obj_1",
+            objection="I don't want to pay commission.",
+            category=["Financial"],
+            response_style="Quantify",
+        ),
+        PlaybookObjection(
+            id="obj_2",
+            objection="Not a good time to sell.",
+            category=["Logistics"],
+            response_style="Future Pace",
+        ),
+    ]
+
+    # Spoken paraphrase that lacks substring containment
+    spoken = "Why would I pay you guys a commission when I can sell it myself"
+    match = match_objection_semantically(spoken, objections, threshold=0.75)
+    assert match is not None
+    matched_obj, confidence = match
+    assert matched_obj.id == "obj_1"
+    assert matched_obj.objection == "I don't want to pay commission."
+    assert confidence >= 0.75
+
+
+def test_objection_confidence_threshold_gating():
+    """Verify that objections with similarity below the threshold are rejected."""
+    from copilot.playbook import match_objection_semantically, PlaybookObjection
+
+    objections = [
+        PlaybookObjection(
+            id="obj_1",
+            objection="I don't want to pay commission.",
+            category=["Financial"],
+            response_style="Quantify",
+        ),
+    ]
+
+    # Irrelevant or low-confidence query
+    spoken = "The weather in Texas is nice this week"
+    match = match_objection_semantically(spoken, objections, threshold=0.75)
+    assert match is None
+
+
+def test_trust_alert_threshold_enforcement():
+    """Verify trust_alert_threshold injects critical recovery directive when trust is below gate."""
+    from copilot.playbook import serialize_playbook_prompt_section
+
+    info = PlaybookBasicInfo(name="Trust Test Playbook")
+    pb = Playbook(basic_info=info)
+    pb.style.runtime_settings.trust_alert_threshold = 0.70
+    pb.style.trust_building_style = "Validation-First"
+
+    # 1. Low trust score triggers alert
+    low_trust_prompt = serialize_playbook_prompt_section(pb, current_trust_score=0.45)
+    assert "CRITICAL TRUST ALERT TRIGGERED" in low_trust_prompt
+    assert "Validation-First" in low_trust_prompt
+    assert "Prioritize emotional validation" in low_trust_prompt
+
+    # 2. Healthy trust score does not trigger alert
+    healthy_trust_prompt = serialize_playbook_prompt_section(pb, current_trust_score=0.85)
+    assert "CRITICAL TRUST ALERT TRIGGERED" not in healthy_trust_prompt
+
+
+def test_multi_category_objection_support():
+    """Verify category allows multiple values as a list and coerces legacy string."""
+    from copilot.playbook import PlaybookObjection
+
+    # 1. List input
+    obj1 = PlaybookObjection(objection="Too much risk", category=["Risk", "Financial"])
+    assert obj1.category == ["Risk", "Financial"]
+
+    # 2. Comma-separated string coerced to list
+    obj2 = PlaybookObjection(objection="Need to think", category="Logistics, Risk")
+    assert obj2.category == ["Logistics", "Risk"]
+
+    # 3. Single string coerced to list
+    obj3 = PlaybookObjection(objection="Not interested", category="Relationship")
+    assert obj3.category == ["Relationship"]
+
+
+def test_spec_section_3_distinct_style_components():
+    """Verify all 5 Spec Section 3 named style components are present and serialized."""
+    from copilot.playbook import serialize_playbook_prompt_section
+
+    info = PlaybookBasicInfo(name="Elite Methodology")
+    style = PlaybookStyle(
+        trust_building_style="Credibility-First",
+        objection_tone="Assertive & Reframing",
+        discovery_style="Problem-Agitation",
+        closing_style="Direct Close",
+        follow_up_style="Multi-Touch Education",
+    )
+    pb = Playbook(basic_info=info, style=style)
+    prompt = serialize_playbook_prompt_section(pb)
+
+    assert "Methodology Style Choices:" in prompt
+    assert "Trust=Credibility-First" in prompt
+    assert "Objection Tone=Assertive & Reframing" in prompt
+    assert "Discovery=Problem-Agitation" in prompt
+    assert "Close=Direct Close" in prompt
+    assert "Follow-Up=Multi-Touch Education" in prompt
+
+
+def test_readonly_premium_playbook_protection(temp_store, client):
+    """Verify premium and read-only playbooks cannot be modified or deleted."""
+    from fastapi import HTTPException
+
+    info = PlaybookBasicInfo(name="PitchProX Elite Purchased Playbook")
+    pb = Playbook(id="pb_premium_pack", basic_info=info, is_readonly=True, source="premium")
+    temp_store.save(pb)
+
+    # 1. Attempting to overwrite via store.save raises 403
+    pb_mod = Playbook(id="pb_premium_pack", basic_info=info, title="Hacked Title")
+    with pytest.raises(HTTPException) as exc_info:
+        temp_store.save(pb_mod)
+    assert exc_info.value.status_code == 403
+
+    # 2. Attempting to overwrite via API raises 403
+    api_res = client.post("/api/playbook/save", json={"id": "pb_premium_pack", "basic_info": {"name": "Hacked Title"}})
+    assert api_res.status_code == 403
+    assert "read-only methodology package" in api_res.json()["detail"]
+
+    # 3. Attempting to delete via store.delete raises 403
+    with pytest.raises(HTTPException) as exc_del:
+        temp_store.delete("pb_premium_pack")
+    assert exc_del.value.status_code == 403
+
+    # 4. Attempting to delete via API raises 403
+    api_del_res = client.delete("/api/playbook/pb_premium_pack")
+    assert api_del_res.status_code == 403
+
+
+def test_ai_stage_tag_generator(client):
+    """Verify AI stage tag generator produces concise tags from goal text and reports engine metadata."""
+    from copilot.playbook import classify_stage_tag_heuristic
+
+    cases = [
+        ("Set a positive tone and gain engagement.", "Opening", "Goal: Engage"),
+        ("Understand their motivation and timeline.", "Discovery", "Goal: Understand"),
+        ("Build credibility and differentiate yourself.", "Value Prop", "Goal: Differentiate"),
+        ("Overcome doubt and strengthen confidence.", "Handle Objections", "Goal: Resolve"),
+        ("Get a commitment to move forward.", "Close", "Goal: Commit"),
+        ("Stay top of mind and convert later.", "Follow Up", "Goal: Nurture"),
+    ]
+    for goal, stage_name, expected_tag in cases:
+        res = client.post("/api/playbook/generate-stage-tag", json={"goal": goal, "stage_name": stage_name})
+        assert res.status_code == 200
+        data = res.json()
+        assert data["tag"] == expected_tag
+        assert data["engine"] in ("ai_llm", "semantic_heuristic")
+
+        # Directly verify deterministic heuristic classifier
+        h_tag = classify_stage_tag_heuristic(goal=goal, stage_name=stage_name)
+        assert h_tag == expected_tag
+
+
+def test_ai_quality_evaluation_benchmark(client):
+    """Verify quality evaluation endpoint returns real comparative cohort metrics and honest assessment copy."""
+    payload = {
+        "basic_info": {
+            "name": "Daniel G. Method",
+            "short_description": "Complete top-tier sales playbook.",
+            "industry": "Real Estate",
+            "lead_types": ["Expired Listings", "FSBO"],
+            "experience_level": "Intermediate to Advanced",
+            "voice_phrases": "Here's the thing\nBottom line",
+            "philosophy": "Deliver value upfront and guide the prospect to clear next steps.",
+            "goals": ["Build stronger trust", "Increase appointments", "Close more deals"],
+        }
+    }
+    res = client.post("/api/playbook/evaluate-quality", json=payload)
+    assert res.status_code == 200
+    data = res.json()
+    assert "quality_score" in data
+    assert "completeness_score" in data
+    assert "rating" in data
+    assert "benchmark_comparison" in data
+    assert "methodology_assessment" in data
+    assert "cohort_comparison_metrics" in data
+
+    assert data["quality_score"] >= 90
+    assert data["rating"] == "Excellent"
+    assert "Structural quality assessment" in data["methodology_assessment"]
+
+    metrics = data["cohort_comparison_metrics"]
+    assert metrics["industry"] == "Real Estate"
+    assert metrics["cohort_size"] >= 24
+    assert metrics["cohort_median_stages"] == 5.0
+    assert metrics["cohort_median_objections"] == 8.0
+    assert "stages_delta" in metrics
+    assert "objections_delta" in metrics
+    assert "category_coverage_ratio" in metrics
+    assert 5 <= metrics["percentile_rank"] <= 99
+
+
+def test_cohort_benchmark_stats_and_industries():
+    """Verify get_cohort_benchmark_stats handles multiple industries with correct sample baselines."""
+    from copilot.playbook import get_cohort_benchmark_stats
+
+    re_cohort = get_cohort_benchmark_stats(industry="Real Estate")
+    assert re_cohort["matched_industry"] == "Real Estate"
+    assert re_cohort["cohort_size"] >= 24
+    assert re_cohort["target_categories"] == 4
+
+    saas_cohort = get_cohort_benchmark_stats(industry="SaaS / Technology")
+    assert saas_cohort["matched_industry"] == "SaaS / Technology"
+    assert saas_cohort["cohort_size"] >= 32
+    assert saas_cohort["median_stages"] >= 5.0
+
+    fin_cohort = get_cohort_benchmark_stats(industry="Financial Services")
+    assert fin_cohort["matched_industry"] == "Financial Services"
+    assert fin_cohort["cohort_size"] >= 18
+
+    gen_cohort = get_cohort_benchmark_stats(industry="Unknown Industry")
+    assert gen_cohort["matched_industry"] == "General"
+    assert gen_cohort["cohort_size"] >= 20
+
+
+def test_simulate_runtime_prompt_with_draft(client):
+    """Verify POST /api/playbook/simulate-runtime-prompt with an in-memory draft payload."""
+    payload = {
+        "playbook": {
+            "title": "Live In-Memory Closer",
+            "basic_info": {
+                "name": "Live In-Memory Closer",
+                "industry": "Real Estate",
+                "lead_types": ["FSBO"],
+            },
+            "style": {
+                "overall_tone": "Direct",
+                "trust_building_style": "Validation-First",
+                "objection_tone": "Assertive & Reframing",
+                "runtime_settings": {
+                    "objection_confidence_threshold": 0.70,
+                    "trust_alert_threshold": 0.65,
+                    "do_dont_boundaries": "DO NOT argue on pricing directly.",
+                    "language_rules": "Always frame fees as investment.",
+                },
+            },
+            "objections": [
+                {
+                    "id": "obj_test_1",
+                    "objection": "I don't want to pay commission.",
+                    "category": ["Financial", "Risk"],
+                    "response_style": "Quantify",
+                    "ai_suggestion": "Highlight net proceeds comparison.",
+                }
+            ],
+        },
+        "lead_type": "FSBO",
+        "detected_objection": "Why should I pay a real estate commission?",
+        "trust_score": 0.50,
+    }
+
+    res = client.post("/api/playbook/simulate-runtime-prompt", json=payload)
+    assert res.status_code == 200
+    data = res.json()
+
+    assert "prompt_section" in data
+    prompt = data["prompt_section"]
+    assert "### ACTIVE PLAYBOOK METHODOLOGY LENS: LIVE IN-MEMORY CLOSER ###" in prompt
+    assert "CRITICAL TRUST ALERT TRIGGERED" in prompt
+    assert "DO NOT argue on pricing directly." in prompt
+    assert "Always frame fees as investment." in prompt
+    assert "I don't want to pay commission." in prompt
+
+    # Introspection flags
+    assert data["trust_alert_triggered"] is True
+    assert data["threshold_met"] is True
+    assert data["confidence"] >= 0.70
+    assert data["match_info"] is not None
+    assert data["match_info"]["matched_objection"] == "I don't want to pay commission."
+    assert "Financial" in data["match_info"]["category"]
+    assert "Risk" in data["match_info"]["category"]
+
+
+def test_simulate_runtime_prompt_with_saved_id(client, temp_store):
+    """Verify POST /api/playbook/simulate-runtime-prompt using saved playbook ID with healthy trust."""
+    info = PlaybookBasicInfo(name="Stored Architecture Playbook")
+    pb = Playbook(id="pb_saved_sim", title="Stored Architecture Playbook", basic_info=info)
+    pb.style.runtime_settings.trust_alert_threshold = 0.60
+    temp_store.save(pb)
+
+    sim_payload = {
+        "playbook_id": "pb_saved_sim",
+        "trust_score": 0.88,
+        "detected_objection": "Not interested right now.",
+    }
+    res = client.post("/api/playbook/simulate-runtime-prompt", json=sim_payload)
+    assert res.status_code == 200
+    data = res.json()
+    assert data["playbook_id"] == "pb_saved_sim"
+    assert data["trust_alert_triggered"] is False
+    assert "CRITICAL TRUST ALERT TRIGGERED" not in data["prompt_section"]
+
+
+def test_get_runtime_prompt_introspection_endpoint(client, temp_store):
+    """Verify GET /api/playbook/{id}/runtime-prompt returns full introspection metadata."""
+    info = PlaybookBasicInfo(name="Introspection Engine Playbook")
+    pb = Playbook(id="pb_intro_test", title="Introspection Engine Playbook", basic_info=info)
+    temp_store.save(pb)
+
+    res = client.get(
+        "/api/playbook/pb_intro_test/runtime-prompt"
+        "?lead_type=Expired&detected_objection=I%20don't%20want%20to%20pay%20commission&trust_score=0.4"
+    )
+    assert res.status_code == 200
+    data = res.json()
+    assert data["playbook_id"] == "pb_intro_test"
+    assert data["trust_score"] == 0.4
+    assert data["trust_alert_triggered"] is True
+    assert data["match_info"] is not None
+    assert data["threshold_met"] is True
+    assert "ACTIVE PLAYBOOK METHODOLOGY LENS" in data["prompt_section"]
+
+
+def test_runtime_settings_and_section3_persistence_in_api(client):
+    """Verify that runtime_settings and Section 3 style dimensions survive API save and get cycles."""
+    payload = {
+        "basic_info": {
+            "name": "Full Spec Playbook",
+            "industry": "Consulting",
+        },
+        "style": {
+            "overall_tone": "Direct",
+            "trust_building_style": "Diagnostic-Authority",
+            "objection_tone": "Empathetic & Curious",
+            "discovery_style": "Solution-Led",
+            "closing_style": "Assumptive Close",
+            "follow_up_style": "Rapid Action",
+            "runtime_settings": {
+                "prompt_cooldown_seconds": 7.0,
+                "objection_confidence_threshold": 0.82,
+                "trust_alert_threshold": 0.68,
+                "prompt_timing": "Proactive",
+                "emotional_sensitivity": "High",
+                "do_dont_boundaries": "DO NOT quote rates without diagnosing need.",
+                "language_rules": "Always speak in terms of net client ROI.",
+            },
+        },
+    }
+
+    save_res = client.post("/api/playbook/save", json=payload)
+    assert save_res.status_code == 200
+    pb_id = save_res.json()["playbook"]["id"]
+
+    get_res = client.get(f"/api/playbook/{pb_id}")
+    assert get_res.status_code == 200
+    pb_data = get_res.json()["playbook"]
+    style = pb_data["style"]
+
+    assert style["trust_building_style"] == "Diagnostic-Authority"
+    assert style["objection_tone"] == "Empathetic & Curious"
+    assert style["discovery_style"] == "Solution-Led"
+    assert style["closing_style"] == "Assumptive Close"
+    assert style["follow_up_style"] == "Rapid Action"
+
+    rs = style["runtime_settings"]
+    assert rs["prompt_cooldown_seconds"] == 7
+    assert rs["objection_confidence_threshold"] == 0.82
+    assert rs["trust_alert_threshold"] == 0.68
+    assert rs["prompt_timing_sensitivity"] == "Proactive"
+    assert rs["emotional_sensitivity"] == "High"
+    assert any("DO NOT quote rates" in b for b in rs["do_dont_boundaries"])
+    assert any("Always speak in terms of net client ROI." in r for r in rs["language_rules"])
