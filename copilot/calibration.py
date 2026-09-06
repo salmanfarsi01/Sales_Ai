@@ -26,6 +26,7 @@ import math
 import os
 import random
 import re
+import subprocess
 import time
 import uuid
 import wave
@@ -108,6 +109,118 @@ def get_audio_duration_seconds(
         return round(estimated_sec, 2)
 
     return max(round(fallback_seconds, 2), 0.0) if fallback_seconds > 0 else 5.0
+
+
+def analyze_audio_signal(
+    audio_bytes: Optional[bytes],
+    sample_rate: int = 16000,
+) -> dict[str, Any]:
+    """Decode raw audio in-memory to mono PCM via imageio-ffmpeg pipe and compute acoustic signal metrics:
+    - speech_onset_sec: timestamp of first speech energy frame (> 1.8x ambient noise floor)
+    - dynamic_range_db: 90th vs 10th percentile vocal energy dynamic range in dB
+    - cv: coefficient of variation of energy across active speech frames (vocal inflection / dynamic phrasing)
+    - duration_sec: accurate duration derived from decoded PCM samples
+    - has_audio: boolean indicating whether valid audio signal was parsed
+    """
+    default_res = {
+        "dynamic_range_db": 15.0,
+        "cv": 0.50,
+        "speech_onset_sec": None,
+        "duration_sec": 0.0,
+        "has_audio": False,
+    }
+    if not audio_bytes or len(audio_bytes) < 150:
+        return default_res
+
+    try:
+        import imageio_ffmpeg
+        import numpy as np
+
+        ffmpeg_exe = imageio_ffmpeg.get_ffmpeg_exe()
+        cmd = [
+            ffmpeg_exe,
+            "-v", "error",
+            "-i", "pipe:0",
+            "-f", "s16le",
+            "-ac", "1",
+            "-ar", str(sample_rate),
+            "pipe:1",
+        ]
+        proc = subprocess.run(
+            cmd,
+            input=audio_bytes,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            timeout=8.0,
+        )
+        if proc.returncode != 0 or not proc.stdout:
+            LOGGER.warning("Audio decode via ffmpeg failed (exit code %s); using safe fallback.", proc.returncode)
+            return default_res
+
+        pcm = np.frombuffer(proc.stdout, dtype=np.int16)
+        if len(pcm) < sample_rate * 0.15:
+            return default_res
+
+        actual_duration = float(len(pcm)) / float(sample_rate)
+
+        frame_size = int(sample_rate * 0.05)  # 50ms frames
+        num_frames = len(pcm) // frame_size
+        if num_frames < 3:
+            return {
+                "dynamic_range_db": 15.0,
+                "cv": 0.50,
+                "speech_onset_sec": None,
+                "duration_sec": actual_duration,
+                "has_audio": True,
+                "is_low_frame_count": True,
+            }
+
+        frames = pcm[: num_frames * frame_size].reshape((num_frames, frame_size))
+        frame_rms = np.sqrt(np.mean(frames.astype(np.float64) ** 2, axis=1))
+
+        min_rms = float(np.min(frame_rms))
+        p10_rms = float(np.percentile(frame_rms, 10))
+        noise_floor = min_rms if min_rms < p10_rms * 0.7 else p10_rms
+        if noise_floor > 800.0:
+            speech_indices = np.where(frame_rms > 100.0)[0]
+        else:
+            speech_thresh = max(noise_floor * 1.8, 100.0)
+            speech_indices = np.where(frame_rms > speech_thresh)[0]
+
+        onset_sec = float(speech_indices[0] * 0.05) if len(speech_indices) > 0 else None
+
+        # Guard against noisy percentile calculations when active speech frames are too sparse (< 8 frames / 400ms)
+        MIN_ACTIVE_SPEECH_FRAMES = 8
+        if len(speech_indices) < MIN_ACTIVE_SPEECH_FRAMES:
+            return {
+                "dynamic_range_db": 14.0,
+                "cv": 0.45,
+                "speech_onset_sec": round(onset_sec, 2) if onset_sec is not None else None,
+                "duration_sec": round(actual_duration, 2),
+                "has_audio": True,
+                "is_low_frame_count": True,
+            }
+
+        speech_frames = frame_rms[speech_indices]
+
+        db = 20 * np.log10(np.maximum(speech_frames, 1e-4) / 32768.0)
+        p90 = float(np.percentile(db, 90))
+        p10 = float(np.percentile(db, 10))
+        dr_db = max(0.0, p90 - p10)
+        cv = float(np.std(speech_frames) / (np.mean(speech_frames) + 1e-5))
+
+        return {
+            "dynamic_range_db": round(dr_db, 1),
+            "cv": round(cv, 2),
+            "speech_onset_sec": round(onset_sec, 2) if onset_sec is not None else None,
+            "duration_sec": round(actual_duration, 2),
+            "has_audio": True,
+            "is_low_frame_count": False,
+        }
+    except Exception as exc:
+        LOGGER.warning("Energy dynamics decode failed, using fallback: %s", exc)
+        return default_res
+
 
 # Curated ElevenLabs Voice Pool & Sales Personas
 VOICE_PERSONAS = [
@@ -449,12 +562,19 @@ class SpeechToTextEngine:
         self.groq_client = Groq(api_key=self.groq_api_key, timeout=15.0) if self.groq_api_key else None
 
     async def transcribe(self, audio_bytes: bytes, mime_type: str = "audio/webm") -> str:
-        """Transcribe user audio to text."""
-        # 1. Deepgram STT
+        """Transcribe user audio to text (convenience wrapper)."""
+        transcript, _ = await self.transcribe_with_timestamps(audio_bytes, mime_type)
+        return transcript
+
+    async def transcribe_with_timestamps(
+        self, audio_bytes: bytes, mime_type: str = "audio/webm"
+    ) -> tuple[str, list[dict[str, Any]]]:
+        """Transcribe user audio to text and extract word-level timestamps."""
+        # 1. Deepgram STT (with word timestamps & utterances)
         if self.deepgram_api_key:
             try:
-                LOGGER.info("Transcribing audio via Deepgram...")
-                url = "https://api.deepgram.com/v1/listen?punctuate=true&model=nova-2&language=en"
+                LOGGER.info("Transcribing audio via Deepgram with word timestamps...")
+                url = "https://api.deepgram.com/v1/listen?punctuate=true&model=nova-2&language=en&utterances=true"
                 headers = {
                     "Authorization": f"Token {self.deepgram_api_key}",
                     "Content-Type": mime_type,
@@ -463,14 +583,15 @@ class SpeechToTextEngine:
                     resp = await client.post(url, headers=headers, content=audio_bytes)
                     if resp.status_code == 200:
                         data = resp.json()
-                        transcript = (
+                        alt = (
                             data.get("results", {})
                             .get("channels", [{}])[0]
                             .get("alternatives", [{}])[0]
-                            .get("transcript", "")
                         )
+                        transcript = alt.get("transcript", "")
+                        words = alt.get("words", [])
                         if transcript.strip():
-                            return transcript.strip()
+                            return transcript.strip(), words
             except Exception as exc:
                 LOGGER.warning("Deepgram STT failed: %s. Trying Groq Whisper.", exc)
 
@@ -482,21 +603,44 @@ class SpeechToTextEngine:
                 filename = f"audio.{ext}"
 
                 def _whisper():
-                    transcription = self.groq_client.audio.transcriptions.create(
-                        file=(filename, io.BytesIO(audio_bytes).read()),
-                        model="whisper-large-v3-turbo",
-                        language="en",
-                        timeout=15.0,
-                    )
-                    return transcription.text
+                    try:
+                        transcription = self.groq_client.audio.transcriptions.create(
+                            file=(filename, io.BytesIO(audio_bytes).read()),
+                            model="whisper-large-v3-turbo",
+                            language="en",
+                            response_format="verbose_json",
+                            timestamp_granularities=["word"],
+                            timeout=15.0,
+                        )
+                        raw_words = getattr(transcription, "words", None) or []
+                        formatted_words = []
+                        for w in raw_words:
+                            if hasattr(w, "word"):
+                                formatted_words.append({
+                                    "word": w.word,
+                                    "start": getattr(w, "start", 0.0),
+                                    "end": getattr(w, "end", 0.0),
+                                })
+                            elif isinstance(w, dict):
+                                formatted_words.append(w)
+                        text = getattr(transcription, "text", "") or ""
+                        return text.strip(), formatted_words
+                    except Exception:
+                        transcription = self.groq_client.audio.transcriptions.create(
+                            file=(filename, io.BytesIO(audio_bytes).read()),
+                            model="whisper-large-v3-turbo",
+                            language="en",
+                            timeout=15.0,
+                        )
+                        return (transcription.text or "").strip(), []
 
-                res = await asyncio.to_thread(_whisper)
-                if res and res.strip():
-                    return res.strip()
+                res_text, res_words = await asyncio.to_thread(_whisper)
+                if res_text:
+                    return res_text, res_words
             except Exception as exc:
                 LOGGER.warning("Groq Whisper failed: %s", exc)
 
-        return ""
+        return "", []
 
 
 # ==========================================
@@ -593,28 +737,103 @@ class CalibrationService:
         duration_seconds: float,
         word_count: int,
         detected_fillers: list[str],
+        word_timings: Optional[list[dict[str, Any]]] = None,
     ) -> int:
-        """Evaluate pause frequency and delivery continuity."""
+        """Evaluate pause frequency, natural pause intervals, and conversational filler count."""
         filler_count = len(detected_fillers)
-        # Moderate deduction for hesitations without failing the user
-        score = max(40, min(95, 90 - (filler_count * 8)))
-        return score
 
-    def compute_energy_dynamics(self, audio_bytes: Optional[bytes], transcript: str) -> int:
-        """Evaluate vocal energy dynamic range or phrasing intensity."""
-        has_emphasis = any(ch in transcript for ch in ["!", "?"])
-        return 82 if has_emphasis else 74
+        # 1. Physical word timestamp gap measurement if word timings available
+        if word_timings and len(word_timings) >= 2:
+            pauses = []
+            for i in range(len(word_timings) - 1):
+                curr_end = float(word_timings[i].get("end", 0.0))
+                next_start = float(word_timings[i + 1].get("start", 0.0))
+                gap = next_start - curr_end
+                if gap > 0:
+                    pauses.append(gap)
 
-    def compute_response_timing(self, latency_ms: Optional[float] = None) -> int:
+            hesitations = [p for p in pauses if 0.55 <= p < 1.2]
+            long_pauses = [p for p in pauses if p >= 1.2]
+            total_pause_time = sum(p for p in pauses if p >= 0.25)
+            pause_ratio = total_pause_time / max(duration_seconds, 1.0)
+
+            score = 92.0
+            # Reward natural conversational pauses (taking breath / pacing)
+            if 0.10 <= pause_ratio <= 0.28 and len(long_pauses) == 0:
+                score += 3.0
+            elif pause_ratio > 0.35:
+                score -= (pause_ratio - 0.35) * 45.0
+
+            # Deductions for hesitations, awkward long pauses, and verbal fillers
+            score -= len(hesitations) * 2.5
+            score -= len(long_pauses) * 6.0
+            score -= filler_count * 5.0
+
+            return max(40, min(96, int(round(score))))
+
+        # 2. Heuristic fallback when word timestamps are unavailable
+        speech_time = word_count * 0.38
+        unvoiced_time = max(0.0, duration_seconds - speech_time)
+        pause_ratio = unvoiced_time / max(duration_seconds, 1.0) if duration_seconds > 0 else 0.2
+        score = 90 - (filler_count * 6) - int(max(0.0, (pause_ratio - 0.35) * 35))
+        return max(40, min(95, score))
+
+    def compute_energy_dynamics(
+        self,
+        audio_bytes: Optional[bytes] = None,
+        transcript: str = "",
+        audio_analysis: Optional[dict[str, Any]] = None,
+    ) -> int:
+        """Evaluate vocal dynamic range (RMS in dB), loudness modulation, and inflection."""
+        try:
+            if audio_analysis is None:
+                audio_analysis = analyze_audio_signal(audio_bytes)
+
+            dr_db = audio_analysis.get("dynamic_range_db", 15.0)
+            cv = audio_analysis.get("cv", 0.5)
+            has_audio = audio_analysis.get("has_audio", False)
+            is_low_frames = audio_analysis.get("is_low_frame_count", False)
+
+            if has_audio and not is_low_frames:
+                # Derived 100% from physical acoustics (dynamic range + CV vocal modulation)
+                # Conversational baseline (14 dB, cv 0.50) -> ~75
+                # Expressive dynamic delivery (22 dB, cv 0.70) -> ~90
+                # Monotone delivery (6 dB, cv 0.25) -> ~54
+                score = int(round(36 + (dr_db * 1.5) + (cv * 36)))
+            else:
+                # Text-based fallback when audio is missing or sparse
+                has_emphasis = any(ch in transcript for ch in ["!", "?"])
+                score = 80 if has_emphasis else 74
+
+            return max(40, min(96, score))
+        except Exception as exc:
+            LOGGER.warning("Energy dynamics evaluation failed, using fallback 74: %s", exc)
+            return 74
+
+    def compute_response_timing(
+        self,
+        latency_ms: Optional[float] = None,
+        speech_onset_sec: Optional[float] = None,
+        word_timings: Optional[list[dict[str, Any]]] = None,
+    ) -> int:
         """Evaluate response prompt-to-speech timing readiness."""
-        if latency_ms is None:
-            return 78
-        if latency_ms <= 600:
-            return 90
-        elif latency_ms <= 1500:
-            return 78
+        onset_ms = 0.0
+        if word_timings and len(word_timings) > 0:
+            onset_ms = float(word_timings[0].get("start", 0.0)) * 1000.0
+        elif speech_onset_sec is not None:
+            onset_ms = float(speech_onset_sec) * 1000.0
+
+        # Sanity bound client-reported latency to plausible conversational bounds [50ms, 15000ms]
+        if latency_ms is not None and 50.0 <= latency_ms <= 15000.0:
+            total_latency_ms = max(100.0, float(latency_ms) + onset_ms)
+        elif onset_ms > 0:
+            total_latency_ms = 450.0 + onset_ms
         else:
-            return 55
+            return 78
+
+        latency_sec = total_latency_ms / 1000.0
+        score = int(round(98 - (latency_sec ** 0.82) * 17.5))
+        return max(40, min(96, score))
 
     async def _call_llm_json(
         self,
@@ -783,6 +1002,7 @@ Respond ONLY with valid JSON with keys "question_text" and "teleprompt_text":
         mime_type: str = "audio/webm",
         transcript_override: Optional[str] = None,
         duration_seconds: float = 0.0,
+        response_latency_ms: Optional[float] = None,
     ) -> dict[str, Any]:
         """Transcribe user audio, evaluate against teleprompt, compute 6 exact metrics."""
         session = self.get_session(session_id)
@@ -792,19 +1012,34 @@ Respond ONLY with valid JSON with keys "question_text" and "teleprompt_text":
         round_data = session["rounds"][round_num]
         teleprompt = round_data["teleprompt_text"]
 
-        # 1. Derive duration server-side from received audio_bytes rather than trusting client form
-        server_duration = get_audio_duration_seconds(audio_bytes, mime_type, fallback_seconds=duration_seconds)
-        final_duration = server_duration if server_duration > 0 else duration_seconds
+        # 1. Non-blocking audio decode via worker thread; prefer exact PCM duration over container estimates
+        audio_analysis = None
+        if audio_bytes and len(audio_bytes) > 100:
+            audio_analysis = await asyncio.to_thread(analyze_audio_signal, audio_bytes)
 
-        # 2. Transcribe speech if audio is provided
+        if audio_analysis and audio_analysis.get("has_audio") and audio_analysis.get("duration_sec", 0.0) > 0:
+            final_duration = audio_analysis["duration_sec"]
+        else:
+            server_duration = get_audio_duration_seconds(audio_bytes, mime_type, fallback_seconds=duration_seconds)
+            final_duration = server_duration if server_duration > 0 else duration_seconds
+
+        # 2. Transcribe speech if audio is provided and obtain word timings
+        word_timings = []
         if transcript_override is not None:
             user_transcript = transcript_override.strip()
         elif audio_bytes and len(audio_bytes) > 100:
-            user_transcript = (await self.stt.transcribe(audio_bytes, mime_type)).strip()
+            user_transcript, word_timings = await self.stt.transcribe_with_timestamps(audio_bytes, mime_type)
+            user_transcript = user_transcript.strip()
         else:
             user_transcript = ""
 
-        # 3. Compute Communication Style Profile (Deterministic Math + Optional Signal Engine)
+        # 3. Sanity check client-reported reaction latency (guard against background-tab timeout or negative skew)
+        sanitized_latency_ms = response_latency_ms
+        if sanitized_latency_ms is not None and (sanitized_latency_ms < 50.0 or sanitized_latency_ms > 15000.0):
+            LOGGER.info("Client response_latency_ms out of bounds (%.1f ms); falling back to speech onset.", sanitized_latency_ms)
+            sanitized_latency_ms = None
+
+        # 4. Compute Communication Style Profile (Deterministic Math + Audio Signal Processing)
         evaluation = await self._run_llm_evaluation(
             round_num=round_num,
             stage=round_data["stage"],
@@ -812,6 +1047,9 @@ Respond ONLY with valid JSON with keys "question_text" and "teleprompt_text":
             user_transcript=user_transcript,
             duration_seconds=final_duration,
             audio_bytes=audio_bytes,
+            response_latency_ms=sanitized_latency_ms,
+            word_timings=word_timings,
+            audio_analysis=audio_analysis,
         )
 
         round_data["evaluation"] = evaluation
@@ -836,9 +1074,22 @@ Respond ONLY with valid JSON with keys "question_text" and "teleprompt_text":
         user_transcript: str,
         duration_seconds: float,
         audio_bytes: Optional[bytes] = None,
+        response_latency_ms: Optional[float] = None,
+        word_timings: Optional[list[dict[str, Any]]] = None,
+        audio_analysis: Optional[dict[str, Any]] = None,
     ) -> dict[str, Any]:
         """Perform communication style profiling on delivery characteristics without script accuracy comparison."""
         user_transcript_clean = user_transcript.strip() if user_transcript else ""
+
+        # Physical audio signal analysis (worker thread if not already precomputed)
+        if audio_analysis is None and audio_bytes and len(audio_bytes) > 100:
+            audio_analysis = await asyncio.to_thread(analyze_audio_signal, audio_bytes)
+        elif audio_analysis is None:
+            audio_analysis = analyze_audio_signal(audio_bytes)
+
+        if audio_analysis.get("has_audio") and audio_analysis.get("duration_sec", 0.0) > 0 and duration_seconds <= 0:
+            duration_seconds = audio_analysis["duration_sec"]
+        speech_onset_sec = audio_analysis.get("speech_onset_sec")
 
         # Detect filler words
         filler_patterns = [
@@ -896,11 +1147,25 @@ Respond ONLY with valid JSON with keys "question_text" and "teleprompt_text":
 
         # Deterministic Style Measurements
         wpm, pace_score = self.compute_speaking_pace(word_count, duration_seconds)
-        timing_score = self.compute_response_timing()
+        timing_score = self.compute_response_timing(
+            latency_ms=response_latency_ms,
+            speech_onset_sec=speech_onset_sec,
+            word_timings=word_timings,
+        )
         avg_sentence_len, sentence_score = self.compute_sentence_handling(user_transcript_clean, word_count)
         ttr, vocab_score = self.compute_vocabulary_complexity(user_transcript_clean, word_count)
-        pause_score = self.compute_pause_cadence(user_transcript_clean, duration_seconds, word_count, detected_fillers)
-        energy_score = self.compute_energy_dynamics(audio_bytes, user_transcript_clean)
+        pause_score = self.compute_pause_cadence(
+            user_transcript_clean,
+            duration_seconds,
+            word_count,
+            detected_fillers,
+            word_timings=word_timings,
+        )
+        energy_score = self.compute_energy_dynamics(
+            audio_bytes=audio_bytes,
+            transcript=user_transcript_clean,
+            audio_analysis=audio_analysis,
+        )
 
         # Apply configurable, versioned weight table
         w = self.profiling_weights
@@ -1244,6 +1509,7 @@ def get_calibration_router(service: Optional[CalibrationService] = None) -> APIR
         round_number: int = Form(...),
         duration_seconds: float = Form(0.0),
         transcript_override: Optional[str] = Form(None),
+        response_latency_ms: Optional[float] = Form(None),
         audio_file: Optional[UploadFile] = File(None),
     ):
         audio_bytes = None
@@ -1259,6 +1525,7 @@ def get_calibration_router(service: Optional[CalibrationService] = None) -> APIR
             mime_type=mime_type,
             transcript_override=transcript_override,
             duration_seconds=duration_seconds,
+            response_latency_ms=response_latency_ms,
         )
 
         session = service.get_session(session_id)

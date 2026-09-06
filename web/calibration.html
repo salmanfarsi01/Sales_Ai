@@ -1449,6 +1449,8 @@
     let currentRoundData = null;
     let sessionStartTime = null;
     let timerInterval = null;
+    let scenarioAudioEndTime = 0;
+    let responseLatencyMs = null;
 
     // MediaRecorder & Web Audio
     let mediaRecorder = null;
@@ -1511,6 +1513,8 @@
       currentRoundData = roundData;
       currentRoundNumber = roundData.round_number;
       isTelepromptRevealed = false;
+      scenarioAudioEndTime = 0;
+      responseLatencyMs = null;
 
       document.getElementById("studioRoundBadge").textContent = `Round ${roundData.round_number} of 8`;
       document.getElementById("studioStageName").textContent = roundData.stage || "Discovery";
@@ -1591,6 +1595,7 @@
       }
 
       audioEl.onended = () => {
+        scenarioAudioEndTime = Date.now();
         btn.textContent = "▶";
         document.getElementById("audioStatusLabel").textContent = "Question complete! Repeat the teleprompt.";
         if (wave) wave.classList.remove("active");
@@ -1613,6 +1618,7 @@
       }
 
       setTimeout(() => {
+        scenarioAudioEndTime = Date.now();
         btn.textContent = "▶";
         document.getElementById("audioStatusLabel").textContent = "Question complete! Repeat the teleprompt.";
         if (wave) wave.classList.remove("active");
@@ -1683,6 +1689,11 @@
         mediaRecorder.start();
         isRecording = true;
         recordStartTime = Date.now();
+        if (scenarioAudioEndTime > 0) {
+          responseLatencyMs = Math.max(0, recordStartTime - scenarioAudioEndTime);
+        } else {
+          responseLatencyMs = 600;
+        }
 
         document.getElementById("btnMicRecord").classList.add("recording");
         document.getElementById("micIcon").textContent = "⏹";
@@ -1716,6 +1727,12 @@
 
     function simulateMockRecording() {
       isRecording = true;
+      recordStartTime = Date.now();
+      if (scenarioAudioEndTime > 0) {
+        responseLatencyMs = Math.max(0, recordStartTime - scenarioAudioEndTime);
+      } else {
+        responseLatencyMs = 600;
+      }
       document.getElementById("btnMicRecord").classList.add("recording");
       document.getElementById("micIcon").textContent = "⏹";
       document.getElementById("micStatusHint").textContent = "Simulating voice input...";
@@ -1734,6 +1751,7 @@
       stopRecording();
       audioBlob = null;
       audioChunks = [];
+      responseLatencyMs = null;
       document.getElementById("recordingTimer").textContent = "00:00s";
       document.getElementById("btnSubmitEval").style.display = "none";
       document.getElementById("btnReRecord").style.display = "none";
@@ -1749,6 +1767,10 @@
 
       const durationSec = Math.max((Date.now() - recordStartTime) / 1000, 4.0);
       formData.append("duration_seconds", durationSec.toFixed(2));
+
+      if (responseLatencyMs !== null) {
+        formData.append("response_latency_ms", responseLatencyMs.toFixed(0));
+      }
 
       if (audioBlob) {
         formData.append("audio_file", audioBlob, `round_${currentRoundNumber}.webm`);
