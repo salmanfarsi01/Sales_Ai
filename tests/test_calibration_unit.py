@@ -290,3 +290,76 @@ def test_response_timing_sanity_bounds():
     # Background tab sleep (> 15 seconds) -> sanitized to fallback
     tab_sleep_score = service.compute_response_timing(latency_ms=30000.0)
     assert tab_sleep_score == 78
+
+
+def test_static_content_bank_structure():
+    """Verify both tracks contain exactly 7 rounds, 4 variants (A-D), and final statements."""
+    from copilot.calibration_content import CALIBRATION_TRACKS
+    
+    assert "seller" in CALIBRATION_TRACKS
+    assert "internal_rep" in CALIBRATION_TRACKS
+
+    for track_key, track_data in CALIBRATION_TRACKS.items():
+        assert len(track_data["rounds"]) == 7, f"Track {track_key} must have 7 rounds"
+        assert track_data["final_statement"].strip(), f"Track {track_key} missing final statement"
+        assert track_data["voice_id"], f"Track {track_key} missing voice_id"
+
+        for idx, r in enumerate(track_data["rounds"], 1):
+            assert r["round_number"] == idx
+            assert r["title"].strip()
+            assert r["seller_line"].strip()
+            variants = r["response_variants"]
+            assert set(variants.keys()) == {"A", "B", "C", "D"}
+            for v_key, v_text in variants.items():
+                assert len(v_text.strip()) > 10, f"Round {idx} variant {v_key} too short"
+
+
+@pytest.mark.asyncio
+async def test_variant_secrecy_and_round_generation():
+    """Verify generate_round_voice_on_demand returns only the chosen variant without leaking the others."""
+    from copilot.calibration_content import CALIBRATION_TRACKS
+
+    service = CalibrationService()
+    session = await service.create_calibration_session(track="seller")
+    s_id = session["session_id"]
+
+    round_info = await service.generate_round_voice_on_demand(s_id, 1)
+
+    # Must contain only teleprompt_text, NOT the whole response_variants map
+    assert "response_variants" not in round_info
+    assert round_info["selected_variant"] in ["A", "B", "C", "D"]
+    
+    # Selected text must match the bank's entry for the chosen variant
+    expected_text = CALIBRATION_TRACKS["seller"]["rounds"][0]["response_variants"][round_info["selected_variant"]]
+    assert round_info["teleprompt_text"] == expected_text
+
+
+@pytest.mark.asyncio
+async def test_round_7_completion_triggers_payoff():
+    """Verify completing round 7 transitions session to completed, synthesizes final statement payoff, and does not exceed 7."""
+    service = CalibrationService()
+    session = await service.create_calibration_session(track="internal_rep")
+    s_id = session["session_id"]
+
+    # Play rounds 1 through 7
+    for r in range(1, 8):
+        await service.generate_round_voice_on_demand(s_id, r)
+        res = await service.evaluate_round(
+            session_id=s_id,
+            round_num=r,
+            transcript_override=session["rounds"][r]["teleprompt_text"],
+            duration_seconds=3.0,
+        )
+        if r < 7:
+            assert res["completed"] is True
+            assert session["status"] == "in_progress"
+            assert session["current_round"] == r + 1
+        else:
+            assert res["completed"] is True
+            assert session["status"] == "completed"
+            assert session["current_round"] == 7
+            assert session["final_audio_url"] is not None
+            assert session["summary_report"] is not None
+            assert session["summary_report"]["rounds_completed"] == 7
+            assert session["summary_report"]["track"] == "internal_rep"
+

@@ -9,19 +9,23 @@ from copilot.calibration import CalibrationService, create_standalone_calibratio
 async def test_calibration_session_lifecycle():
     service = CalibrationService()
     
-    # 1. Create Dynamic 8-Round Session with Groq
-    session = await service.create_dynamic_session(user_id="test_sales_rep", industry="B2B Enterprise AI")
+    # 1. Create 7-Round Static Session (default seller track)
+    session = await service.create_calibration_session(user_id="test_sales_rep", track="seller")
     session_id = session["session_id"]
     assert session_id.startswith("calib_")
     assert session["current_round"] == 1
     assert session["status"] == "in_progress"
-    assert session["total_rounds"] == 8
+    assert session["total_rounds"] == 7
+    assert session["track"] == "seller"
+    assert "Expired Listing Seller" in session["track_name"]
+    assert session["final_statement"] is not None
 
-    # 2. Generate on-demand Round 1 ElevenLabs Voice
+    # 2. Generate on-demand Round 1 Voice from static content bank
     round_1 = await service.generate_round_voice_on_demand(session_id, 1)
     assert round_1["round_number"] == 1
     assert "question_text" in round_1
     assert "teleprompt_text" in round_1
+    assert round_1["selected_variant"] in ["A", "B", "C", "D"]
     assert round_1["audio_id"] is not None
     assert round_1["audio_url"] == f"/api/calibration/audio/{round_1['audio_id']}"
 
@@ -46,8 +50,8 @@ async def test_calibration_session_lifecycle():
     assert 0 <= breakdown["pause_filters"] <= 100
     assert 0 <= breakdown["energy_inflection"] <= 100
 
-    # 4. Progress through remaining rounds (2 to 8)
-    for r in range(2, 9):
+    # 4. Progress through remaining rounds (2 to 7)
+    for r in range(2, 8):
         await service.generate_round_voice_on_demand(session_id, r)
         r_eval = await service.evaluate_round(
             session_id=session_id,
@@ -57,16 +61,21 @@ async def test_calibration_session_lifecycle():
         )
         assert r_eval["completed"] is True
 
-    # 5. Verify final summary report
+    # 5. Verify final summary report & audio payoff
     session_status = service.get_session(session_id)
     assert session_status["status"] == "completed"
+    assert session_status["final_statement"] is not None
+    assert session_status["final_audio_url"] is not None
     
     report = session_status["summary_report"]
     assert report is not None
-    assert report["rounds_completed"] == 8
-    assert report["total_rounds"] == 8
+    assert report["rounds_completed"] == 7
+    assert report["total_rounds"] == 7
+    assert report["track"] == "seller"
+    assert report["final_statement"] == session_status["final_statement"]
+    assert report["final_audio_url"] == session_status["final_audio_url"]
     assert 0 <= report["overall_score"] <= 100
-    assert len(report["round_performance"]) == 8
+    assert len(report["round_performance"]) == 7
     assert "word_choice" in report["score_breakdown"]
     assert "pacing" in report["score_breakdown"]
     assert "sentiment" in report["score_breakdown"]
@@ -75,6 +84,19 @@ async def test_calibration_session_lifecycle():
     assert "energy_inflection" in report["score_breakdown"]
     assert len(report["what_this_means"]) == 4
     assert len(report["what_is_next"]) == 3
+
+
+@pytest.mark.asyncio
+async def test_internal_rep_track_session():
+    service = CalibrationService()
+    session = await service.create_calibration_session(user_id="top_rep_1", track="internal_rep")
+    assert session["track"] == "internal_rep"
+    assert "Top Producer" in session["track_name"]
+    assert session["total_rounds"] == 7
+    
+    round_1 = await service.generate_round_voice_on_demand(session["session_id"], 1)
+    assert "top agents" in round_1["seller_line"].lower() or "honest" in round_1["seller_line"].lower()
+    assert round_1["selected_variant"] in ["A", "B", "C", "D"]
 
 
 def test_standalone_app_initialization():

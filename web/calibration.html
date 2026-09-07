@@ -439,6 +439,33 @@
       margin-top: 2px;
     }
 
+    /* Calibration Track Selector */
+    .btn-track {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      padding: 10px 18px;
+      border-radius: 12px;
+      font-weight: 700;
+      font-size: 0.88rem;
+      cursor: pointer;
+      border: 1.5px solid var(--slate-200);
+      background: var(--white);
+      color: var(--slate-700);
+      transition: all 0.2s ease;
+    }
+    .btn-track:hover {
+      border-color: var(--primary);
+      color: var(--primary-dark);
+      background: var(--primary-light);
+    }
+    .btn-track.active {
+      border-color: var(--primary);
+      background: var(--primary);
+      color: var(--white);
+      box-shadow: 0 4px 12px rgba(13, 148, 136, 0.25);
+    }
+
     /* Bottom Grid: Score Breakdown & What's Next */
     .results-grid-bottom {
       display: grid;
@@ -981,7 +1008,9 @@
   <!-- Top Navigation -->
   <header class="header-nav">
     <a href="#" class="brand">
-      <div class="brand-icon">🎙️</div>
+      <div class="brand-icon">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z"></path><path d="M19 10v2a7 7 0 0 1-14 0v-2"></path><line x1="12" y1="19" x2="12" y2="23"></line><line x1="8" y1="23" x2="16" y2="23"></line></svg>
+      </div>
       <span>Sales AI Studio</span>
     </a>
     <div style="display: flex; align-items: center; gap: 16px;">
@@ -1001,23 +1030,41 @@
       <div class="page-title-row">
         <div>
           <h1 class="page-title">Voice Calibration Studio</h1>
-          <p class="subtitle">Complete 8 quick business rounds. Listen to the prospect voice, then read the AI
-            teleprompt aloud.</p>
+          <p class="subtitle">Complete 7 quick conversational rounds. Listen to the prospect voice, then read the assigned teleprompt response aloud.</p>
         </div>
         <button id="btnStartSession" class="btn-primary" onclick="initiateCalibration()">
-          <span> Start 8-Round Calibration</span>
+          <span>Restart 7-Round Calibration</span>
         </button>
+      </div>
+
+      <!-- Track Switcher Row -->
+      <div class="card track-selection-card" style="margin-bottom: 20px; padding: 18px 24px; background: #ffffff; border: 1px solid var(--slate-200); border-radius: var(--card-radius);">
+        <div style="display: flex; flex-wrap: wrap; justify-content: space-between; align-items: center; gap: 16px;">
+          <div>
+            <div style="font-size: 0.78rem; text-transform: uppercase; letter-spacing: 0.08em; font-weight: 800; color: var(--primary);">Active Calibration Track</div>
+            <div style="font-size: 1.15rem; font-weight: 800; color: var(--slate-900);" id="activeTrackTitle">Expired Listing Seller (Frustrated Homeowner)</div>
+            <div style="font-size: 0.85rem; color: var(--slate-500);" id="activeTrackDesc">7-round negotiation arc navigating interruption barriers, agent loyalty, price defensiveness, and credibility.</div>
+          </div>
+          <div style="display: flex; gap: 10px;">
+            <button id="btnTrackSeller" class="btn-track active" onclick="switchTrack('seller')">
+              <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m3 9 9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"></path><polyline points="9 22 9 12 15 12 15 22"></polyline></svg>
+              <span>Seller Calibration</span>
+            </button>
+            <button id="btnTrackRep" class="btn-track" onclick="switchTrack('internal_rep')">
+              <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="20" height="14" x="2" y="7" rx="2" ry="2"></rect><path d="M16 21V5a2 2 0 0 0-2-2h-4a2 2 0 0 0-2 2v16"></path></svg>
+              <span>Internal Rep Calibration</span>
+            </button>
+          </div>
+        </div>
       </div>
 
       <!-- Live Round Progress Bar -->
       <div class="card round-progress-card">
         <div style="display: flex; align-items: center; gap: 14px;">
-          <span class="round-pill" id="studioRoundBadge">Round 1 of 8</span>
+          <span class="round-pill" id="studioRoundBadge">Round 1 of 7</span>
           <div>
-            <h3 id="studioStageName" style="font-size: 1.1rem; font-weight: 700; color: var(--slate-900);">Discovery &
-              Onboarding</h3>
-            <p id="studioScenarioType" style="font-size: 0.82rem; color: var(--slate-500);">Scenario: Implementation
-              Timeline & Value</p>
+            <h3 id="studioStageName" style="font-size: 1.1rem; font-weight: 700; color: var(--slate-900);">The Interruption Barrier</h3>
+            <p id="studioScenarioType" style="font-size: 0.82rem; color: var(--slate-500);">Expired Listing Seller • Frustrated Homeowner</p>
           </div>
         </div>
         <div style="text-align: right;">
@@ -1033,7 +1080,6 @@
         <!-- Left: Prospect Question & Voice -->
         <div class="card">
           <div class="card-header-icon">
-            <!-- <div class="icon-badge">🗣️</div> -->
             <div>
               <h3>AI Prospect Question</h3>
               <p style="font-size: 0.8rem; color: var(--slate-400);">Generated on-demand with ElevenLabs Voice</p>
@@ -1066,7 +1112,7 @@
               <p style="font-size: 0.8rem; color: var(--slate-400);">Speak with clear pacing, confidence, and natural inflection</p>
             </div>
             <div id="telepromptStatusBadge" class="teleprompt-status-badge badge-waiting">
-              <span>🎧 Listen to AI Voice</span>
+              <span>Listen to AI Voice</span>
             </div>
           </div>
 
@@ -1120,7 +1166,9 @@
         <!-- Mic Button -->
         <div style="display: flex; flex-direction: column; align-items: center; gap: 8px;">
           <button id="btnMicRecord" class="mic-button" onclick="toggleRecording()">
-            <span id="micIcon">🎙️</span>
+            <span id="micIcon">
+              <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z"></path><path d="M19 10v2a7 7 0 0 1-14 0v-2"></path><line x1="12" y1="19" x2="12" y2="23"></line><line x1="8" y1="23" x2="16" y2="23"></line></svg>
+            </span>
           </button>
           <div id="recordingTimer" class="timer-badge">00:00s</div>
           <p id="micStatusHint" style="font-size: 0.85rem; color: var(--slate-500); font-weight: 600;">Click microphone
@@ -1179,15 +1227,13 @@
             <div class="stat-list">
               <div class="stat-item">
                 <div class="stat-left">
-                  <!-- <span class="stat-icon">🎯</span> -->
-                  <span id="resRoundsCompleted">8</span>
+                  <span id="resRoundsCompleted">7</span>
                 </div>
                 <div class="stat-right">Rounds profiled</div>
               </div>
 
               <div class="stat-item">
                 <div class="stat-left">
-                  <!-- <span class="stat-icon">⏱️</span> -->
                   <span id="resTotalTime">8m 24s</span>
                 </div>
                 <div class="stat-right">Total time</div>
@@ -1195,7 +1241,6 @@
 
               <div class="stat-item">
                 <div class="stat-left">
-                  <!-- <span class="stat-icon">📅</span> -->
                   <span id="resCompletedOn">May 16, 2025</span>
                 </div>
                 <div class="stat-right">Completed on</div>
@@ -1208,7 +1253,6 @@
         <div class="card info-card">
           <div>
             <div class="card-header-icon">
-              <!-- <div class="icon-badge">✨</div> -->
               <h3>What this means</h3>
             </div>
 
@@ -1233,7 +1277,7 @@
           </div>
 
           <button class="btn-outline" onclick="restartCalibration()">
-            <span>🔄 Recalibrate</span>
+            <span>Recalibrate</span>
           </button>
         </div>
 
@@ -1371,7 +1415,6 @@
         <div class="card info-card">
           <div>
             <div class="card-header-icon">
-              <!-- <div class="icon-badge">🚀</div> -->
               <h3>What's next?</h3>
             </div>
 
@@ -1393,7 +1436,7 @@
               <span>Go to Dashboard</span>
             </a>
             <button class="btn-outline" onclick="downloadJSONReport()" style="text-align: center; justify-content: center; width: 100%; border-color: #99f6e4; background: #f0fdfa; color: #0d9488;">
-              <span>📥 Download JSON Report</span>
+              <span>Download JSON Report</span>
             </button>
           </div>
         </div>
@@ -1411,7 +1454,6 @@
   <div id="evalModal" class="modal-overlay">
     <div class="modal-content">
       <div style="text-align: center; margin-bottom: 20px;">
-        <!-- <div style="font-size: 2.2rem; margin-bottom: 6px;">🎉</div> -->
         <h2 style="font-size: 1.4rem; font-weight: 800; color: var(--slate-900);" id="modalRoundTitle">Round 1 Profile</h2>
         <div style="font-size: 2.4rem; font-weight: 800; color: var(--primary); margin: 8px 0;" id="modalScoreVal">88</div>
         <p style="color: var(--slate-600); font-size: 0.9rem;" id="modalFeedbackText">Great pace and confident delivery.</p>
@@ -1425,7 +1467,26 @@
           <li>Structured sentence cadence</li>
         </ul>
         <div id="modalPromptingNote" style="margin-top: 12px; font-size: 0.82rem; color: #0f766e; background: #ccfbf1; padding: 10px 14px; border-radius: 8px; font-weight: 600; line-height: 1.4;">
-          🎯 Configures live teleprompter delivery.
+          Configures live teleprompter delivery.
+        </div>
+      </div>
+
+      <!-- Post-Round 7 Closing Statement Payoff (shown upon Round 7 completion) -->
+      <div id="modalFinalPayoff" style="display: none; margin-bottom: 20px; padding: 18px; background: #f0fdf4; border: 1.5px solid #86efac; border-radius: 14px; text-align: left;">
+        <div style="display: flex; align-items: center; gap: 12px; margin-bottom: 12px;">
+          <div style="width: 36px; height: 36px; border-radius: 50%; background: #22c55e; color: white; display: flex; align-items: center; justify-content: center; font-size: 1.2rem; font-weight: 800;">✓</div>
+          <div>
+            <div style="font-weight: 800; font-size: 1rem; color: #15803d;" id="modalPayoffHeading">Conversation Successfully Concluded!</div>
+            <div style="font-size: 0.82rem; color: #166534;" id="modalPayoffSub">Prospect Decision & Closure Payoff:</div>
+          </div>
+        </div>
+        <div style="background: white; border-radius: 10px; padding: 14px; font-size: 0.9rem; font-style: italic; color: #1e293b; margin-bottom: 14px; border-left: 4px solid #22c55e; line-height: 1.5;" id="modalFinalStatementText">
+          "You know what, that actually makes sense..."
+        </div>
+        <div style="display: flex; align-items: center; gap: 14px;">
+          <button id="btnPlayFinalAudio" class="btn-circle" style="width: 42px; height: 42px; min-width: 42px; background: #15803d; color: white;" onclick="playFinalStatementAudio()">▶</button>
+          <div style="font-size: 0.84rem; color: #166534; font-weight: 600;" id="finalAudioStatusText">Click play to listen to prospect closing acceptance</div>
+          <audio id="finalAudioElement" style="display: none;"></audio>
         </div>
       </div>
 
@@ -1451,6 +1512,23 @@
     let timerInterval = null;
     let scenarioAudioEndTime = 0;
     let responseLatencyMs = null;
+    let currentTrack = "seller";
+    let finalAudioUrl = null;
+
+    const TRACK_METADATA = {
+      "seller": {
+        "title": "Expired Listing Seller (Frustrated Homeowner)",
+        "desc": "7-round negotiation arc navigating interruption barriers, agent loyalty, price defensiveness, and credibility.",
+        "payoffHeading": "Meeting Accepted — Opportunity Secured",
+        "payoffSub": "The frustrated homeowner agreed to meet and let you demonstrate your strategy."
+      },
+      "internal_rep": {
+        "title": "Top Producer Onboarding (Skeptical Top Producer)",
+        "desc": "7-round objection arc addressing coaching skepticism, existing infrastructure, scriptedness fears, and ROI.",
+        "payoffHeading": "Subscription Secured — Top Producer Onboarded",
+        "payoffSub": "The top-producing agent acknowledged real conversation leverage and agreed to subscribe."
+      }
+    };
 
     // MediaRecorder & Web Audio
     let mediaRecorder = null;
@@ -1469,11 +1547,25 @@
       initiateCalibration();
     });
 
+    function switchTrack(track) {
+      if (currentTrack === track && currentSessionId) return;
+      currentTrack = track;
+      document.getElementById("btnTrackSeller").classList.toggle("active", track === "seller");
+      document.getElementById("btnTrackRep").classList.toggle("active", track === "internal_rep");
+      const meta = TRACK_METADATA[track] || TRACK_METADATA["seller"];
+      document.getElementById("activeTrackTitle").textContent = meta.title;
+      document.getElementById("activeTrackDesc").textContent = meta.desc;
+      initiateCalibration();
+    }
+
     // 1. Start or Reset Calibration Session
     async function initiateCalibration() {
       try {
         setNavStatus("Initializing session...");
-        const res = await fetch("/api/calibration/start", { method: "POST" });
+        const form = new FormData();
+        form.append("track", currentTrack);
+
+        const res = await fetch("/api/calibration/start", { method: "POST", body: form });
         const data = await res.json();
 
         currentSessionId = data.session.session_id;
@@ -1484,7 +1576,7 @@
         startSessionTimer();
 
         renderStudioRound(currentRoundData);
-        setNavStatus(`Calibrating • Round 1 of 8`);
+        setNavStatus(`Calibrating • Round 1 of 7 (${data.session.track_name || currentTrack})`);
       } catch (err) {
         console.error("Failed to start session:", err);
         setNavStatus("Offline Mode Active");
@@ -1516,14 +1608,14 @@
       scenarioAudioEndTime = 0;
       responseLatencyMs = null;
 
-      document.getElementById("studioRoundBadge").textContent = `Round ${roundData.round_number} of 8`;
-      document.getElementById("studioStageName").textContent = roundData.stage || "Discovery";
+      document.getElementById("studioRoundBadge").textContent = `Round ${roundData.round_number} of 7`;
+      document.getElementById("studioStageName").textContent = roundData.title || roundData.stage || "Conversation Round";
 
-      const scenarioText = roundData.scenario_type || 'B2B Enterprise Scenario';
-      const personaInfo = roundData.persona_name ? `${roundData.persona_name} (${roundData.persona_title})` : 'Prospect Executive';
-      document.getElementById("studioScenarioType").textContent = `${scenarioText} • ${personaInfo}`;
+      const scenarioText = roundData.scenario_type || 'PitchProX Calibration';
+      const personaInfo = roundData.persona_name ? `${roundData.persona_name} (${roundData.persona_title})` : 'Prospect';
+      document.getElementById("studioScenarioType").textContent = `${scenarioText}`;
 
-      document.getElementById("studioQuestionText").textContent = `"${roundData.question_text}"`;
+      document.getElementById("studioQuestionText").textContent = `"${roundData.seller_line || roundData.question_text}"`;
       document.getElementById("studioTelepromptText").textContent = `"${roundData.teleprompt_text}"`;
 
       // Lock & hide teleprompt script initially until AI voice ends
@@ -1532,28 +1624,16 @@
       
       const badge = document.getElementById("telepromptStatusBadge");
       badge.className = "teleprompt-status-badge badge-waiting";
-      badge.innerHTML = "<span>🎧 Listen to AI Voice</span>";
+      badge.innerHTML = "<span>Listen to AI Voice</span>";
 
       document.getElementById("telepromptPlaceholderTitle").textContent = "Listen to the Prospect First";
       document.getElementById("telepromptPlaceholderSubtitle").innerHTML = "Click <strong>▶ Play</strong> on the left. The live teleprompt response will dynamically appear here the instant the prospect finishes speaking.";
       const wave = document.getElementById("telepromptWaveAnim");
       if (wave) wave.classList.remove("active");
 
-      const voicePersonaMap = {
-        "21m00Tcm4TlvDq8ikWAM": "Rachel (Calm & Professional)",
-        "AZnzlk1XvdvUeBnXmlld": "Domi (Energetic & Direct)",
-        "EXAVITQu4vr4xnSDxMaL": "Bella (Warm & Consultative)",
-        "ErXwobaYiN019PkySvjV": "Antoni (Clear & Confident)",
-        "MF3mGyEYCl7XYWbV9V6O": "Elli (Pleasant Enterprise Lead)",
-        "TxGEqnHWrfWFTfGW9XjX": "Josh (Senior Decision Maker)",
-        "VR6AewLTigWG4xSOukaG": "Arnold (Analytical Executive)",
-        "pNInz6obpgDQGcFmaJgB": "Adam (Crisp Tech Founder)"
-      };
-
-      const voiceDisplay = roundData.voice_name ? `ElevenLabs: ${roundData.voice_name}` : (voicePersonaMap[roundData.voice_id] || "ElevenLabs AI Voice");
-      document.getElementById("voicePersonaLabel").textContent = `${voiceDisplay} • Speaking as ${roundData.persona_name || 'Prospect'}`;
+      document.getElementById("voicePersonaLabel").textContent = `${roundData.persona_name || 'Prospect'} (${roundData.persona_title || 'Lead'}) • Voice: ${roundData.voice_name || 'Audio'}`;
       document.getElementById("audioStatusLabel").textContent = "Click play to listen to prospect voice";
-      document.getElementById("micStatusHint").textContent = "🎧 Listen to prospect voice before recording";
+      document.getElementById("micStatusHint").textContent = "Listen to prospect voice before recording";
 
       // Setup audio element
       const audioEl = document.getElementById("scenarioAudioElement");
@@ -1578,7 +1658,7 @@
 
           if (!isTelepromptRevealed) {
             badge.className = "teleprompt-status-badge badge-listening";
-            badge.innerHTML = "<span>🔊 Prospect Speaking...</span>";
+            badge.innerHTML = "<span>Prospect Speaking...</span>";
             document.getElementById("telepromptPlaceholderTitle").textContent = "Prospect is speaking...";
             document.getElementById("telepromptPlaceholderSubtitle").textContent = "Listen closely to the question. The live teleprompt script will appear in real-time the moment they finish.";
             if (wave) wave.classList.add("active");
@@ -1608,11 +1688,11 @@
       const badge = document.getElementById("telepromptStatusBadge");
       const wave = document.getElementById("telepromptWaveAnim");
 
-      btn.textContent = "🔊";
+      btn.textContent = "▶";
       document.getElementById("audioStatusLabel").textContent = "Playing prospect voice...";
       if (!isTelepromptRevealed) {
         badge.className = "teleprompt-status-badge badge-listening";
-        badge.innerHTML = "<span>🔊 Prospect Speaking...</span>";
+        badge.innerHTML = "<span>Prospect Speaking...</span>";
         document.getElementById("telepromptPlaceholderTitle").textContent = "Prospect is speaking...";
         if (wave) wave.classList.add("active");
       }
@@ -1646,7 +1726,7 @@
       badge.innerHTML = "<span class='live-dot-pulse'></span><span>LIVE TELEPROMPT</span>";
 
       // Update recording hint
-      document.getElementById("micStatusHint").textContent = "🎯 Teleprompt Live! Click microphone to record your repetition.";
+      document.getElementById("micStatusHint").textContent = "Teleprompt Live! Click microphone to record your repetition.";
 
       // Pulse mic button
       const micBtn = document.getElementById("btnMicRecord");
@@ -1655,6 +1735,9 @@
         setTimeout(() => { micBtn.style.transform = "scale(1)"; }, 350);
       }
     }
+
+    const SVG_MIC_ICON = '<svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z"></path><path d="M19 10v2a7 7 0 0 1-14 0v-2"></path><line x1="12" y1="19" x2="12" y2="23"></line><line x1="8" y1="23" x2="16" y2="23"></line></svg>';
+    const SVG_STOP_ICON = '<svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor"><rect x="4" y="4" width="16" height="16" rx="2"></rect></svg>';
 
     // 4. Microphone Recording & Web Audio
     async function toggleRecording() {
@@ -1696,7 +1779,7 @@
         }
 
         document.getElementById("btnMicRecord").classList.add("recording");
-        document.getElementById("micIcon").textContent = "⏹";
+        document.getElementById("micIcon").innerHTML = SVG_STOP_ICON;
         document.getElementById("micStatusHint").textContent = "Recording... Read teleprompt aloud!";
 
         // Start live visualizer
@@ -1722,7 +1805,7 @@
       isRecording = false;
       clearInterval(recordTimerInterval);
       document.getElementById("btnMicRecord").classList.remove("recording");
-      document.getElementById("micIcon").textContent = "🎙️";
+      document.getElementById("micIcon").innerHTML = SVG_MIC_ICON;
     }
 
     function simulateMockRecording() {
@@ -1734,13 +1817,13 @@
         responseLatencyMs = 600;
       }
       document.getElementById("btnMicRecord").classList.add("recording");
-      document.getElementById("micIcon").textContent = "⏹";
+      document.getElementById("micIcon").innerHTML = SVG_STOP_ICON;
       document.getElementById("micStatusHint").textContent = "Simulating voice input...";
 
       setTimeout(() => {
         isRecording = false;
         document.getElementById("btnMicRecord").classList.remove("recording");
-        document.getElementById("micIcon").textContent = "🎙️";
+        document.getElementById("micIcon").innerHTML = SVG_MIC_ICON;
         document.getElementById("btnSubmitEval").style.display = "inline-flex";
         document.getElementById("btnReRecord").style.display = "inline-flex";
         document.getElementById("micStatusHint").textContent = "Simulated recording ready for evaluation!";
@@ -1812,24 +1895,51 @@
       const noteEl = document.getElementById("modalPromptingNote");
       if (noteEl) {
         if (roundEval.is_excluded) {
-          noteEl.textContent = "ℹ️ Low speech signal detected in this round. It is excluded from your final profile calculation.";
+          noteEl.textContent = "Low speech signal detected in this round. It is excluded from your final profile calculation.";
           noteEl.style.background = "#fef3c7";
           noteEl.style.color = "#92400e";
         } else {
-          noteEl.textContent = `🎯 ${roundEval.prompting_adaptation || "Configures live teleprompter delivery."}`;
+          noteEl.textContent = roundEval.prompting_adaptation || "Configures live teleprompter delivery.";
           noteEl.style.background = "#ccfbf1";
           noteEl.style.color = "#0f766e";
         }
       }
 
       if (data.is_session_completed) {
-        document.getElementById("modalBtnNext").textContent = "🏆 View Final Communication Profile";
+        // Stop recording permanently for this session
+        stopRecording();
+        document.getElementById("btnMicRecord").style.pointerEvents = "none";
+        document.getElementById("btnMicRecord").style.opacity = "0.5";
+        document.getElementById("micStatusHint").textContent = "7-Round Calibration Concluded! Review closure statement above.";
+
+        // Show Post-Round 7 Closing Statement Payoff
+        const payoffEl = document.getElementById("modalFinalPayoff");
+        if (payoffEl) {
+          payoffEl.style.display = "block";
+          const meta = TRACK_METADATA[currentTrack] || TRACK_METADATA["seller"];
+          document.getElementById("modalPayoffHeading").textContent = meta.payoffHeading;
+          document.getElementById("modalPayoffSub").textContent = meta.payoffSub;
+
+          const fText = data.final_statement || (data.summary_report && data.summary_report.final_statement) || "";
+          document.getElementById("modalFinalStatementText").textContent = `"${fText}"`;
+
+          finalAudioUrl = data.final_audio_url || (data.summary_report && data.summary_report.final_audio_url);
+          const finalAudioEl = document.getElementById("finalAudioElement");
+          if (finalAudioUrl && finalAudioEl) {
+            finalAudioEl.src = finalAudioUrl;
+          }
+        }
+
+        document.getElementById("modalBtnNext").textContent = "View Final Communication Profile";
         document.getElementById("modalBtnNext").onclick = () => {
           closeModal();
           showResultsDashboard(data.summary_report);
         };
       } else {
-        document.getElementById("modalBtnNext").textContent = `Continue to Round ${currentRoundNumber + 1} →`;
+        const payoffEl = document.getElementById("modalFinalPayoff");
+        if (payoffEl) payoffEl.style.display = "none";
+
+        document.getElementById("modalBtnNext").textContent = `Continue to Round ${currentRoundNumber + 1} of 7 →`;
         document.getElementById("modalBtnNext").onclick = () => {
           closeModal();
           loadRound(currentRoundNumber + 1);
@@ -1839,16 +1949,43 @@
       openModal();
     }
 
+    function playFinalStatementAudio() {
+      const audioEl = document.getElementById("finalAudioElement");
+      const btn = document.getElementById("btnPlayFinalAudio");
+      const statusText = document.getElementById("finalAudioStatusText");
+      if (!audioEl || !audioEl.src) return;
+
+      if (audioEl.paused) {
+        audioEl.play().then(() => {
+          btn.textContent = "⏸";
+          statusText.textContent = "Playing prospect closing acceptance...";
+        }).catch(err => {
+          console.warn("Playback error:", err);
+          statusText.textContent = "Audio unavailable - read statement above.";
+        });
+        audioEl.onended = () => {
+          btn.textContent = "▶";
+          statusText.textContent = "Closing acceptance complete! Click below to view your profile.";
+        };
+      } else {
+        audioEl.pause();
+        btn.textContent = "▶";
+        statusText.textContent = "Paused";
+      }
+    }
+
     function openModal() {
       document.getElementById("evalModal").classList.add("active");
     }
 
     function closeModal() {
       document.getElementById("evalModal").classList.remove("active");
+      const finalAudioEl = document.getElementById("finalAudioElement");
+      if (finalAudioEl) finalAudioEl.pause();
     }
 
     async function loadRound(nextRoundNum) {
-      setNavStatus(`Generating Round ${nextRoundNum}...`);
+      setNavStatus(`Loading Round ${nextRoundNum}...`);
       const form = new FormData();
       form.append("session_id", currentSessionId);
       form.append("round_number", nextRoundNum);
@@ -1859,7 +1996,7 @@
       });
       const data = await res.json();
       renderStudioRound(data.round_data);
-      setNavStatus(`Calibrating • Round ${nextRoundNum} of 8`);
+      setNavStatus(`Calibrating • Round ${nextRoundNum} of 7`);
     }
 
     let lastSummaryReport = null;
@@ -1872,7 +2009,7 @@
       document.getElementById("resultsView").classList.remove("hidden");
       document.getElementById("resultsView").classList.add("results-active");
 
-      setNavStatus("Calibration Complete • Profile Ready");
+      setNavStatus(`Calibration Complete • ${report.track_name || 'Profile Ready'}`);
 
       // Gauge Score
       const score = report.overall_score || 78;
@@ -1888,16 +2025,16 @@
       const pLevel = report.prompting_level || { name: "Prompting Level: Balanced", badge: "Balanced" };
       const badgeEl = document.getElementById("resPromptingBadge");
       if (badgeEl) {
-        badgeEl.textContent = pLevel.name || "Prompting Level: Balanced";
+        badgeEl.textContent = `${pLevel.name} (${report.track_name || 'Calibrated'})`;
       }
 
-      document.getElementById("resHeading").textContent = "Profile calibrated";
+      document.getElementById("resHeading").textContent = `Profile calibrated • ${report.track_name || '7 Rounds'}`;
       document.getElementById("resStatusMsg").textContent = report.status_message || "Your communication profile is complete and ready for live call teleprompter steering.";
-      document.getElementById("resRoundsCompleted").textContent = `${report.rounds_profiled || report.rounds_completed || 8} of ${report.total_rounds || 8}`;
-      document.getElementById("resTotalTime").textContent = report.total_time_formatted || "8m 24s";
+      document.getElementById("resRoundsCompleted").textContent = `${report.rounds_profiled || report.rounds_completed || 7} of ${report.total_rounds || 7}`;
+      document.getElementById("resTotalTime").textContent = report.total_time_formatted || "5m 12s";
       document.getElementById("resCompletedOn").textContent = report.completed_on || "May 16, 2025";
 
-      // Render 8 Stepper Steps
+      // Render 7 Stepper Steps
       const stepperContainer = document.getElementById("roundStepperSteps");
       stepperContainer.innerHTML = "";
       const perfList = report.round_performance || [];
@@ -1906,10 +2043,11 @@
         const stepDiv = document.createElement("div");
         stepDiv.className = "step-node";
         const wpmText = p.wpm ? `${p.wpm} WPM` : (p.is_excluded ? "Excluded" : `${p.score || 75}`);
+        const varBadge = p.selected_variant ? ` [${p.selected_variant}]` : "";
         stepDiv.innerHTML = `
           <div class="step-circle">${p.is_excluded ? "•" : "✓"}</div>
-          <div class="step-label">Round ${p.round_number}</div>
-          <div class="step-score">${wpmText}</div>
+          <div class="step-label">R${p.round_number}: ${p.title ? (p.title.length > 18 ? p.title.substring(0, 16) + '...' : p.title) : ('Round ' + p.round_number)}</div>
+          <div class="step-score">${wpmText}${varBadge}</div>
         `;
         stepperContainer.appendChild(stepDiv);
       });

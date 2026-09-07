@@ -47,9 +47,11 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
+from copilot.calibration_content import CALIBRATION_TRACKS
+
 LOGGER = logging.getLogger("copilot.calibration")
 STATIC_DIR = Path(__file__).resolve().parent.parent / "web"
-AUDIO_CACHE_DIR = Path(__file__).resolve().parent.parent / "calibration_audio"
+AUDIO_CACHE_DIR = Path(__file__).resolve().parent.parent / "calibration_audio"    
 AUDIO_CACHE_DIR.mkdir(parents=True, exist_ok=True)
 
 
@@ -349,18 +351,22 @@ class RoundEvaluation(BaseModel):
     is_excluded: bool = False
     style_traits: list[str] = []
     prompting_adaptation: str = ""
+    selected_variant: Optional[str] = None
 
 
 class RoundData(BaseModel):
     round_number: int
-    stage: str
-    scenario_type: str
-    persona_name: str
-    persona_title: str
-    voice_id: str
-    voice_name: str
-    question_text: str
-    teleprompt_text: str
+    stage: str = ""
+    title: str = ""
+    scenario_type: str = ""
+    persona_name: str = ""
+    persona_title: str = ""
+    voice_id: str = ""
+    voice_name: str = ""
+    seller_line: str = ""
+    question_text: str = ""
+    teleprompt_text: str = ""
+    selected_variant: Optional[str] = None
     audio_id: Optional[str] = None
     audio_url: Optional[str] = None
     evaluation: Optional[RoundEvaluation] = None
@@ -371,16 +377,20 @@ class RoundData(BaseModel):
 class CalibrationSummaryReport(BaseModel):
     session_id: str
     overall_score: int
+    track: str = "seller"
+    track_name: str = "Expired Listing Seller"
     prompting_level: dict[str, Any] = Field(default_factory=dict)
     formula_version: str = CALIBRATION_FORMULA_VERSION
     formula_weights: dict[str, float] = Field(default_factory=dict)
     rounds_completed: int
-    rounds_profiled: int = 8
-    total_rounds: int = 8
+    rounds_profiled: int = 7
+    total_rounds: int = 7
     total_time_seconds: float
     total_time_formatted: str
     completed_on: str
     status_message: str
+    final_statement: Optional[str] = None
+    final_audio_url: Optional[str] = None
     round_performance: list[dict[str, Any]]
     score_breakdown: RoundScoreBreakdown
     what_this_means: list[str]
@@ -890,27 +900,48 @@ class CalibrationService:
 
         return {}
 
-    async def create_dynamic_session(self, user_id: str = "sales_rep_1", industry: Optional[str] = None) -> dict[str, Any]:
-        """Generate a completely dynamic 8-round calibration session plan."""
+    async def create_calibration_session(self, user_id: str = "sales_rep_1", track: str = "seller") -> dict[str, Any]:
+        """Generate a 7-round calibration session plan based on the selected static track."""
+        if track not in CALIBRATION_TRACKS:
+            track = "seller"
+        track_data = CALIBRATION_TRACKS[track]
         session_id = f"calib_{uuid.uuid4().hex[:12]}"
-        selected_industry = industry or random.choice(INDUSTRIES)
 
         session_data = {
             "session_id": session_id,
             "user_id": user_id,
-            "industry": selected_industry,
+            "track": track,
+            "track_name": track_data["track_name"],
+            "persona_name": track_data["persona_name"],
+            "persona_title": track_data["persona_title"],
+            "voice_id": track_data["voice_id"],
+            "voice_name": track_data["voice_name"],
+            "industry": track_data["track_name"],
             "created_at": datetime.now(timezone.utc).isoformat(),
             "start_time_monotonic": time.monotonic(),
             "end_time_monotonic": None,
             "current_round": 1,
-            "total_rounds": 8,
+            "total_rounds": 7,
             "status": "in_progress",
-            "rounds": {},  # Populated dynamically on-demand per round
+            "rounds": {},
+            "final_statement": track_data.get("final_statement"),
+            "final_audio_id": None,
+            "final_audio_url": None,
             "summary_report": None,
         }
         self.sessions[session_id] = session_data
-        LOGGER.info("Created dynamic 8-round calibration session: %s (Industry: %s)", session_id, selected_industry)
+        LOGGER.info("Created 7-round calibration session: %s (Track: %s - %s)", session_id, track, track_data["track_name"])
         return session_data
+
+    async def create_dynamic_session(
+        self,
+        user_id: str = "sales_rep_1",
+        industry: Optional[str] = None,
+        track: Optional[str] = None,
+    ) -> dict[str, Any]:
+        """Backward-compatible wrapper for create_calibration_session."""
+        resolved_track = track or ("internal_rep" if industry and "internal" in industry.lower() else "seller")
+        return await self.create_calibration_session(user_id=user_id, track=resolved_track)
 
     def get_session(self, session_id: str) -> dict[str, Any]:
         """Fetch session data or raise 404."""
@@ -920,69 +951,44 @@ class CalibrationService:
         return session
 
     async def generate_round_voice_on_demand(self, session_id: str, round_num: int) -> dict[str, Any]:
-        """Generate a dynamic question & teleprompt using Groq LLM, then synthesize ElevenLabs voice on-demand."""
+        """Fetch pre-authored round script from static content bank, secretly roll 1 of 4 variants, and synthesize prospect voice."""
         session = self.get_session(session_id)
-        if round_num < 1 or round_num > 8:
-            raise HTTPException(status_code=400, detail="Round number must be between 1 and 8")
+        if round_num < 1 or round_num > 7:
+            raise HTTPException(status_code=400, detail="Round number must be between 1 and 7")
 
         # If already generated for this round in this session, return existing
         if round_num in session["rounds"] and session["rounds"][round_num].get("audio_id"):
             return session["rounds"][round_num]
 
-        stage_info = SALES_STAGES[round_num - 1]
-        stage = stage_info["stage"]
-        focus = stage_info["focus"]
-        persona = VOICE_PERSONAS[(round_num - 1) % len(VOICE_PERSONAS)]
-        industry = session.get("industry", "B2B Enterprise SaaS & AI")
+        track_key = session.get("track", "seller")
+        track_data = CALIBRATION_TRACKS.get(track_key, CALIBRATION_TRACKS["seller"])
+        round_def = track_data["rounds"][round_num - 1]
 
-        # Generate unique scenario dynamically using Groq LLM
-        dynamic_prompt = f"""You are an elite B2B sales simulation coach generating Round {round_num} of 8.
-Target Industry: {industry}
-Sales Stage: {stage}
-Key Focus: {focus}
-Buyer Persona: {persona['name']} ({persona['title']}, {persona['style']})
+        # Randomly pick exactly ONE variant A-D
+        variant_key = random.choice(["A", "B", "C", "D"])
+        teleprompt_text = round_def["response_variants"][variant_key]
 
-Generate:
-1. "question_text": A realistic, natural question or objection from {persona['name']} ({persona['title']}). Must be conversational, specific to {industry}, and 1-2 sentences.
-2. "teleprompt_text": An ideal, high-converting salesperson response script to repeat (20-35 words, confident, structured, addressing {persona['name']}'s concern directly).
-
-Respond ONLY with valid JSON with keys "question_text" and "teleprompt_text":
-{{
-  "question_text": "...",
-  "teleprompt_text": "..."
-}}
-"""
-
-        question_text = f"In terms of {stage.lower()}, how does your solution address {focus.lower()}?"
-        teleprompt_text = f"We provide a proven enterprise solution tailored for {industry} that delivers fast measurable results with dedicated engineering support."
-
-        parsed = await self._call_llm_json(
-            system="You are an enterprise sales simulator returning valid JSON.",
-            prompt=dynamic_prompt,
-            temperature=0.8,
-            timeout=15.0,
-        )
-        if parsed.get("question_text") and parsed.get("teleprompt_text"):
-            question_text = parsed["question_text"].strip()
-            teleprompt_text = parsed["teleprompt_text"].strip()
-
-        # Synthesize ElevenLabs voice on-demand for this specific dynamic question
-        voice_id = persona["voice_id"]
-        voice_name = persona["name"]
+        # Synthesize ElevenLabs voice on-demand for the prospect's line
+        seller_line = round_def["seller_line"]
+        voice_id = track_data["voice_id"]
+        voice_name = track_data["voice_name"]
         audio_id = f"audio_{session_id}_{round_num}_{uuid.uuid4().hex[:6]}"
-        audio_bytes, mime_type = await self.tts.generate_speech(question_text, voice_id=voice_id)
+        audio_bytes, mime_type = await self.tts.generate_speech(seller_line, voice_id=voice_id)
         self.audio_store[audio_id] = (audio_bytes, mime_type)
 
         round_data = {
             "round_number": round_num,
-            "stage": stage,
-            "scenario_type": f"{industry} • {persona['title']}",
-            "persona_name": persona["name"],
-            "persona_title": persona["title"],
+            "title": round_def["title"],
+            "stage": round_def["title"],
+            "scenario_type": f"{track_data['track_name']} • {round_def['title']}",
+            "persona_name": track_data["persona_name"],
+            "persona_title": track_data["persona_title"],
             "voice_id": voice_id,
             "voice_name": voice_name,
-            "question_text": question_text,
+            "seller_line": seller_line,
+            "question_text": seller_line,
             "teleprompt_text": teleprompt_text,
+            "selected_variant": variant_key,
             "audio_id": audio_id,
             "audio_url": f"/api/calibration/audio/{audio_id}",
             "evaluation": None,
@@ -1052,16 +1058,33 @@ Respond ONLY with valid JSON with keys "question_text" and "teleprompt_text":
             audio_analysis=audio_analysis,
         )
 
+        if isinstance(evaluation, dict):
+            evaluation["selected_variant"] = round_data.get("selected_variant")
+
         round_data["evaluation"] = evaluation
         round_data["completed"] = True
         round_data["duration_seconds"] = final_duration
 
         # Advance session round
-        if round_num < 8:
+        if round_num < 7:
             session["current_round"] = round_num + 1
         else:
             session["status"] = "completed"
             session["end_time_monotonic"] = time.monotonic()
+
+            # Synthesize final statement audio payoff
+            track_key = session.get("track", "seller")
+            track_data = CALIBRATION_TRACKS.get(track_key, CALIBRATION_TRACKS["seller"])
+            final_statement = track_data.get("final_statement", "")
+            session["final_statement"] = final_statement
+
+            if final_statement:
+                f_audio_id = f"audio_{session_id}_final_{uuid.uuid4().hex[:6]}"
+                f_audio_bytes, f_mime = await self.tts.generate_speech(final_statement, voice_id=track_data["voice_id"])
+                self.audio_store[f_audio_id] = (f_audio_bytes, f_mime)
+                session["final_audio_id"] = f_audio_id
+                session["final_audio_url"] = f"/api/calibration/audio/{f_audio_id}"
+
             session["summary_report"] = self._compute_summary_report(session)
 
         return round_data
@@ -1309,43 +1332,53 @@ Return valid JSON:
         time_formatted = f"{minutes}m {seconds:02d}s" if minutes > 0 else f"{seconds}s"
         completed_on_str = datetime.now(timezone.utc).strftime("%B %d, %Y")
 
+        track_key = session.get("track", "seller")
+        track_data = CALIBRATION_TRACKS.get(track_key, CALIBRATION_TRACKS["seller"])
+        total_rounds = session.get("total_rounds", 7)
+
         round_performance_list = []
-        for i in range(1, 9):
+        for i in range(1, total_rounds + 1):
             r_data = rounds.get(i)
             if r_data and r_data.get("evaluation"):
                 ev = r_data["evaluation"]
                 round_performance_list.append({
                     "round_number": i,
-                    "stage": r_data["stage"],
+                    "title": r_data.get("title", f"Round {i}"),
+                    "stage": r_data.get("stage", r_data.get("title", f"Round {i}")),
                     "score": ev["overall_score"],
                     "wpm": ev.get("wpm", 0),
                     "confidence": ev.get("confidence", 1.0),
                     "is_excluded": ev.get("is_excluded", False),
+                    "selected_variant": ev.get("selected_variant") or r_data.get("selected_variant"),
                     "completed": True,
                 })
             else:
-                stage_name = SALES_STAGES[i - 1]["stage"]
+                round_title = track_data["rounds"][i - 1]["title"] if i <= len(track_data["rounds"]) else f"Round {i}"
                 round_performance_list.append({
                     "round_number": i,
-                    "stage": stage_name,
+                    "title": round_title,
+                    "stage": round_title,
                     "score": None,
                     "wpm": None,
                     "completed": False,
                 })
 
         rounds_detailed = []
-        for i in range(1, 9):
+        for i in range(1, total_rounds + 1):
             r_data = rounds.get(i)
             if r_data:
                 ev = r_data.get("evaluation") or {}
                 rounds_detailed.append({
                     "round_number": i,
+                    "title": r_data.get("title", f"Round {i}"),
                     "stage": r_data.get("stage", f"Round {i}"),
-                    "persona_name": r_data.get("persona_name", "AI Prospect"),
-                    "persona_title": r_data.get("persona_title", "Executive"),
-                    "voice_name": r_data.get("voice_name", "Rachel"),
+                    "persona_name": r_data.get("persona_name", track_data["persona_name"]),
+                    "persona_title": r_data.get("persona_title", track_data["persona_title"]),
+                    "voice_name": r_data.get("voice_name", track_data["voice_name"]),
+                    "seller_line": r_data.get("seller_line", r_data.get("question_text", "")),
                     "question_text": r_data.get("question_text", ""),
                     "teleprompt_text": r_data.get("teleprompt_text", ""),
+                    "selected_variant": r_data.get("selected_variant"),
                     "user_transcript": ev.get("transcribed_text", ""),
                     "duration_seconds": r_data.get("duration_seconds", 0.0),
                     "wpm": ev.get("wpm", 0),
@@ -1363,7 +1396,9 @@ Return valid JSON:
         report_dict = {
             "session_id": session["session_id"],
             "user_id": session.get("user_id", "sales_rep_1"),
-            "industry": session.get("industry", "Enterprise B2B SaaS"),
+            "track": track_key,
+            "track_name": track_data["track_name"],
+            "industry": track_data["track_name"],
             "created_at": session.get("created_at"),
             "completed_at": datetime.now(timezone.utc).isoformat(),
             "overall_score": overall_score,
@@ -1373,11 +1408,13 @@ Return valid JSON:
             "formula_weights": self.profiling_weights,
             "rounds_completed": num_completed,
             "rounds_profiled": len(valid_rounds),
-            "total_rounds": 8,
+            "total_rounds": total_rounds,
             "total_time_seconds": round(total_seconds, 1),
             "total_time_formatted": time_formatted,
             "completed_on": completed_on_str,
             "status_message": f"Great job! Calibration complete. Your natural speaking style is mapped to {prompting_level['name']}.",
+            "final_statement": session.get("final_statement"),
+            "final_audio_url": session.get("final_audio_url"),
             "round_performance": round_performance_list,
             "rounds_detail": rounds_detailed,
             "score_breakdown": {
@@ -1442,13 +1479,35 @@ def get_calibration_router(service: Optional[CalibrationService] = None) -> APIR
     router = APIRouter(prefix="/api/calibration", tags=["Calibration"])
 
     @router.post("/start")
-    async def start_session(user_id: str = Form("sales_rep_1"), industry: Optional[str] = Form(None)):
-        session = await service.create_dynamic_session(user_id=user_id, industry=industry)
+    async def start_session(
+        user_id: str = Form("sales_rep_1"),
+        track: Optional[str] = Form(None),
+        industry: Optional[str] = Form(None),
+    ):
+        resolved_track = track or ("internal_rep" if industry and "internal" in industry.lower() else "seller")
+        session = await service.create_calibration_session(user_id=user_id, track=resolved_track)
         round_1 = await service.generate_round_voice_on_demand(session["session_id"], 1)
         return {
             "status": "success",
             "session": session,
             "current_round_data": round_1,
+        }
+
+    @router.get("/tracks")
+    async def get_calibration_tracks():
+        """Return metadata summary for the two pre-authored calibration tracks."""
+        return {
+            "tracks": [
+                {
+                    "track_id": k,
+                    "track_name": v["track_name"],
+                    "persona_name": v["persona_name"],
+                    "persona_title": v["persona_title"],
+                    "total_rounds": len(v["rounds"]),
+                    "description": "Expired listing seller objection arc" if k == "seller" else "Top producer onboarding and adoption arc",
+                }
+                for k, v in CALIBRATION_TRACKS.items()
+            ]
         }
 
     @router.get("/session/{session_id}")
@@ -1460,10 +1519,14 @@ def get_calibration_router(service: Optional[CalibrationService] = None) -> APIR
         return {
             "session_id": session_id,
             "status": session["status"],
+            "track": session.get("track", "seller"),
+            "track_name": session.get("track_name"),
             "industry": session.get("industry"),
             "current_round": session["current_round"],
             "total_rounds": session["total_rounds"],
             "rounds": session["rounds"],
+            "final_statement": session.get("final_statement"),
+            "final_audio_url": session.get("final_audio_url"),
             "summary_report": report,
         }
 
@@ -1536,6 +1599,8 @@ def get_calibration_router(service: Optional[CalibrationService] = None) -> APIR
             "round_data": round_data,
             "is_session_completed": is_completed,
             "next_round": session["current_round"] if not is_completed else None,
+            "final_statement": session.get("final_statement") if is_completed else None,
+            "final_audio_url": session.get("final_audio_url") if is_completed else None,
             "summary_report": session.get("summary_report") if is_completed else None,
         }
 
