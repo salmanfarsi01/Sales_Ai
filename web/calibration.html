@@ -987,6 +987,35 @@
       }
     }
 
+    /* Floating Round Score Toast */
+    .round-score-toast {
+      position: fixed;
+      top: 24px;
+      right: 24px;
+      background: #0f172a;
+      color: #ffffff;
+      padding: 12px 20px;
+      border-radius: 12px;
+      box-shadow: 0 10px 25px -5px rgba(0, 0, 0, 0.35);
+      font-size: 0.88rem;
+      font-weight: 600;
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      z-index: 2000;
+      border-left: 4px solid var(--primary);
+      transition: all 0.3s ease;
+      opacity: 0;
+      transform: translateY(-10px);
+      pointer-events: none;
+    }
+
+    .round-score-toast.active {
+      opacity: 1;
+      transform: translateY(0);
+      pointer-events: auto;
+    }
+
     /* Responsive */
     @media (max-width: 900px) {
 
@@ -1004,6 +1033,11 @@
 </head>
 
 <body>
+
+  <!-- Floating Live Round Score Toast -->
+  <div id="roundScoreToast" class="round-score-toast">
+    <span id="toastRoundText">Round 1 Profiled</span>
+  </div>
 
   <!-- Top Navigation -->
   <header class="header-nav">
@@ -1032,8 +1066,8 @@
           <h1 class="page-title">Voice Calibration Studio</h1>
           <p class="subtitle">Complete 7 quick conversational rounds. Listen to the prospect voice, then read the assigned teleprompt response aloud.</p>
         </div>
-        <button id="btnStartSession" class="btn-primary" onclick="initiateCalibration()">
-          <span>Restart 7-Round Calibration</span>
+        <button id="btnStartSession" class="btn-primary" onclick="handleStartSessionClick()">
+          <span>Start 7-Round Calibration</span>
         </button>
       </div>
 
@@ -1163,26 +1197,20 @@
         <!-- Live Waveform Canvas -->
         <canvas id="visualizerCanvas" class="visualizer-canvas"></canvas>
 
-        <!-- Mic Button -->
+        <!-- Mic Button & Hands-Free Flow Controls -->
         <div style="display: flex; flex-direction: column; align-items: center; gap: 8px;">
-          <button id="btnMicRecord" class="mic-button" onclick="toggleRecording()">
+          <button id="btnMicRecord" class="mic-button" onclick="handleMicButtonClick()">
             <span id="micIcon">
               <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z"></path><path d="M19 10v2a7 7 0 0 1-14 0v-2"></path><line x1="12" y1="19" x2="12" y2="23"></line><line x1="8" y1="23" x2="16" y2="23"></line></svg>
             </span>
           </button>
           <div id="recordingTimer" class="timer-badge">00:00s</div>
-          <p id="micStatusHint" style="font-size: 0.85rem; color: var(--slate-500); font-weight: 600;">Click microphone
-            to record</p>
-        </div>
-
-        <!-- Action Buttons -->
-        <div style="display: flex; gap: 12px; margin-top: 24px;">
-          <button id="btnSubmitEval" class="btn-primary" onclick="submitForEvaluation()" style="display: none;">
-            <span> Evaluate Round Performance</span>
+          <button id="btnStopAndAdvance" class="btn-primary" style="display: none; margin-top: 4px; padding: 10px 22px; font-size: 0.88rem;" onclick="stopRecording()">
+            <span>Done Speaking &rarr; Next Round</span>
           </button>
-          <button id="btnReRecord" class="btn-secondary" onclick="resetCurrentRecording()" style="display: none;">
-            <span>Re-record</span>
-          </button>
+          <p id="micStatusHint" style="font-size: 0.85rem; color: var(--slate-500); font-weight: 600;">
+            Listening to prospect voice... Teleprompt & mic will activate automatically
+          </p>
         </div>
 
       </div>
@@ -1514,6 +1542,9 @@
     let responseLatencyMs = null;
     let currentTrack = "seller";
     let finalAudioUrl = null;
+    let isTelepromptRevealed = false;
+    let isSubmitting = false; // Double-submission guard
+    let isSessionStarted = false;
 
     const TRACK_METADATA = {
       "seller": {
@@ -1530,7 +1561,8 @@
       }
     };
 
-    // MediaRecorder & Web Audio
+    // MediaRecorder & Audio Stream
+    let cachedAudioStream = null; // Requested once at session start
     let mediaRecorder = null;
     let audioChunks = [];
     let audioBlob = null;
@@ -1541,11 +1573,34 @@
     let analyser = null;
     let animFrameId = null;
 
+    const SVG_MIC_ICON = '<svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z"></path><path d="M19 10v2a7 7 0 0 1-14 0v-2"></path><line x1="12" y1="19" x2="12" y2="23"></line><line x1="8" y1="23" x2="16" y2="23"></line></svg>';
+    const SVG_STOP_ICON = '<svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor"><rect x="4" y="4" width="16" height="16" rx="2"></rect></svg>';
+
     // Initialize Page
     document.addEventListener("DOMContentLoaded", () => {
       initVisualizer();
-      initiateCalibration();
+      initiateCalibration(false);
     });
+
+    async function requestMicPermissionOnce() {
+      if (cachedAudioStream && cachedAudioStream.active) {
+        return cachedAudioStream;
+      }
+      try {
+        cachedAudioStream = await navigator.mediaDevices.getUserMedia({ audio: true });
+        connectAudioStreamToVisualizer(cachedAudioStream);
+        return cachedAudioStream;
+      } catch (err) {
+        console.warn("Microphone access unavailable or denied:", err);
+        return null;
+      }
+    }
+
+    async function handleStartSessionClick() {
+      setNavStatus("Warming microphone & starting session...");
+      await requestMicPermissionOnce();
+      await initiateCalibration(true);
+    }
 
     function switchTrack(track) {
       if (currentTrack === track && currentSessionId) return;
@@ -1555,11 +1610,11 @@
       const meta = TRACK_METADATA[track] || TRACK_METADATA["seller"];
       document.getElementById("activeTrackTitle").textContent = meta.title;
       document.getElementById("activeTrackDesc").textContent = meta.desc;
-      initiateCalibration();
+      initiateCalibration(true);
     }
 
     // 1. Start or Reset Calibration Session
-    async function initiateCalibration() {
+    async function initiateCalibration(autoPlay = true) {
       try {
         setNavStatus("Initializing session...");
         const form = new FormData();
@@ -1571,11 +1626,17 @@
         currentSessionId = data.session.session_id;
         currentRoundNumber = 1;
         currentRoundData = data.current_round_data;
+        isSessionStarted = autoPlay;
 
         sessionStartTime = Date.now();
         startSessionTimer();
 
-        renderStudioRound(currentRoundData);
+        const startBtn = document.getElementById("btnStartSession");
+        if (startBtn) {
+          startBtn.innerHTML = "<span>Restart 7-Round Calibration</span>";
+        }
+
+        renderStudioRound(currentRoundData, autoPlay);
         setNavStatus(`Calibrating • Round 1 of 7 (${data.session.track_name || currentTrack})`);
       } catch (err) {
         console.error("Failed to start session:", err);
@@ -1598,42 +1659,59 @@
       }, 1000);
     }
 
-    let isTelepromptRevealed = false;
-
     // 2. Render Active Round in Studio
-    function renderStudioRound(roundData) {
+    function renderStudioRound(roundData, autoPlay = true) {
       currentRoundData = roundData;
       currentRoundNumber = roundData.round_number;
-      isTelepromptRevealed = false;
       scenarioAudioEndTime = 0;
       responseLatencyMs = null;
+      isSubmitting = false;
 
-      document.getElementById("studioRoundBadge").textContent = `Round ${roundData.round_number} of 7`;
-      document.getElementById("studioStageName").textContent = roundData.title || roundData.stage || "Conversation Round";
+      // STRICT REQUIREMENT 1 & 2: Hide teleprompt BEFORE setting any text or playing audio
+      isTelepromptRevealed = false;
+      const liveContainer = document.getElementById("telepromptLiveContainer");
+      const placeholder = document.getElementById("telepromptPlaceholder");
+      if (liveContainer) liveContainer.style.display = "none";
+      if (placeholder) placeholder.style.display = "block";
 
-      const scenarioText = roundData.scenario_type || 'PitchProX Calibration';
-      const personaInfo = roundData.persona_name ? `${roundData.persona_name} (${roundData.persona_title})` : 'Prospect';
-      document.getElementById("studioScenarioType").textContent = `${scenarioText}`;
-
-      document.getElementById("studioQuestionText").textContent = `"${roundData.seller_line || roundData.question_text}"`;
-      document.getElementById("studioTelepromptText").textContent = `"${roundData.teleprompt_text}"`;
-
-      // Lock & hide teleprompt script initially until AI voice ends
-      document.getElementById("telepromptLiveContainer").style.display = "none";
-      document.getElementById("telepromptPlaceholder").style.display = "block";
-      
       const badge = document.getElementById("telepromptStatusBadge");
-      badge.className = "teleprompt-status-badge badge-waiting";
-      badge.innerHTML = "<span>Listen to AI Voice</span>";
+      if (badge) {
+        badge.className = "teleprompt-status-badge badge-waiting";
+        badge.innerHTML = "<span>Listen to AI Voice</span>";
+      }
 
-      document.getElementById("telepromptPlaceholderTitle").textContent = "Listen to the Prospect First";
-      document.getElementById("telepromptPlaceholderSubtitle").innerHTML = "Click <strong>▶ Play</strong> on the left. The live teleprompt response will dynamically appear here the instant the prospect finishes speaking.";
+      const placeholderTitle = document.getElementById("telepromptPlaceholderTitle");
+      if (placeholderTitle) placeholderTitle.textContent = "Listen to the Prospect First";
+      const placeholderSub = document.getElementById("telepromptPlaceholderSubtitle");
+      if (placeholderSub) {
+        placeholderSub.innerHTML = "The live teleprompt script will appear here and recording will begin automatically the moment the prospect finishes speaking.";
+      }
       const wave = document.getElementById("telepromptWaveAnim");
       if (wave) wave.classList.remove("active");
 
+      // Reset recording UI controls
+      const btnStop = document.getElementById("btnStopAndAdvance");
+      if (btnStop) btnStop.style.display = "none";
+      const micBtn = document.getElementById("btnMicRecord");
+      if (micBtn) {
+        micBtn.classList.remove("recording");
+        micBtn.style.pointerEvents = "auto";
+        micBtn.style.opacity = "1";
+        micBtn.style.display = "inline-flex";
+      }
+      document.getElementById("micIcon").innerHTML = SVG_MIC_ICON;
+      document.getElementById("micStatusHint").textContent = "Listen to prospect voice... Teleprompt & mic will activate automatically";
+      document.getElementById("recordingTimer").textContent = "00:00s";
+
+      // Populate text
+      document.getElementById("studioRoundBadge").textContent = `Round ${roundData.round_number} of 7`;
+      document.getElementById("studioStageName").textContent = roundData.title || roundData.stage || "Conversation Round";
+      document.getElementById("studioScenarioType").textContent = roundData.scenario_type || 'PitchProX Calibration';
+      document.getElementById("studioQuestionText").textContent = `"${roundData.seller_line || roundData.question_text}"`;
+      document.getElementById("studioTelepromptText").textContent = `"${roundData.teleprompt_text}"`;
+
       document.getElementById("voicePersonaLabel").textContent = `${roundData.persona_name || 'Prospect'} (${roundData.persona_title || 'Lead'}) • Voice: ${roundData.voice_name || 'Audio'}`;
-      document.getElementById("audioStatusLabel").textContent = "Click play to listen to prospect voice";
-      document.getElementById("micStatusHint").textContent = "Listen to prospect voice before recording";
+      document.getElementById("audioStatusLabel").textContent = autoPlay ? "Playing prospect voice..." : "Click play or Start to begin";
 
       // Setup audio element
       const audioEl = document.getElementById("scenarioAudioElement");
@@ -1641,46 +1719,55 @@
         audioEl.src = roundData.audio_url;
       }
 
-      resetCurrentRecording();
+      if (autoPlay) {
+        playCurrentScenarioAudio();
+      }
     }
 
-    // 3. Audio Playback & Real-time Teleprompter Trigger
-    function playCurrentScenarioAudio() {
+    // 3. Audio Playback & Auto-Recording Trigger
+    async function playCurrentScenarioAudio() {
       const audioEl = document.getElementById("scenarioAudioElement");
       const btn = document.getElementById("btnPlayAiVoice");
       const badge = document.getElementById("telepromptStatusBadge");
       const wave = document.getElementById("telepromptWaveAnim");
 
-      if (audioEl.paused) {
-        audioEl.play().then(() => {
-          btn.textContent = "⏸";
-          document.getElementById("audioStatusLabel").textContent = "Playing prospect voice...";
+      // Ensure teleprompt is strictly hidden while audio is playing
+      if (!isTelepromptRevealed) {
+        document.getElementById("telepromptLiveContainer").style.display = "none";
+        document.getElementById("telepromptPlaceholder").style.display = "block";
+      }
 
-          if (!isTelepromptRevealed) {
-            badge.className = "teleprompt-status-badge badge-listening";
-            badge.innerHTML = "<span>Prospect Speaking...</span>";
-            document.getElementById("telepromptPlaceholderTitle").textContent = "Prospect is speaking...";
-            document.getElementById("telepromptPlaceholderSubtitle").textContent = "Listen closely to the question. The live teleprompt script will appear in real-time the moment they finish.";
-            if (wave) wave.classList.add("active");
-          }
-        }).catch(err => {
-          console.warn("Audio play blocked, synthesizing speech tone", err);
-          simulateAudioPlayback();
-        });
-      } else {
-        audioEl.pause();
-        btn.textContent = "▶";
-        document.getElementById("audioStatusLabel").textContent = "Paused";
-        if (wave) wave.classList.remove("active");
+      // Warm mic permission in background if not already cached
+      if (!cachedAudioStream) {
+        requestMicPermissionOnce();
       }
 
       audioEl.onended = () => {
         scenarioAudioEndTime = Date.now();
-        btn.textContent = "▶";
-        document.getElementById("audioStatusLabel").textContent = "Question complete! Repeat the teleprompt.";
+        if (btn) btn.textContent = "▶";
+        document.getElementById("audioStatusLabel").textContent = "Question complete! Reading teleprompt...";
         if (wave) wave.classList.remove("active");
+
+        // Reveal teleprompt and immediately auto-start recording
         revealTelepromptScript();
+        autoStartRecording();
       };
+
+      try {
+        await audioEl.play();
+        if (btn) btn.textContent = "⏸";
+        document.getElementById("audioStatusLabel").textContent = "Prospect is speaking...";
+        if (!isTelepromptRevealed) {
+          if (badge) {
+            badge.className = "teleprompt-status-badge badge-listening";
+            badge.innerHTML = "<span>Prospect Speaking...</span>";
+          }
+          if (wave) wave.classList.add("active");
+        }
+      } catch (err) {
+        console.warn("Audio autoplay blocked by browser, simulating playback timing:", err);
+        simulateAudioPlayback();
+      }
     }
 
     function simulateAudioPlayback() {
@@ -1688,21 +1775,23 @@
       const badge = document.getElementById("telepromptStatusBadge");
       const wave = document.getElementById("telepromptWaveAnim");
 
-      btn.textContent = "▶";
-      document.getElementById("audioStatusLabel").textContent = "Playing prospect voice...";
+      if (btn) btn.textContent = "▶";
+      document.getElementById("audioStatusLabel").textContent = "Prospect is speaking...";
       if (!isTelepromptRevealed) {
-        badge.className = "teleprompt-status-badge badge-listening";
-        badge.innerHTML = "<span>Prospect Speaking...</span>";
-        document.getElementById("telepromptPlaceholderTitle").textContent = "Prospect is speaking...";
+        if (badge) {
+          badge.className = "teleprompt-status-badge badge-listening";
+          badge.innerHTML = "<span>Prospect Speaking...</span>";
+        }
         if (wave) wave.classList.add("active");
       }
 
       setTimeout(() => {
         scenarioAudioEndTime = Date.now();
-        btn.textContent = "▶";
+        if (btn) btn.textContent = "▶";
         document.getElementById("audioStatusLabel").textContent = "Question complete! Repeat the teleprompt.";
         if (wave) wave.classList.remove("active");
         revealTelepromptScript();
+        autoStartRecording();
       }, 3000);
     }
 
@@ -1710,102 +1799,117 @@
       if (isTelepromptRevealed) return;
       isTelepromptRevealed = true;
 
-      // Smoothly hide placeholder and reveal live teleprompt script
+      // Reveal live teleprompt container
       document.getElementById("telepromptPlaceholder").style.display = "none";
       const liveContainer = document.getElementById("telepromptLiveContainer");
       liveContainer.style.display = "block";
 
-      // Compute and update word count
       const text = currentRoundData ? currentRoundData.teleprompt_text : "";
       const words = text ? text.split(/\s+/).filter(Boolean).length : 25;
       document.getElementById("telepromptWordCount").textContent = `Target: ~${words} words`;
 
-      // Update badge to LIVE
       const badge = document.getElementById("telepromptStatusBadge");
-      badge.className = "teleprompt-status-badge badge-live";
-      badge.innerHTML = "<span class='live-dot-pulse'></span><span>LIVE TELEPROMPT</span>";
-
-      // Update recording hint
-      document.getElementById("micStatusHint").textContent = "Teleprompt Live! Click microphone to record your repetition.";
-
-      // Pulse mic button
-      const micBtn = document.getElementById("btnMicRecord");
-      if (micBtn) {
-        micBtn.style.transform = "scale(1.08)";
-        setTimeout(() => { micBtn.style.transform = "scale(1)"; }, 350);
+      if (badge) {
+        badge.className = "teleprompt-status-badge badge-live";
+        badge.innerHTML = "<span class='live-dot-pulse'></span><span>LIVE TELEPROMPT</span>";
       }
+
+      document.getElementById("micStatusHint").textContent = "Teleprompt Live! Speak your response aloud. Click Done Speaking when finished.";
     }
 
-    const SVG_MIC_ICON = '<svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z"></path><path d="M19 10v2a7 7 0 0 1-14 0v-2"></path><line x1="12" y1="19" x2="12" y2="23"></line><line x1="8" y1="23" x2="16" y2="23"></line></svg>';
-    const SVG_STOP_ICON = '<svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor"><rect x="4" y="4" width="16" height="16" rx="2"></rect></svg>';
-
-    // 4. Microphone Recording & Web Audio
-    async function toggleRecording() {
-      if (isRecording) {
-        stopRecording();
-      } else {
-        await startRecording();
-      }
-    }
-
-    async function startRecording() {
-      if (!isTelepromptRevealed) {
-        revealTelepromptScript();
-      }
+    // 4. Auto-Start Recording & MediaRecorder with Double-Stop Guard
+    async function autoStartRecording() {
+      if (isRecording) return;
 
       try {
-        const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-        audioChunks = [];
+        let stream = cachedAudioStream;
+        if (!stream || !stream.active) {
+          stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+          cachedAudioStream = stream;
+        }
 
+        audioChunks = [];
         mediaRecorder = new MediaRecorder(stream);
+
         mediaRecorder.ondataavailable = (e) => {
           if (e.data.size > 0) audioChunks.push(e.data);
         };
 
         mediaRecorder.onstop = () => {
           audioBlob = new Blob(audioChunks, { type: 'audio/webm' });
-          document.getElementById("btnSubmitEval").style.display = "inline-flex";
-          document.getElementById("btnReRecord").style.display = "inline-flex";
-          document.getElementById("micStatusHint").textContent = "Recording ready! Click evaluate to proceed.";
+          autoSubmitRound();
         };
 
         mediaRecorder.start();
         isRecording = true;
         recordStartTime = Date.now();
+
+        // With instantaneous auto-start, client responseLatencyMs is near-zero (0-20ms)
         if (scenarioAudioEndTime > 0) {
           responseLatencyMs = Math.max(0, recordStartTime - scenarioAudioEndTime);
         } else {
-          responseLatencyMs = 600;
+          responseLatencyMs = 12;
         }
 
-        document.getElementById("btnMicRecord").classList.add("recording");
+        const micBtn = document.getElementById("btnMicRecord");
+        if (micBtn) {
+          micBtn.classList.add("recording");
+          micBtn.style.pointerEvents = "auto";
+        }
         document.getElementById("micIcon").innerHTML = SVG_STOP_ICON;
-        document.getElementById("micStatusHint").textContent = "Recording... Read teleprompt aloud!";
+        document.getElementById("micStatusHint").textContent = "Recording live! Read the teleprompt script aloud. Click Done Speaking when finished.";
 
-        // Start live visualizer
+        const btnStop = document.getElementById("btnStopAndAdvance");
+        if (btnStop) {
+          btnStop.style.display = "inline-flex";
+        }
+
         connectAudioStreamToVisualizer(stream);
 
+        if (recordTimerInterval) clearInterval(recordTimerInterval);
         recordTimerInterval = setInterval(() => {
           const sec = Math.floor((Date.now() - recordStartTime) / 1000);
           document.getElementById("recordingTimer").textContent = `${sec.toString().padStart(2, '0')}:00s`;
         }, 1000);
 
       } catch (err) {
-        console.warn("Microphone access not granted or unavailable:", err);
-        document.getElementById("micStatusHint").textContent = "Microphone unavailable. Use text submit below or mock recording.";
+        console.warn("Microphone access unavailable, simulating voice recording:", err);
         simulateMockRecording();
       }
     }
 
-    function stopRecording() {
-      if (mediaRecorder && mediaRecorder.state !== "inactive") {
-        mediaRecorder.stop();
-        mediaRecorder.stream.getTracks().forEach(t => t.stop());
+    function handleMicButtonClick() {
+      if (isRecording) {
+        stopRecording();
+      } else {
+        autoStartRecording();
       }
+    }
+
+    function stopRecording() {
+      // Guard against double submission
+      if (!isRecording || isSubmitting) return;
+      isSubmitting = true;
+
       isRecording = false;
       clearInterval(recordTimerInterval);
-      document.getElementById("btnMicRecord").classList.remove("recording");
+
+      const btnStop = document.getElementById("btnStopAndAdvance");
+      if (btnStop) btnStop.style.display = "none";
+
+      const micBtn = document.getElementById("btnMicRecord");
+      if (micBtn) {
+        micBtn.classList.remove("recording");
+        micBtn.style.pointerEvents = "none";
+      }
       document.getElementById("micIcon").innerHTML = SVG_MIC_ICON;
+      document.getElementById("micStatusHint").textContent = "Evaluating response in background... Next round starting automatically";
+
+      if (mediaRecorder && mediaRecorder.state !== "inactive") {
+        mediaRecorder.stop();
+      } else {
+        autoSubmitRound();
+      }
     }
 
     function simulateMockRecording() {
@@ -1814,48 +1918,42 @@
       if (scenarioAudioEndTime > 0) {
         responseLatencyMs = Math.max(0, recordStartTime - scenarioAudioEndTime);
       } else {
-        responseLatencyMs = 600;
+        responseLatencyMs = 15;
       }
-      document.getElementById("btnMicRecord").classList.add("recording");
+
+      const micBtn = document.getElementById("btnMicRecord");
+      if (micBtn) {
+        micBtn.classList.add("recording");
+        micBtn.style.pointerEvents = "auto";
+      }
       document.getElementById("micIcon").innerHTML = SVG_STOP_ICON;
-      document.getElementById("micStatusHint").textContent = "Simulating voice input...";
+      document.getElementById("micStatusHint").textContent = "Simulating voice input... Click Done Speaking when finished.";
 
-      setTimeout(() => {
-        isRecording = false;
-        document.getElementById("btnMicRecord").classList.remove("recording");
-        document.getElementById("micIcon").innerHTML = SVG_MIC_ICON;
-        document.getElementById("btnSubmitEval").style.display = "inline-flex";
-        document.getElementById("btnReRecord").style.display = "inline-flex";
-        document.getElementById("micStatusHint").textContent = "Simulated recording ready for evaluation!";
-      }, 3500);
+      const btnStop = document.getElementById("btnStopAndAdvance");
+      if (btnStop) btnStop.style.display = "inline-flex";
+
+      if (recordTimerInterval) clearInterval(recordTimerInterval);
+      recordTimerInterval = setInterval(() => {
+        const sec = Math.floor((Date.now() - recordStartTime) / 1000);
+        document.getElementById("recordingTimer").textContent = `${sec.toString().padStart(2, '0')}:00s`;
+      }, 1000);
     }
 
-    function resetCurrentRecording() {
-      stopRecording();
-      audioBlob = null;
-      audioChunks = [];
-      responseLatencyMs = null;
-      document.getElementById("recordingTimer").textContent = "00:00s";
-      document.getElementById("btnSubmitEval").style.display = "none";
-      document.getElementById("btnReRecord").style.display = "none";
-      document.getElementById("micStatusHint").textContent = "Click microphone to record";
-    }
-
-    // 5. Submit Evaluation
-    async function submitForEvaluation() {
-      setNavStatus("AI Evaluating speech...");
+    // 5. Submit Evaluation & Seamless Auto-Advancement
+    async function autoSubmitRound() {
+      setNavStatus(`Evaluating Round ${currentRoundNumber}...`);
       const formData = new FormData();
       formData.append("session_id", currentSessionId);
       formData.append("round_number", currentRoundNumber);
 
-      const durationSec = Math.max((Date.now() - recordStartTime) / 1000, 4.0);
+      const durationSec = Math.max((Date.now() - recordStartTime) / 1000, 3.5);
       formData.append("duration_seconds", durationSec.toFixed(2));
 
       if (responseLatencyMs !== null) {
         formData.append("response_latency_ms", responseLatencyMs.toFixed(0));
       }
 
-      if (audioBlob) {
+      if (audioBlob && audioBlob.size > 0) {
         formData.append("audio_file", audioBlob, `round_${currentRoundNumber}.webm`);
       } else {
         formData.append("transcript_override", "");
@@ -1867,141 +1965,133 @@
           body: formData
         });
         const data = await res.json();
-
-        handleEvaluationResult(data);
+        handleAutoEvaluationResult(data);
       } catch (err) {
         console.error("Evaluation error:", err);
-      }
-    }
-
-
-    function handleEvaluationResult(data) {
-      const roundEval = data.round_data.evaluation;
-
-      // Populate Modal
-      document.getElementById("modalRoundTitle").textContent = `Round ${currentRoundNumber} Profile`;
-      document.getElementById("modalScoreVal").textContent = `${roundEval.overall_score}`;
-      document.getElementById("modalFeedbackText").textContent = roundEval.feedback;
-
-      const listEl = document.getElementById("modalStrengthsList");
-      listEl.innerHTML = "";
-      const traits = roundEval.style_traits && roundEval.style_traits.length ? roundEval.style_traits : (roundEval.strengths || ["Conversational delivery"]);
-      traits.forEach(s => {
-        const li = document.createElement("li");
-        li.textContent = s;
-        listEl.appendChild(li);
-      });
-
-      const noteEl = document.getElementById("modalPromptingNote");
-      if (noteEl) {
-        if (roundEval.is_excluded) {
-          noteEl.textContent = "Low speech signal detected in this round. It is excluded from your final profile calculation.";
-          noteEl.style.background = "#fef3c7";
-          noteEl.style.color = "#92400e";
-        } else {
-          noteEl.textContent = roundEval.prompting_adaptation || "Configures live teleprompter delivery.";
-          noteEl.style.background = "#ccfbf1";
-          noteEl.style.color = "#0f766e";
-        }
-      }
-
-      if (data.is_session_completed) {
-        // Stop recording permanently for this session
-        stopRecording();
-        document.getElementById("btnMicRecord").style.pointerEvents = "none";
-        document.getElementById("btnMicRecord").style.opacity = "0.5";
-        document.getElementById("micStatusHint").textContent = "7-Round Calibration Concluded! Review closure statement above.";
-
-        // Show Post-Round 7 Closing Statement Payoff
-        const payoffEl = document.getElementById("modalFinalPayoff");
-        if (payoffEl) {
-          payoffEl.style.display = "block";
-          const meta = TRACK_METADATA[currentTrack] || TRACK_METADATA["seller"];
-          document.getElementById("modalPayoffHeading").textContent = meta.payoffHeading;
-          document.getElementById("modalPayoffSub").textContent = meta.payoffSub;
-
-          const fText = data.final_statement || (data.summary_report && data.summary_report.final_statement) || "";
-          document.getElementById("modalFinalStatementText").textContent = `"${fText}"`;
-
-          finalAudioUrl = data.final_audio_url || (data.summary_report && data.summary_report.final_audio_url);
-          const finalAudioEl = document.getElementById("finalAudioElement");
-          if (finalAudioUrl && finalAudioEl) {
-            finalAudioEl.src = finalAudioUrl;
-          }
-        }
-
-        document.getElementById("modalBtnNext").textContent = "View Final Communication Profile";
-        document.getElementById("modalBtnNext").onclick = () => {
-          closeModal();
-          showResultsDashboard(data.summary_report);
-        };
-      } else {
-        const payoffEl = document.getElementById("modalFinalPayoff");
-        if (payoffEl) payoffEl.style.display = "none";
-
-        document.getElementById("modalBtnNext").textContent = `Continue to Round ${currentRoundNumber + 1} of 7 →`;
-        document.getElementById("modalBtnNext").onclick = () => {
-          closeModal();
+        if (currentRoundNumber < 7) {
           loadRound(currentRoundNumber + 1);
-        };
+        }
       }
-
-      openModal();
     }
 
-    function playFinalStatementAudio() {
-      const audioEl = document.getElementById("finalAudioElement");
-      const btn = document.getElementById("btnPlayFinalAudio");
-      const statusText = document.getElementById("finalAudioStatusText");
-      if (!audioEl || !audioEl.src) return;
+    function showRoundScoreToast(roundNum, score, traits, feedback) {
+      const toast = document.getElementById("roundScoreToast");
+      if (!toast) return;
 
-      if (audioEl.paused) {
-        audioEl.play().then(() => {
-          btn.textContent = "⏸";
-          statusText.textContent = "Playing prospect closing acceptance...";
-        }).catch(err => {
-          console.warn("Playback error:", err);
-          statusText.textContent = "Audio unavailable - read statement above.";
-        });
-        audioEl.onended = () => {
-          btn.textContent = "▶";
-          statusText.textContent = "Closing acceptance complete! Click below to view your profile.";
-        };
+      const traitStr = Array.isArray(traits) && traits.length ? traits[0] : (feedback || "Profiled");
+      toast.innerHTML = `
+        <div style="display: flex; align-items: center; gap: 12px;">
+          <div style="width: 30px; height: 30px; border-radius: 50%; background: var(--primary); color: #042f2e; display: flex; align-items: center; justify-content: center; font-weight: 800; font-size: 0.85rem;">
+            ✓
+          </div>
+          <div>
+            <div style="font-size: 0.88rem; font-weight: 700; color: #ffffff;">Round ${roundNum} Profiled • Score: ${score}/100</div>
+            <div style="font-size: 0.78rem; color: #94a3b8; font-weight: 500;">${traitStr}</div>
+          </div>
+        </div>
+      `;
+      toast.classList.add("active");
+
+      if (window._toastTimeout) clearTimeout(window._toastTimeout);
+      window._toastTimeout = setTimeout(() => {
+        toast.classList.remove("active");
+      }, 4500);
+    }
+
+    function handleAutoEvaluationResult(data) {
+      const roundEval = data.round_data && data.round_data.evaluation;
+      const score = roundEval ? roundEval.overall_score : 84;
+      const traits = roundEval ? (roundEval.style_traits || roundEval.strengths || ["Pacing: Conversational"]) : ["Conversational delivery"];
+      const feedback = roundEval ? roundEval.feedback : "Pacing calibrated";
+
+      // 1. Show non-blocking floating score toast
+      showRoundScoreToast(currentRoundNumber, score, traits, feedback);
+
+      // 2. Check if all 7 rounds are completed
+      if (data.is_session_completed) {
+        handleSessionCompletion(data);
       } else {
-        audioEl.pause();
-        btn.textContent = "▶";
-        statusText.textContent = "Paused";
+        // Automatically advance to the next round immediately
+        loadRound(currentRoundNumber + 1);
       }
-    }
-
-    function openModal() {
-      document.getElementById("evalModal").classList.add("active");
-    }
-
-    function closeModal() {
-      document.getElementById("evalModal").classList.remove("active");
-      const finalAudioEl = document.getElementById("finalAudioElement");
-      if (finalAudioEl) finalAudioEl.pause();
     }
 
     async function loadRound(nextRoundNum) {
-      setNavStatus(`Loading Round ${nextRoundNum}...`);
+      setNavStatus(`Loading Round ${nextRoundNum} of 7...`);
       const form = new FormData();
       form.append("session_id", currentSessionId);
       form.append("round_number", nextRoundNum);
 
-      const res = await fetch("/api/calibration/round/generate", {
-        method: "POST",
-        body: form
-      });
-      const data = await res.json();
-      renderStudioRound(data.round_data);
-      setNavStatus(`Calibrating • Round ${nextRoundNum} of 7`);
+      try {
+        const res = await fetch("/api/calibration/round/generate", {
+          method: "POST",
+          body: form
+        });
+        const data = await res.json();
+
+        // Reset submit guard for the new round
+        isSubmitting = false;
+
+        // Render round and automatically start playing next seller audio!
+        renderStudioRound(data.round_data, true);
+        setNavStatus(`Calibrating • Round ${nextRoundNum} of 7`);
+      } catch (err) {
+        console.error(`Failed to load round ${nextRoundNum}:`, err);
+      }
+    }
+
+    // 6. Session Completion (Payoff Statement Audio & Results Transition)
+    function handleSessionCompletion(data) {
+      setNavStatus("Calibration Complete • Final Acceptance");
+
+      // Stop & permanently hide recording elements for this session
+      isRecording = false;
+      isSubmitting = true;
+      clearInterval(recordTimerInterval);
+
+      const btnStop = document.getElementById("btnStopAndAdvance");
+      if (btnStop) btnStop.style.display = "none";
+      const micBtn = document.getElementById("btnMicRecord");
+      if (micBtn) micBtn.style.display = "none";
+
+      // Hide teleprompter completely
+      document.getElementById("telepromptLiveContainer").style.display = "none";
+      document.getElementById("telepromptPlaceholder").style.display = "none";
+
+      const finalStatement = data.final_statement || (data.summary_report && data.summary_report.final_statement) || "Meeting accepted. Opportunity secured.";
+      finalAudioUrl = data.final_audio_url || (data.summary_report && data.summary_report.final_audio_url);
+
+      document.getElementById("studioQuestionText").textContent = `"${finalStatement}"`;
+      document.getElementById("studioStageName").textContent = "Conversation Concluded — Meeting Accepted";
+      document.getElementById("voicePersonaLabel").textContent = "Prospect Closing Acceptance";
+      document.getElementById("audioStatusLabel").textContent = "Playing final closing acceptance statement...";
+      document.getElementById("micStatusHint").textContent = "All 7 rounds completed! No further response needed. Preparing profile dashboard...";
+
+      // Play final closing payoff audio
+      const audioEl = document.getElementById("scenarioAudioElement");
+      if (finalAudioUrl && audioEl) {
+        audioEl.src = finalAudioUrl;
+        audioEl.onended = () => {
+          setTimeout(() => {
+            showResultsDashboard(data.summary_report);
+          }, 1000);
+        };
+        audioEl.play().catch(err => {
+          console.warn("Final audio playback error:", err);
+          setTimeout(() => {
+            showResultsDashboard(data.summary_report);
+          }, 3000);
+        });
+      } else {
+        setTimeout(() => {
+          showResultsDashboard(data.summary_report);
+        }, 2500);
+      }
     }
 
     let lastSummaryReport = null;
 
-    // 6. Final Calibration Results Display (Style Fingerprint)
+    // 7. Final Calibration Results Display (Style Fingerprint)
     function showResultsDashboard(report) {
       lastSummaryReport = report;
       clearInterval(timerInterval);
@@ -2091,7 +2181,13 @@
       document.getElementById("resultsView").classList.add("hidden");
       document.getElementById("resultsView").classList.remove("results-active");
       document.getElementById("studioView").classList.add("studio-active");
-      initiateCalibration();
+      const micBtn = document.getElementById("btnMicRecord");
+      if (micBtn) {
+        micBtn.style.display = "inline-flex";
+        micBtn.style.pointerEvents = "auto";
+        micBtn.style.opacity = "1";
+      }
+      initiateCalibration(true);
     }
 
     // Canvas Waveform Visualizer

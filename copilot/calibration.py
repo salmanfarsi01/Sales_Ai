@@ -833,9 +833,15 @@ class CalibrationService:
         elif speech_onset_sec is not None:
             onset_ms = float(speech_onset_sec) * 1000.0
 
-        # Sanity bound client-reported latency to plausible conversational bounds [50ms, 15000ms]
-        if latency_ms is not None and 50.0 <= latency_ms <= 15000.0:
-            total_latency_ms = max(100.0, float(latency_ms) + onset_ms)
+        # In automated hands-free flow, client latency (recordStartTime - scenarioAudioEndTime) is near-zero (0-50ms).
+        # Response timing evaluates genuine speech onset hesitation (onset_ms) once mic is live.
+        if latency_ms is not None and 0.0 <= latency_ms <= 15000.0:
+            if onset_ms > 0:
+                total_latency_ms = max(100.0, float(latency_ms) + onset_ms)
+            elif latency_ms >= 50.0:
+                total_latency_ms = max(100.0, float(latency_ms))
+            else:
+                total_latency_ms = 450.0
         elif onset_ms > 0:
             total_latency_ms = 450.0 + onset_ms
         else:

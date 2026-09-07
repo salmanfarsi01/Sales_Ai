@@ -210,6 +210,10 @@ def test_response_timing_measurement():
     slow_score = service.compute_response_timing(latency_ms=3500.0)
     assert slow_score <= 60, f"Expected <= 60 for delayed response, got {slow_score}"
 
+    # Auto-start near-zero client latency with natural speech onset (15ms client + 350ms speech onset = 365ms)
+    auto_score = service.compute_response_timing(latency_ms=15.0, speech_onset_sec=0.35)
+    assert auto_score >= 88, f"Expected >= 88 for auto-start with quick onset, got {auto_score}"
+
     # Verify scores are strictly differentiated
     assert fast_score > med_score > slow_score
 
