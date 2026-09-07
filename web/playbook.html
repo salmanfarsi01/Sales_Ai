@@ -2210,7 +2210,7 @@ Avoid: 'cheap', 'hurry up', 'standard commission'</textarea>
               "Hey Daniel, I've got you. I'll keep my prompts confident, direct, and consultative — short, professional, and to the point. Let's build a playbook that wins more conversations."
             </div>
 
-            <button class="btn-nav-secondary" style="width: 100%; margin-top: 12px; justify-content: center;" onclick="generateLivePromptPreview()">
+            <button class="btn-nav-secondary" style="width: 100%; margin-top: 12px; justify-content: center;" onclick="generateLivePromptPreview(true)">
               🔄 Generate Preview
             </button>
           </div>
@@ -3240,10 +3240,19 @@ Avoid: 'cheap', 'hurry up', 'standard commission'</textarea>
       showToast('Response sequence updated');
     }
 
-    async function generateLivePromptPreview() {
-      const payload = constructPayload();
+    let lastPreviewPayloadHash = null;
+    let lastPreviewDisplaySummary = null;
 
-      document.getElementById('livePromptPreviewBox').innerText = 'Compiling methodology lens...';
+    async function generateLivePromptPreview(force = false) {
+      const payload = constructPayload();
+      const payloadHash = JSON.stringify(payload);
+
+      if (!force && payloadHash === lastPreviewPayloadHash && lastPreviewDisplaySummary) {
+        document.getElementById('livePromptPreviewBox').innerText = lastPreviewDisplaySummary;
+        return;
+      }
+
+      document.getElementById('livePromptPreviewBox').innerText = 'Generating voice preview with AI...';
 
       try {
         const res = await fetch('/api/playbook/simulate-runtime-prompt', {
@@ -3257,7 +3266,10 @@ Avoid: 'cheap', 'hurry up', 'standard commission'</textarea>
           })
         });
         const data = await res.json();
-        document.getElementById('livePromptPreviewBox').innerText = data.methodology_prompt;
+        const summary = data.display_summary || data.methodology_prompt;
+        lastPreviewPayloadHash = payloadHash;
+        lastPreviewDisplaySummary = summary;
+        document.getElementById('livePromptPreviewBox').innerText = summary;
       } catch (e) {
         document.getElementById('livePromptPreviewBox').innerText = 'Preview unavailable — check connection.';
       }

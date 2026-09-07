@@ -949,6 +949,70 @@ Return ONLY valid JSON:
     return None
 
 
+async def ai_summarize_playbook_voice(pb: Playbook, full_prompt: str) -> Optional[str]:
+    """LLM reads the full compiled methodology prompt and writes a short, warm,
+    first-person preview of how the AI coach will sound — for UI display only.
+    Does NOT affect the real methodology_prompt used at live-call time.
+    """
+    rep_name = pb.basic_info.name.split()[0] if pb.basic_info.name else "there"
+
+    summarize_prompt = f"""You are writing a short, warm preview message FROM the AI sales coach TO the salesperson, 
+introducing how it will sound during their calls.
+
+Here is the full compiled methodology configuration for this playbook:
+{full_prompt}
+
+Write EXACTLY 3-4 short lines, first person, as if the AI coach is speaking directly to {rep_name}.
+Style example (match this tone exactly):
+"Hey Daniel, I've got you.
+I'll keep my prompts confident, direct, and consultative — short, professional, and to the point.
+Let's build a playbook that wins more conversations."
+
+Rules:
+- Address them by first name in line 1.
+- Reflect the ACTUAL tone, style, and approach from the methodology above — don't invent generic filler.
+- Mention 1 concrete, specific thing from their setup (e.g. their objection tone, their trust-building style, or their philosophy) so it feels personalized, not templated.
+- Keep total output under 50 words.
+- Output ONLY the message text, no quotes, no labels, no JSON.
+"""
+
+    api_key_groq = os.getenv("GROQ_API_KEY")
+    if api_key_groq and not api_key_groq.startswith("mock_"):
+        try:
+            import groq
+            client = groq.Groq(api_key=api_key_groq, timeout=6.0)
+            def _call():
+                resp = client.chat.completions.create(
+                    model=os.getenv("GROQ_FAST_MODEL", "llama-3.1-8b-instant"),
+                    messages=[{"role": "user", "content": summarize_prompt}],
+                    temperature=0.6,
+                    max_tokens=120,
+                )
+                return resp.choices[0].message.content.strip()
+            return await asyncio.to_thread(_call)
+        except Exception as exc:
+            LOGGER.warning("AI voice summary failed, will fall back: %s", exc)
+
+    api_key_openai = os.getenv("OPENAI_API_KEY")
+    if api_key_openai and not api_key_openai.startswith("mock_"):
+        try:
+            import openai
+            client = openai.OpenAI(api_key=api_key_openai, timeout=6.0)
+            def _call():
+                resp = client.chat.completions.create(
+                    model=os.getenv("OPENAI_MINI_MODEL", "gpt-4o-mini"),
+                    messages=[{"role": "user", "content": summarize_prompt}],
+                    temperature=0.6,
+                    max_tokens=120,
+                )
+                return resp.choices[0].message.content.strip()
+            return await asyncio.to_thread(_call)
+        except Exception as exc:
+            LOGGER.warning("AI voice summary (OpenAI) failed: %s", exc)
+
+    return None
+
+
 def evaluate_playbook_structural_quality(
     pb: Playbook,
     store: Optional[PlaybookStore] = None,
@@ -1547,12 +1611,27 @@ def get_playbook_router(store: Optional[PlaybookStore] = None) -> APIRouter:
         top_conf = match_info["confidence"] if match_info else 0.0
         top_thresh_met = match_info["threshold_met"] if match_info else False
 
+        display_summary = await ai_summarize_playbook_voice(pb, prompt)
+        if not display_summary:
+            rep_name = pb.basic_info.name.split()[0] if pb.basic_info.name else "there"
+            display_summary = (
+                f"Hey {rep_name}, I've got you.\n"
+                f"I'll keep my prompts {pb.style.overall_tone.lower()}, {pb.style.communication_style.lower()}, "
+                f"and {pb.style.sentence_style.lower()}.\n"
+                f"Let's build a playbook that wins more conversations."
+            )
+            summary_source = "template_fallback"
+        else:
+            summary_source = "ai_llm"
+
         return {
             "status": "success",
             "playbook_id": pb.id,
             "playbook_title": pb.title,
             "prompt_section": prompt,
             "methodology_prompt": prompt,
+            "display_summary": display_summary,
+            "summary_source": summary_source,
             "detected_objection": req.detected_objection,
             "match_info": match_info,
             "confidence": top_conf,

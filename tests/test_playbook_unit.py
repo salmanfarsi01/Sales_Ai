@@ -543,6 +543,12 @@ def test_simulate_runtime_prompt_with_draft(client):
     assert "Financial" in data["match_info"]["category"]
     assert "Risk" in data["match_info"]["category"]
 
+    # Display summary
+    assert "display_summary" in data
+    assert "summary_source" in data
+    assert "Hey Live," in data["display_summary"] or "Hey there," in data["display_summary"]
+    assert data["summary_source"] in ("ai_llm", "template_fallback")
+
 
 def test_simulate_runtime_prompt_with_saved_id(client, temp_store):
     """Verify POST /api/playbook/simulate-runtime-prompt using saved playbook ID with healthy trust."""
@@ -562,6 +568,8 @@ def test_simulate_runtime_prompt_with_saved_id(client, temp_store):
     assert data["playbook_id"] == "pb_saved_sim"
     assert data["trust_alert_triggered"] is False
     assert "CRITICAL TRUST ALERT TRIGGERED" not in data["prompt_section"]
+    assert "display_summary" in data
+    assert "Hey Stored," in data["display_summary"] or "Hey there," in data["display_summary"]
 
 
 def test_get_runtime_prompt_introspection_endpoint(client, temp_store):
@@ -811,3 +819,47 @@ async def test_awaitable_playbook_dual_mode_and_private_attr(temp_store, monkeyp
     from_disk = temp_store.get(pb2.id)
     assert from_disk.quality_score == awaited_saved.quality_score
     assert from_disk.quality_feedback.get("quality_source") == "ai_llm"
+
+
+@pytest.mark.asyncio
+async def test_ai_summarize_playbook_voice_mocked_and_fallback(monkeypatch):
+    """Verify ai_summarize_playbook_voice with mocked LLM and fallback path."""
+    import sys
+    from copilot.playbook import Playbook, PlaybookBasicInfo, ai_summarize_playbook_voice
+
+    pb = Playbook(basic_info=PlaybookBasicInfo(name="Salman Farsi"))
+    full_prompt = "### ACTIVE PLAYBOOK METHODOLOGY LENS: SALMAN FARSI ###\n- Objection Tone: Empathetic & Resilient"
+
+    # 1. Fallback when no API keys
+    monkeypatch.delenv("GROQ_API_KEY", raising=False)
+    monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+    res_none = await ai_summarize_playbook_voice(pb, full_prompt)
+    assert res_none is None
+
+    # 2. Mocked LLM response
+    mock_summary = (
+        "Hey Salman, I've got you.\n"
+        "I'll keep things confident, consultative, and short — leading with empathy when objections come up.\n"
+        "Let's build conversations people actually want to keep having."
+    )
+    class DummyChoice:
+        message = type("Msg", (), {"content": mock_summary})()
+    class DummyResp:
+        choices = [DummyChoice()]
+    class DummyCompletions:
+        def create(self, **kwargs):
+            return DummyResp()
+    class DummyChat:
+        completions = DummyCompletions()
+    class DummyGroq:
+        def __init__(self, **kwargs):
+            self.chat = DummyChat()
+
+    monkeypatch.setenv("GROQ_API_KEY", "gsk_test_mock_key")
+    dummy_module = type("dummy_groq", (), {"Groq": DummyGroq})
+    monkeypatch.setitem(sys.modules, "groq", dummy_module)
+
+    res_mock = await ai_summarize_playbook_voice(pb, full_prompt)
+    assert res_mock == mock_summary
+    assert "Hey Salman" in res_mock
+
