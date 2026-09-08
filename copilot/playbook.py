@@ -253,6 +253,7 @@ class PlaybookObjection(BaseModel):
         description="Reframe | Clarify | Validate | Educate | Quantify | Differentiate | De-Risk | Challenge | Social Proof | Future Pace | Direct",
     )
     ai_suggestion: str = Field("", max_length=500)
+    user_comment: Optional[str] = Field(None, max_length=500, description="User's own note/refinement on the AI suggestion")
     last_updated: str = Field(default_factory=lambda: datetime.now(timezone.utc).strftime("%b %d, %Y"))
 
     @field_validator("category", mode="before")
@@ -291,7 +292,7 @@ class PlaybookRuntimeSettings(BaseModel):
         "Do keep teleprompts under 25 words.",
         "Do not offer unauthorized price cuts.",
         "Do not disparage competitors or existing agents."
-    ])
+    ], description="Conversation Guardrails")
     language_rules: List[str] = Field(default_factory=lambda: [
         "Use: 'net proceeds', 'timeline clarity', 'direct buyers'",
         "Avoid: 'cheap', 'hurry up', 'standard commission'"
@@ -623,6 +624,108 @@ def classify_stage_tag_heuristic(goal: str, stage_name: str = "") -> str:
         return f"Goal: {first_keyword}"
 
 
+async def ai_generate_objection_suggestion(
+    objection_text: str,
+    category: Union[str, List[str]],
+    response_style: str,
+    philosophy: str = "",
+    user_comment: str = "",
+) -> Optional[str]:
+    """Generates a concise strategic tip for an objection using Groq or OpenAI."""
+    if not objection_text or not objection_text.strip():
+        return None
+
+    cat_display = ", ".join(category) if isinstance(category, list) else str(category)
+    prompt = (
+        f'You are a sales methodology coach. A salesperson needs a strategic tip for handling this objection:\n\n'
+        f'Objection: "{objection_text}"\n'
+        f'Category: {cat_display}\n'
+        f'Assigned Response Style: {response_style}\n'
+        f'{("Rep\'s Philosophy: " + philosophy + chr(10)) if philosophy else ""}'
+        f'{("User\'s Note / Direction: " + user_comment + chr(10)) if user_comment else ""}'
+        f'\nWrite ONE concise strategic tip (1-2 sentences, under 40 words) for how to apply the "{response_style}" '
+        f'response style to this specific objection.\n'
+        f'{"Incorporate the user\'s note/direction into the refined tip. " if user_comment else ""}'
+        f'Be specific and tactical, not generic.\n\n'
+        f'Output ONLY the tip text, nothing else.'
+    )
+
+    api_key_groq = os.getenv("GROQ_API_KEY")
+    api_key_openai = os.getenv("OPENAI_API_KEY")
+
+    if api_key_groq and not api_key_groq.startswith("mock_"):
+        try:
+            import groq
+            client = groq.Groq(api_key=api_key_groq, timeout=5.0)
+            groq_model = os.getenv("GROQ_FAST_MODEL", "llama-3.1-8b-instant")
+            def _call_groq():
+                resp = client.chat.completions.create(
+                    model=groq_model,
+                    messages=[{"role": "user", "content": prompt}],
+                    temperature=0.3,
+                    max_tokens=80,
+                )
+                return resp.choices[0].message.content.strip()
+
+            res = await asyncio.to_thread(_call_groq)
+            if "<think>" in res and "</think>" in res:
+                res = res.split("</think>")[-1].strip()
+            res = res.strip().strip('"\'')
+            if res:
+                return res
+        except Exception as exc:
+            LOGGER.debug("Groq objection suggestion fallback: %s", exc)
+
+    if api_key_openai and not api_key_openai.startswith("mock_"):
+        try:
+            import openai
+            client = openai.OpenAI(api_key=api_key_openai, timeout=5.0)
+            def _call_openai():
+                resp = client.chat.completions.create(
+                    model=os.getenv("OPENAI_MINI_MODEL", "gpt-4o-mini"),
+                    messages=[{"role": "user", "content": prompt}],
+                    temperature=0.3,
+                    max_tokens=80,
+                )
+                return resp.choices[0].message.content.strip()
+
+            res = await asyncio.to_thread(_call_openai)
+            res = res.strip().strip('"\'')
+            if res:
+                return res
+        except Exception as exc:
+            LOGGER.debug("OpenAI objection suggestion fallback: %s", exc)
+
+    return None
+
+
+def generate_objection_suggestion_heuristic(
+    objection_text: str,
+    category: Union[str, List[str]],
+    response_style: str,
+    philosophy: str = "",
+    user_comment: str = "",
+) -> str:
+    """Deterministic fallback tactical tip for objection response."""
+    style_tips = {
+        "Quantify": "Focus on net proceeds and market exposure metrics rather than gross commission.",
+        "Reframe": "Shift the conversation from transactional friction to overall equity preservation and timeline certainty.",
+        "Validate": "Acknowledge the homeowner's perspective first, building trust before pivoting to your marketing differentiator.",
+        "Clarify": "Ask diagnostic questions to isolate whether their hesitation is rooted in pricing, timing, or past agent disappointment.",
+        "De-Risk": "Offer performance guarantees or a flexible cancellation clause to remove perceived risk.",
+        "Direct": "Confront the root friction candidly, contrasting passive listing tactics with proactive buyer outreach.",
+        "Educate": "Share localized hyper-recent absorption rate statistics to ground their expectations in current market facts.",
+        "Differentiate": "Highlight your active marketing assets and track record to clearly distinguish yourself from average agents.",
+        "Challenge": "Respectfully challenge the assumption that waiting or cutting fees leads to higher net take-home dollars.",
+        "Social Proof": "Cite a specific recent comparable client who had the identical hesitation before securing an above-asking offer.",
+        "Future Pace": "Walk them through the emotional cost of sitting on the market for another 90 days vs taking action now.",
+    }
+    tip = style_tips.get(response_style, "Focus on diagnosing the underlying root cause before recommending a tailored solution.")
+    if user_comment:
+        return f"{tip} Note: {user_comment}"
+    return tip
+
+
 def serialize_playbook_prompt_section(
     playbook: Playbook,
     current_lead_type: Optional[str] = None,
@@ -669,6 +772,8 @@ def serialize_playbook_prompt_section(
                 f"  - Suggested Response Style (if Core confirms relevance): {obj.response_style}\n"
                 f"  - Reference Strategy Tip: {obj.ai_suggestion}\n"
             )
+            if getattr(obj, "user_comment", None):
+                matching_obj_str += f"  - User's Own Note: {obj.user_comment}\n"
 
     # Trust sensitivity guidance
     trust_note_str = ""
@@ -696,7 +801,7 @@ def serialize_playbook_prompt_section(
         )
 
     lines.extend([
-        "- Do / Don't Boundaries:\n" + do_dont_lines,
+        "- Conversation Guardrails:\n" + do_dont_lines,
         "- Language Rules:\n" + lang_rules,
     ])
 
@@ -1310,6 +1415,45 @@ def get_playbook_router(store: Optional[PlaybookStore] = None) -> APIRouter:
         # 2. Deterministic semantic heuristic fallback
         heuristic_tag = classify_stage_tag_heuristic(goal=goal, stage_name=stage_name)
         return {"tag": heuristic_tag, "goal": goal, "engine": "semantic_heuristic"}
+
+    @router.post("/generate-objection-suggestion")
+    async def generate_objection_suggestion_endpoint(payload: Dict[str, Any]):
+        """Generates dynamic strategic tip for an objection based on text, category, style, and user comment/direction."""
+        obj_text = (payload.get("objection_text") or payload.get("objection") or "").strip()
+        cat = payload.get("category", ["Financial"])
+        style = payload.get("response_style", "Reframe")
+        philosophy = payload.get("philosophy", "")
+        user_comment = (payload.get("user_comment") or "").strip()
+
+        if not obj_text:
+            raise HTTPException(status_code=400, detail="objection_text is required")
+
+        ai_tip = await ai_generate_objection_suggestion(
+            objection_text=obj_text,
+            category=cat,
+            response_style=style,
+            philosophy=philosophy,
+            user_comment=user_comment,
+        )
+        if ai_tip:
+            return {
+                "suggestion": ai_tip,
+                "engine": "ai_llm",
+                "user_comment": user_comment or None,
+            }
+
+        heuristic_tip = generate_objection_suggestion_heuristic(
+            objection_text=obj_text,
+            category=cat,
+            response_style=style,
+            philosophy=philosophy,
+            user_comment=user_comment,
+        )
+        return {
+            "suggestion": heuristic_tip,
+            "engine": "semantic_heuristic",
+            "user_comment": user_comment or None,
+        }
 
     @router.post("/evaluate-quality")
     async def evaluate_quality_endpoint(req: PlaybookSaveRequest):

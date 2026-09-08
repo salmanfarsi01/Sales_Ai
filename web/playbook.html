@@ -1955,7 +1955,7 @@
 
         <div class="grid-2-col">
           <div class="form-group">
-            <label class="form-label" for="doDontBoundariesInput">DO / DON'T OPERATIONAL BOUNDARIES (1 PER LINE)</label>
+            <label class="form-label" for="doDontBoundariesInput">Conversation Guardrails</label>
             <textarea id="doDontBoundariesInput" class="input-textarea" style="min-height: 90px;" oninput="handleInputChange()">Do validate emotion before offering facts.
 Do keep teleprompts under 25 words.
 Do not offer unauthorized price cuts.
@@ -2570,14 +2570,31 @@ Avoid: 'cheap', 'hurry up', 'standard commission'</textarea>
           </div>
         </div>
 
-        <div class="ai-suggestion-box">
+        <div class="ai-suggestion-box" style="margin-top: 14px;">
           <div style="color: var(--primary); font-size: 1.2rem;">✨</div>
-          <div>
-            <div style="font-size: 0.82rem; font-weight: 800; color: var(--primary);">PitchProX AI Suggestion</div>
-            <div style="font-size: 0.82rem; color: var(--slate-700); margin-top: 2px;" id="modalAiSuggestionText">
+          <div style="flex: 1;">
+            <div style="display: flex; justify-content: space-between; align-items: center;">
+              <div style="font-size: 0.82rem; font-weight: 800; color: var(--primary);">PitchProX AI Suggestion</div>
+              <button type="button" class="btn-tag-generate" style="font-size: 0.72rem; padding: 2px 8px; border-radius: 4px; border: 1px solid var(--primary-light); background: white; color: var(--primary); cursor: pointer;" onclick="requestAiObjectionSuggestion()">⚡ Re-generate</button>
+            </div>
+            <div style="font-size: 0.82rem; color: var(--slate-700); margin-top: 4px; line-height: 1.4;" id="modalAiSuggestionText">
               Focus on net proceeds and market exposure metrics rather than gross commission.
             </div>
           </div>
+        </div>
+
+        <div class="form-group" style="margin-top: 12px;">
+          <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 4px;">
+            <label class="form-label" for="objUserCommentInput" style="margin-bottom: 0;">YOUR NOTES ON THIS SUGGESTION (OPTIONAL)</label>
+            <button type="button" id="btnRefineAiSuggestion" onclick="requestAiObjectionSuggestion()" style="background: var(--primary); color: white; border: none; border-radius: 4px; padding: 4px 10px; font-size: 0.75rem; font-weight: 600; cursor: pointer; display: inline-flex; align-items: center; gap: 4px;">
+              ✨ Refine Suggestion with AI
+            </button>
+          </div>
+          <textarea id="objUserCommentInput" class="input-textarea" style="min-height: 55px;" 
+                    placeholder="e.g., I'd rather emphasize speed of sale and seller convenience instead of price..."></textarea>
+          <span style="font-size: 0.72rem; color: var(--slate-400); margin-top: 3px; display: block;">
+            Add your own feedback or guidance, then click <strong>Refine Suggestion with AI</strong> so the AI can tailor the tip to your preference.
+          </span>
         </div>
       </div>
       <div class="modal-footer">
@@ -3084,7 +3101,10 @@ Avoid: 'cheap', 'hurry up', 'standard commission'</textarea>
         <tr class="obj-row">
           <td>
             <div class="obj-title">${escapeHtml(o.objection)}</div>
-            <div class="obj-subcat">${escapeHtml(o.ai_suggestion.substring(0, 48))}...</div>
+            <div class="obj-subcat">
+              ${escapeHtml((o.ai_suggestion || '').substring(0, 48))}${(o.ai_suggestion || '').length > 48 ? '...' : ''}
+              ${o.user_comment ? `<span class="tag-pill" style="font-size: 0.65rem; background: #e0f2fe; color: #0369a1; padding: 1px 6px; margin-left: 5px; font-weight: 600;">📝 Note</span>` : ''}
+            </div>
           </td>
           <td>
             ${o.lead_types.slice(0, 2).map(lt => `<span class="tag-pill">${escapeHtml(lt)}</span>`).join('')}
@@ -3126,6 +3146,8 @@ Avoid: 'cheap', 'hurry up', 'standard commission'</textarea>
       document.getElementById('catCheck_Logistics').checked = false;
       document.getElementById('catCheck_Relationship').checked = false;
       document.getElementById('modalRespStyleSelect').value = 'Reframe';
+      document.getElementById('objUserCommentInput').value = '';
+      document.getElementById('modalAiSuggestionText').innerText = 'Type an objection above and click "Refine Suggestion with AI" or enter a note to get a tailored strategic tip.';
       document.getElementById('objectionModal').classList.add('active');
     }
 
@@ -3141,6 +3163,7 @@ Avoid: 'cheap', 'hurry up', 'standard commission'</textarea>
       document.getElementById('catCheck_Logistics').checked = cats.includes('Logistics');
       document.getElementById('catCheck_Relationship').checked = cats.includes('Relationship');
       document.getElementById('modalRespStyleSelect').value = o.response_style || 'Reframe';
+      document.getElementById('objUserCommentInput').value = o.user_comment || '';
       document.getElementById('modalAiSuggestionText').innerText = o.ai_suggestion || 'Focus on value and net proceeds.';
       document.getElementById('objectionModal').classList.add('active');
     }
@@ -3149,10 +3172,67 @@ Avoid: 'cheap', 'hurry up', 'standard commission'</textarea>
       document.getElementById('objectionModal').classList.remove('active');
     }
 
+    async function requestAiObjectionSuggestion() {
+      const text = document.getElementById('clientObjInput').value.trim();
+      if (!text) {
+        showToast('Please enter objection text first');
+        document.getElementById('clientObjInput').focus();
+        return;
+      }
+      const checkedBoxes = Array.from(document.querySelectorAll('input[name="modalCatCheckbox"]:checked'));
+      const cats = checkedBoxes.length > 0 ? checkedBoxes.map(b => b.value) : ['Financial'];
+      const style = document.getElementById('modalRespStyleSelect').value;
+      const philosophy = document.getElementById('philosophyText')?.value?.trim() || '';
+      const userComment = document.getElementById('objUserCommentInput').value.trim();
+
+      const btn = document.getElementById('btnRefineAiSuggestion');
+      const boxText = document.getElementById('modalAiSuggestionText');
+      const prevBtnHtml = btn ? btn.innerHTML : '';
+      if (btn) {
+        btn.disabled = true;
+        btn.innerHTML = '⏳ Refining...';
+      }
+      boxText.innerText = 'Consulting sales methodology AI...';
+
+      try {
+        const res = await fetch('/api/playbook/generate-objection-suggestion', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            objection_text: text,
+            category: cats,
+            response_style: style,
+            philosophy: philosophy,
+            user_comment: userComment
+          })
+        });
+        if (res.ok) {
+          const data = await res.json();
+          if (data && data.suggestion) {
+            boxText.innerText = data.suggestion;
+            showToast(userComment ? '✨ AI refined suggestion with your notes!' : '✨ AI generated strategic tip');
+          }
+        } else {
+          boxText.innerText = 'Focus on value, net proceeds, and isolating client timeline friction.';
+        }
+      } catch (err) {
+        console.error('Failed to generate objection suggestion:', err);
+        boxText.innerText = 'Focus on value, net proceeds, and isolating client timeline friction.';
+      } finally {
+        if (btn) {
+          btn.disabled = false;
+          btn.innerHTML = prevBtnHtml || '✨ Refine Suggestion with AI';
+        }
+      }
+    }
+
     function submitObjectionForm() {
       const text = document.getElementById('clientObjInput').value.trim();
       const style = document.getElementById('modalRespStyleSelect').value;
       const editId = document.getElementById('editingObjId').value;
+      const userComment = document.getElementById('objUserCommentInput').value.trim();
+      const aiSug = document.getElementById('modalAiSuggestionText').innerText.trim();
+
       if (!text) return alert('Enter objection text.');
 
       const checkedBoxes = Array.from(document.querySelectorAll('input[name="modalCatCheckbox"]:checked'));
@@ -3165,15 +3245,21 @@ Avoid: 'cheap', 'hurry up', 'standard commission'</textarea>
           target.objection = text;
           target.category = selectedCats;
           target.response_style = style;
+          target.ai_suggestion = (aiSug && !aiSug.startsWith('Type an objection') && !aiSug.startsWith('Consulting')) ? aiSug : (target.ai_suggestion || 'Focus on value and net proceeds.');
+          target.user_comment = userComment || null;
         }
       } else {
+        const fallbackTip = (aiSug && !aiSug.startsWith('Type an objection') && !aiSug.startsWith('Consulting')) 
+          ? aiSug 
+          : 'Focus on diagnosing the underlying friction before offering tailored value.';
         objections.push({
           id: 'obj_' + Math.random().toString(36).substring(2, 8),
           objection: text,
           category: selectedCats,
           lead_types: ['Expired Listings', 'FSBO (For Sale By Owner)'],
           response_style: style,
-          ai_suggestion: 'Standardized methodology response.',
+          ai_suggestion: fallbackTip,
+          user_comment: userComment || null,
           last_updated: 'May 2, 2024'
         });
       }

@@ -260,7 +260,7 @@ def test_serialize_playbook_prompt_section():
     assert "Candidate Objection Match" in prompt_section
     assert "I don't want to pay commission." in prompt_section
     assert "Quantify" in prompt_section
-    assert "Do / Don't Boundaries" in prompt_section
+    assert "Conversation Guardrails" in prompt_section
 
 
 def test_semantic_objection_matching_paraphrased():
@@ -982,4 +982,69 @@ def test_point_6_no_fabricated_benchmarks():
     assert "completeness_score" in eval_res
     assert "coverage_metrics" in eval_res
     assert eval_res["coverage_metrics"]["category_diversity"] == "4 of 4 categories covered"
+
+
+def test_generate_objection_suggestion_with_user_comment(client):
+    """Verify POST /api/playbook/generate-objection-suggestion handles dynamic suggestions and user comment."""
+
+    # 1. Without user comment
+    resp1 = client.post(
+        "/api/playbook/generate-objection-suggestion",
+        json={
+            "objection_text": "I don't want to pay commission.",
+            "category": ["Financial"],
+            "response_style": "Quantify",
+            "philosophy": "Focus on net equity."
+        }
+    )
+    assert resp1.status_code == 200
+    data1 = resp1.json()
+    assert "suggestion" in data1
+    assert len(data1["suggestion"]) > 10
+
+    # 2. With user comment refining the direction
+    resp2 = client.post(
+        "/api/playbook/generate-objection-suggestion",
+        json={
+            "objection_text": "I don't want to pay commission.",
+            "category": ["Financial"],
+            "response_style": "Quantify",
+            "philosophy": "Focus on net equity.",
+            "user_comment": "Emphasize speed of sale and seller convenience instead of price."
+        }
+    )
+    assert resp2.status_code == 200
+    data2 = resp2.json()
+    assert "suggestion" in data2
+    assert data2["user_comment"] == "Emphasize speed of sale and seller convenience instead of price."
+
+
+def test_objection_user_comment_in_prompt_section():
+    """Verify that user_comment on PlaybookObjection flows into the serialized prompt block."""
+    from copilot.playbook import serialize_playbook_prompt_section, PlaybookObjection, Playbook, PlaybookBasicInfo
+
+    obj = PlaybookObjection(
+        id="obj_custom_1",
+        objection="Your fee is too high.",
+        category=["Financial"],
+        response_style="Quantify",
+        ai_suggestion="Focus on net proceeds and marketing leverage.",
+        user_comment="Highlight our proven 98.4% list-to-sale ratio."
+    )
+    pb = Playbook(
+        title="Custom Method",
+        basic_info=PlaybookBasicInfo(name="Custom Method"),
+        objections=[obj]
+    )
+
+    prompt = serialize_playbook_prompt_section(
+        pb,
+        detected_objection="Your fee is too high."
+    )
+
+    assert "Candidate Objection Match" in prompt
+    assert "- Possible Objection: Your fee is too high." in prompt
+    assert "- Reference Strategy Tip: Focus on net proceeds and marketing leverage." in prompt
+    assert "- User's Own Note: Highlight our proven 98.4% list-to-sale ratio." in prompt
+
 
