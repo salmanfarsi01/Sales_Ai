@@ -1569,18 +1569,6 @@
             <div class="char-counter" id="descCounter">63/120</div>
         </div>
 
-        <div style="margin-bottom: 20px; padding: 12px 16px; background: var(--slate-50); border: 1.5px dashed var(--slate-200); border-radius: 12px; display: flex; align-items: center; justify-content: space-between;">
-          <div>
-            <label class="checkbox-label" style="display: flex; align-items: center; gap: 8px; font-weight: 700; font-size: 0.88rem; color: var(--slate-800); cursor: pointer;">
-              <input type="checkbox" id="isReadonlyToggle" onchange="toggleReadonlyBadge(this.checked); handleInputChange()">
-              <span>🔒 Lock as Read-Only Premium Methodology Package</span>
-            </label>
-            <p style="font-size: 0.76rem; color: var(--slate-500); margin-left: 24px; margin-top: 2px;">
-              Enforces HTTP 403 Forbidden protection on the backend against unauthorized edits or deletion.
-            </p>
-          </div>
-          <span id="readonlyBadgePreview" class="tag-pill" style="display: none; font-size: 0.72rem; background: #fef2f2; color: #b91c1c; border: 1px solid #fecaca; font-weight: 800;">🔒 READ-ONLY</span>
-        </div>
           <div class="form-group">
             <label class="form-label" for="industrySelect">Select Industry / Niche</label>
             <select id="industrySelect" class="select-dropdown" onchange="handleInputChange()">
@@ -2323,7 +2311,6 @@ Avoid: 'cheap', 'hurry up', 'standard commission'</textarea>
                   <h3 style="font-size: 1.1rem; font-weight: 800; color: var(--slate-900); margin: 0;">Quality Check</h3>
                   <span id="qualitySourceBadge" class="tag-pill" style="font-size: 0.68rem; font-weight: 700; background: #e0f2fe; color: #0369a1; border: 1px solid #bae6fd;">AI-Reviewed</span>
                 </div>
-                <p id="qualityCheckSummary" style="font-size: 0.85rem; color: var(--slate-500); margin-top: 4px; margin-bottom: 2px;">Compared against internal baseline heuristics and other playbooks created in this workspace</p>
                 <div id="qualityLlmFeedback" style="margin-top: 8px; font-size: 0.8rem; color: #334155; line-height: 1.4; display: none; background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 6px; padding: 8px 12px;"></div>
               </div>
             </div>
@@ -3323,13 +3310,11 @@ Avoid: 'cheap', 'hurry up', 'standard commission'</textarea>
       const payload = constructPayload();
       const scoreEl = document.getElementById('qualityScoreDisplay');
       const badgeEl = document.getElementById('qualityBadgeLabel');
-      const summaryEl = document.getElementById('qualityCheckSummary');
       const srcBadge = document.getElementById('qualitySourceBadge');
       const feedbackEl = document.getElementById('qualityLlmFeedback');
 
       if (scoreEl) scoreEl.innerText = '--';
       if (badgeEl) badgeEl.innerText = 'Evaluating...';
-      if (summaryEl) summaryEl.innerText = 'Analyzing playbook methodology completeness and structure...';
       if (srcBadge) {
         srcBadge.innerText = '⏳ AI Reviewing...';
         srcBadge.style.background = '#f1f5f9';
@@ -3348,7 +3333,6 @@ Avoid: 'cheap', 'hurry up', 'standard commission'</textarea>
           lastEvaluatedQualityScore = data.quality_score;
           if (scoreEl && data.quality_score) scoreEl.innerText = data.quality_score;
           if (badgeEl && data.rating) badgeEl.innerText = data.rating;
-          if (summaryEl) summaryEl.innerText = data.summary || 'Compared against internal baseline heuristics and other playbooks created in this workspace';
 
           if (srcBadge) {
             if (data.quality_source === 'ai_llm') {
@@ -3380,7 +3364,6 @@ Avoid: 'cheap', 'hurry up', 'standard commission'</textarea>
             }
           }
         } else {
-          if (summaryEl) summaryEl.innerText = 'Quality evaluation service unavailable.';
           if (srcBadge) {
             srcBadge.innerText = '⚠️ Offline';
             srcBadge.style.background = '#fef2f2';
@@ -3388,7 +3371,11 @@ Avoid: 'cheap', 'hurry up', 'standard commission'</textarea>
           }
         }
       } catch (e) {
-        if (summaryEl) summaryEl.innerText = 'Quality evaluation error: ' + e.message;
+        if (srcBadge) {
+          srcBadge.innerText = '⚠️ Error';
+          srcBadge.style.background = '#fef2f2';
+          srcBadge.style.color = '#dc2626';
+        }
       }
     }
 
@@ -3566,7 +3553,8 @@ Avoid: 'cheap', 'hurry up', 'standard commission'</textarea>
         if (d.basic_info?.philosophy) document.getElementById('philosophyText').value = d.basic_info.philosophy;
 
         if (d.is_readonly !== undefined) {
-          document.getElementById('isReadonlyToggle').checked = Boolean(d.is_readonly);
+          const roEl = document.getElementById('isReadonlyToggle');
+          if (roEl) roEl.checked = Boolean(d.is_readonly);
           toggleReadonlyBadge(Boolean(d.is_readonly));
         }
 
@@ -3668,7 +3656,8 @@ Avoid: 'cheap', 'hurry up', 'standard commission'</textarea>
         if (pb.basic_info?.philosophy) document.getElementById('philosophyText').value = pb.basic_info.philosophy;
 
         const isRo = Boolean(pb.is_readonly);
-        document.getElementById('isReadonlyToggle').checked = isRo;
+        const roEl = document.getElementById('isReadonlyToggle');
+        if (roEl) roEl.checked = isRo;
         toggleReadonlyBadge(isRo);
 
         if (pb.style?.trust_building_style) document.getElementById('trustBuildingStyleSelect').value = pb.style.trust_building_style;

@@ -674,7 +674,7 @@ async def test_ai_quality_evaluation_with_mocked_llm(monkeypatch):
     assert eval_res["quality_source"] == "ai_llm"
     assert eval_res["llm_evaluation"] == mock_llm_response
     assert "strengths" in eval_res
-    assert eval_res["summary"] == "Compared against internal baseline heuristics and other playbooks created in this workspace"
+    assert eval_res["summary"] == "Great job! Your playbook methodology is complete and ready to use."
     assert eval_res["methodology_assessment"] == "Highly coherent strategy progressing naturally to close."
 
     # Check the 40% structural / 60% LLM formula

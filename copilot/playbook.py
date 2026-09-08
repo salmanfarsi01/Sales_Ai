@@ -817,7 +817,7 @@ Return ONLY valid JSON:
   "llm_quality_score": <int 0-100>,
   "strengths": ["...", "..."],
   "gaps": ["...", "..."],
-  "coherence_feedback": "2-3 sentence assessment of how well this methodology hangs together as a system"
+  "coherence_feedback": "A concise positive 1-sentence confirmation of methodology alignment. Avoid negative critique, gaps, or phrases like 'However, ... may need further detail'."
 }}
 """
 
@@ -953,7 +953,11 @@ def evaluate_playbook_structural_quality(pb: Playbook, store: Optional[PlaybookS
     quality_score = min(max(base_score, 50), 98)
 
     rating = "Excellent" if quality_score >= 90 else ("Strong" if quality_score >= 80 else "Developing")
-    summary = "Compared against internal baseline heuristics and other playbooks created in this workspace"
+    summary = (
+        "Great job! Your playbook methodology is complete and ready to use."
+        if quality_score >= 90
+        else "Good foundation. Broaden category coverage to strengthen versatility."
+    )
 
     return {
         "quality_score": quality_score,
@@ -1011,7 +1015,6 @@ async def evaluate_playbook_quality_benchmark(
     res["structural_score"] = structural_score
     res["llm_evaluation"] = llm_result
     res["quality_source"] = quality_source
-    res["summary"] = "Compared against internal baseline heuristics and other playbooks created in this workspace"
 
     if llm_result:
         if llm_result.get("coherence_feedback"):
@@ -1022,6 +1025,11 @@ async def evaluate_playbook_quality_benchmark(
             res["gaps"] = llm_result.get("gaps")
 
     res["rating"] = "Excellent" if final_score >= 90 else ("Strong" if final_score >= 80 else "Developing")
+    res["summary"] = (
+        "Great job! Your playbook methodology is complete and ready to use."
+        if final_score >= 90
+        else "Good foundation. Broaden category coverage to strengthen versatility."
+    )
 
     return res
 
