@@ -1,43 +1,47 @@
 {
-  "id": "pb_8722170093fa",
-  "title": "Daniel G. Method",
-  "status": "published",
-  "current_step": 5,
-  "created_at": "2026-09-06T09:11:58.622983+00:00",
-  "updated_at": "2026-09-06T09:11:58.622983+00:00",
+  "id": "pb_82bc65649ef2",
+  "title": "Quality Test",
+  "status": "draft",
+  "current_step": 1,
+  "created_at": "2026-09-07T09:23:45.967481+00:00",
+  "updated_at": "2026-09-07T09:23:45.967481+00:00",
   "is_readonly": false,
   "source": "custom",
   "basic_info": {
-    "name": "Daniel G. Method",
-    "short_description": "My approach to building trust and closing more high-value deals.",
-    "industry": "SaaS / Software",
+    "name": "Quality Test",
+    "short_description": "",
+    "industry": "Real Estate",
     "lead_types": [
-      "Expired Listings"
+      "Expired Listings",
+      "FSBO (For Sale By Owner)",
+      "Pre-Expired Listings"
     ],
-    "experience_level": "Entry Level (0-1 yrs)",
-    "voice_phrases": "• \"Here's the thing\"\n• \"Bottom line\"\n• \"What I've seen is...\"\n• \"At the end of the day\"",
-    "philosophy": "1. showing transparency to gain trust\n2. giving reliable example to justify why our service will be best\n3. needed joyful appearance to client",
+    "experience_level": "Intermediate to Advanced",
+    "voice_phrases": "",
+    "philosophy": "Always add value",
     "goals": [
-      "Build stronger trust"
+      "Build stronger trust",
+      "Increase appointments",
+      "Close more deals"
     ]
   },
   "style": {
-    "overall_tone": "Friendly",
-    "communication_style": "Solution-Oriented",
+    "overall_tone": "Confident",
+    "communication_style": "Consultative",
     "energy_level": "Medium",
-    "sentence_style": "Detailed & Structured",
-    "formality": "Casual & Conversational",
-    "humor_level": "Moderate",
+    "sentence_style": "Short & Conversational",
+    "formality": "Professional",
+    "humor_level": "Light",
     "trust_building_style": "Validation-First",
     "objection_tone": "Empathetic & Resilient",
     "discovery_style": "Diagnostic / Question-Led",
     "closing_style": "Low-Pressure Next-Step Commitment",
     "follow_up_style": "Value-Added Persistence",
-    "voice_phrases": "• \"Here's the thing\"\n• \"Bottom line\"\n• \"What I've seen is...\"\n• \"At the end of the day\"",
-    "core_selling_principles": "1. showing transparency to gain trust\n2. giving reliable example to justify why our service will be best\n3. needed joyful appearance to client",
+    "voice_phrases": null,
+    "core_selling_principles": null,
     "runtime_settings": {
       "prompt_timing_sensitivity": "Normal",
-      "emotional_sensitivity": "High",
+      "emotional_sensitivity": "Normal",
       "objection_confidence_threshold": 0.75,
       "trust_alert_threshold": 0.7,
       "prompt_cooldown_seconds": 4,
@@ -60,7 +64,7 @@
       "name": "Opening",
       "goal": "Set a positive tone and gain engagement.",
       "description": "Create rapport and get permission to have a conversation.",
-      "tag": "",
+      "tag": "Goal: Engage",
       "icon": "hand"
     },
     {
@@ -69,7 +73,7 @@
       "name": "Discovery",
       "goal": "Understand their motivation and timeline.",
       "description": "Ask questions and uncover their situation and needs.",
-      "tag": "",
+      "tag": "Goal: Understand",
       "icon": "search"
     },
     {
@@ -78,7 +82,7 @@
       "name": "Value Proposition",
       "goal": "Build credibility and differentiate yourself.",
       "description": "Position your value and show how you solve their problem.",
-      "tag": "",
+      "tag": "Goal: Differentiate",
       "icon": "diamond"
     },
     {
@@ -87,7 +91,7 @@
       "name": "Handle Objections",
       "goal": "Overcome doubt and strengthen confidence.",
       "description": "Address concerns and remove hesitation.",
-      "tag": "",
+      "tag": "Goal: Resolve",
       "icon": "shield"
     },
     {
@@ -96,7 +100,7 @@
       "name": "Close",
       "goal": "Get a commitment to move forward.",
       "description": "Guide them to commit to the next step.",
-      "tag": "",
+      "tag": "Goal: Commit",
       "icon": "target"
     },
     {
@@ -105,17 +109,8 @@
       "name": "Follow Up",
       "goal": "Stay top of mind and convert later.",
       "description": "Reinforce value and keep the momentum.",
-      "tag": "",
+      "tag": "Goal: Nurture",
       "icon": "phone"
-    },
-    {
-      "id": "stage_gtmjrzj",
-      "order": 7,
-      "name": "Initial meeting",
-      "goal": "Understand client requirement",
-      "description": "just tell me how can ai handle the initial situation when client not getting interested on our service",
-      "tag": "Goal: Discover",
-      "icon": "hand"
     }
   ],
   "objections": [
@@ -127,10 +122,11 @@
       ],
       "lead_types": [
         "FSBO (For Sale By Owner)",
-        "Expired Listings"
+        "Expired Listings",
+        "Pre-Expired Listings"
       ],
       "response_style": "Quantify",
-      "ai_suggestion": "Highlight net proceeds. Mention MLS-represented sales closed 7.2% higher.",
+      "ai_suggestion": "This \"Quantify\" reframe highlights net take-home equity. Mention that MLS-represented listings in this area closed on average 7.2% higher.",
       "last_updated": "May 2, 2024"
     },
     {
@@ -140,11 +136,12 @@
         "Logistics"
       ],
       "lead_types": [
+        "FSBO (For Sale By Owner)",
         "Expired Listings",
         "Absentee Owners"
       ],
       "response_style": "Future Pace",
-      "ai_suggestion": "Validate market uncertainty, then project seasonal equity growth.",
+      "ai_suggestion": "Validate market uncertainty, then project seasonal equity growth to establish timeline clarity.",
       "last_updated": "May 2, 2024"
     },
     {
@@ -158,7 +155,7 @@
         "Pre-Expired Listings"
       ],
       "response_style": "Differentiate",
-      "ai_suggestion": "Respect loyalty, then ask diagnostic questions about current marketing reach.",
+      "ai_suggestion": "Respect loyalty, then ask diagnostic questions about current marketing reach and recent buyer feedback.",
       "last_updated": "May 2, 2024"
     },
     {
@@ -168,11 +165,12 @@
         "Risk"
       ],
       "lead_types": [
+        "FSBO (For Sale By Owner)",
         "Circle Prospecting",
         "Absentee Owners"
       ],
       "response_style": "Direct",
-      "ai_suggestion": "Be transparent about public records, then explain active buyer inquiries in area.",
+      "ai_suggestion": "Be transparent about public record property rolls, then immediately explain why active local buyers asked about their property.",
       "last_updated": "May 2, 2024"
     },
     {
@@ -182,11 +180,12 @@
         "Relationship"
       ],
       "lead_types": [
+        "Expired Listings",
         "Past Clients & Sphere",
         "Circle Prospecting"
       ],
       "response_style": "Validate",
-      "ai_suggestion": "Disarm friction: 'Understood, just curious if timing changed or if resolved?'",
+      "ai_suggestion": "Disarm friction with low-pressure validation: 'Understood, just curious if timing changed or if you already resolved the property need?'",
       "last_updated": "May 2, 2024"
     },
     {
@@ -197,17 +196,19 @@
       ],
       "lead_types": [
         "Investor / Cash Buyers",
-        "Pre-Foreclosure"
+        "Pre-Foreclosure",
+        "Absentee Owners"
       ],
       "response_style": "Reframe",
-      "ai_suggestion": "Reframe trade-off between rate drops and buyer competition surges.",
+      "ai_suggestion": "Reframe the trade-off between rate drops and inventory surges that drive acquisition competition.",
       "last_updated": "May 2, 2024"
     },
     {
       "id": "obj_7",
       "objection": "We need to think about it.",
       "category": [
-        "Logistics"
+        "Logistics",
+        "Risk"
       ],
       "lead_types": [
         "Trust & Estate",
@@ -215,7 +216,7 @@
         "Divorce"
       ],
       "response_style": "Clarify",
-      "ai_suggestion": "Clarify whether it is timeline, estate steps, or family consensus.",
+      "ai_suggestion": "Clarify whether it is the timeline, legal estate steps, or family consensus holding back the next milestone.",
       "last_updated": "May 2, 2024"
     },
     {
@@ -226,10 +227,11 @@
       ],
       "lead_types": [
         "Just Listed",
-        "Just Sold"
+        "Just Sold",
+        "Circle Prospecting"
       ],
       "response_style": "De-Risk",
-      "ai_suggestion": "Offer 1-page market snapshot while locking in a brief calendar check-in.",
+      "ai_suggestion": "Offer a 1-page local market snapshot while locking in a 5-minute calendar check-in next Tuesday.",
       "last_updated": "May 2, 2024"
     }
   ],
@@ -259,33 +261,63 @@
       "icon": "file"
     }
   ],
-  "completeness_score": 100,
-  "quality_score": 98,
+  "completeness_score": 84,
+  "quality_score": 88,
   "quality_feedback": {
-    "quality_score": 98,
-    "completeness_score": 100,
-    "rating": "Excellent",
-    "summary": "Great job! Your playbook methodology is complete and ready to use.",
-    "benchmark_comparison": "Compared against Consultative B2B High-Trust Methodology Standard (N=21 cohort; median 5.1 stages, 6.7 objections)",
-    "methodology_assessment": "Structural quality assessment based on methodology completeness and coverage",
+    "quality_score": 88,
+    "structural_score": 93,
+    "completeness_score": 84,
+    "rating": "Strong",
+    "summary": "The playbook presents a coherent framework with a clear philosophy, logical stages, and a well‑structured objection library. However, the abstraction of objection responses and the lack of detailed follow‑up actions leave some gaps that could weaken execution consistency.",
+    "benchmark_comparison": "Compared against Top Producer Real Estate Methodology Standard (NAR & Elite Coaching) (N=32 cohort; median 5.3 stages, 7.8 objections)",
+    "methodology_assessment": "The playbook presents a coherent framework with a clear philosophy, logical stages, and a well‑structured objection library. However, the abstraction of objection responses and the lack of detailed follow‑up actions leave some gaps that could weaken execution consistency.",
+    "quality_source": "ai_llm",
     "cohort_comparison_metrics": {
-      "industry": "General",
-      "cohort_name": "Consultative B2B High-Trust Methodology Standard",
-      "cohort_size": 21,
-      "workspace_playbooks_analyzed": 1,
-      "cohort_median_stages": 5.1,
-      "cohort_median_objections": 6.7,
-      "stages_delta": 1.9,
-      "objections_delta": 1.3,
+      "industry": "Real Estate",
+      "cohort_name": "Top Producer Real Estate Methodology Standard (NAR & Elite Coaching)",
+      "cohort_size": 32,
+      "workspace_playbooks_analyzed": 8,
+      "cohort_median_stages": 5.3,
+      "cohort_median_objections": 7.8,
+      "stages_delta": 0.7,
+      "objections_delta": 0.2,
       "category_coverage_ratio": "4/4",
-      "percentile_rank": 98
+      "percentile_rank": 88
     },
     "coverage_metrics": {
-      "stages_count": 7,
+      "stages_count": 6,
       "objections_count": 8,
       "category_diversity": "4 of 4 categories covered",
-      "tone_calibration": "Friendly"
-    }
+      "tone_calibration": "Confident"
+    },
+    "llm_evaluation": {
+      "llm_quality_score": 85,
+      "strengths": [
+        "Clear guiding philosophy that emphasizes value addition",
+        "Logical progression of conversation stages from opening to follow‑up",
+        "Comprehensive objection library covering major objection categories",
+        "Diverse objection categories ensuring broad coverage"
+      ],
+      "gaps": [
+        "Objection responses are high‑level categories rather than concrete scripts",
+        "No explicit handling for product‑specific objections",
+        "Follow‑up stage lacks detailed actions or metrics",
+        "No success metrics or KPI definitions"
+      ],
+      "coherence_feedback": "The playbook presents a coherent framework with a clear philosophy, logical stages, and a well‑structured objection library. However, the abstraction of objection responses and the lack of detailed follow‑up actions leave some gaps that could weaken execution consistency."
+    },
+    "strengths": [
+      "Clear guiding philosophy that emphasizes value addition",
+      "Logical progression of conversation stages from opening to follow‑up",
+      "Comprehensive objection library covering major objection categories",
+      "Diverse objection categories ensuring broad coverage"
+    ],
+    "gaps": [
+      "Objection responses are high‑level categories rather than concrete scripts",
+      "No explicit handling for product‑specific objections",
+      "Follow‑up stage lacks detailed actions or metrics",
+      "No success metrics or KPI definitions"
+    ]
   },
   "metadata": {}
 }

@@ -9,7 +9,7 @@ Playbook Integration Specification (Version 1.0):
 - Controlled Objection Library with 4 canonical categories (Financial, Risk, Logistics, Relationship)
   supporting multiple categories per objection and 11 standardized response styles.
 - Runtime sensitivity & threshold controls (Prompt Timing, Emotional Sensitivity, Objection Confidence,
-  Trust Alert Threshold, Prompt Cooldown, Do/Don't Boundaries, Language Rules).
+  Trust Sensitivity Threshold, Prompt Cooldown, Do/Don't Boundaries, Language Rules).
 - Spec Section 3 named components: Trust-Building Style, Objection Tone, Discovery Style,
   Closing Style, Follow-Up Style.
 - Semantic objection matching with confidence threshold gating.
@@ -279,9 +279,12 @@ class ResponseSequenceStep(BaseModel):
 class PlaybookRuntimeSettings(BaseModel):
     """Runtime sensitivity and boundary rules from Playbook Specification Section 3."""
     prompt_timing_sensitivity: str = Field("Normal", description="Normal | Aggressive | Relaxed")
-    emotional_sensitivity: str = Field("Normal", description="Normal | High | Adaptive")
+    emotional_sensitivity: str = Field(
+        "Normal",
+        description="Normal | High | Adaptive — Adaptive adjusts emphasis to live in-call signals only; does not create persistent behavior changes outside the approved learning pipeline."
+    )
     objection_confidence_threshold: float = Field(0.75, ge=0.0, le=1.0)
-    trust_alert_threshold: float = Field(0.70, ge=0.0, le=1.0)
+    trust_sensitivity_threshold: float = Field(0.70, ge=0.0, le=1.0, description="Point below which Core should weight trust deterioration more heavily")
     prompt_cooldown_seconds: int = Field(4, ge=1, le=30)
     do_dont_boundaries: List[str] = Field(default_factory=lambda: [
         "Do validate emotion before offering facts.",
@@ -294,12 +297,22 @@ class PlaybookRuntimeSettings(BaseModel):
         "Avoid: 'cheap', 'hurry up', 'standard commission'"
     ])
 
+    @property
+    def trust_alert_threshold(self) -> float:
+        return self.trust_sensitivity_threshold
+
+    @trust_alert_threshold.setter
+    def trust_alert_threshold(self, val: float) -> None:
+        self.trust_sensitivity_threshold = val
+
     @model_validator(mode="before")
     @classmethod
     def handle_aliases(cls, data: Any) -> Any:
         if isinstance(data, dict):
             if "prompt_timing" in data and "prompt_timing_sensitivity" not in data:
                 data["prompt_timing_sensitivity"] = data["prompt_timing"]
+            if "trust_alert_threshold" in data and "trust_sensitivity_threshold" not in data:
+                data["trust_sensitivity_threshold"] = data["trust_alert_threshold"]
         return data
 
     @field_validator("do_dont_boundaries", "language_rules", mode="before")
@@ -621,7 +634,7 @@ def serialize_playbook_prompt_section(
     Enforces:
     - Semantic objection matching gated by objection_confidence_threshold.
     - Spec Section 3 distinct style components (Trust, Objection Tone, Discovery, Close, Follow-Up).
-    - Critical trust alert gated by trust_alert_threshold.
+    - Trust sensitivity guidance gated by trust_sensitivity_threshold.
     """
     tone = playbook.style.overall_tone
     comm_style = playbook.style.communication_style
@@ -649,19 +662,22 @@ def serialize_playbook_prompt_section(
             obj, confidence = match_result
             cat_display = ", ".join(obj.category) if isinstance(obj.category, list) else str(obj.category)
             matching_obj_str = (
-                f"\n  [Matched Objection Rule (Confidence: {int(confidence * 100)}% >= Threshold: {int(settings.objection_confidence_threshold * 100)}%)]:\n"
-                f"  - Objection: {obj.objection} ({cat_display})\n"
-                f"  - Response Style: {obj.response_style}\n"
-                f"  - AI Strategy Tip: {obj.ai_suggestion}\n"
+                f"\n  [Candidate Objection Match — Lexical Similarity: {int(confidence * 100)}% "
+                f"(reference signal only; final relevance should be determined using full conversational context, "
+                f"objection recurrence, and lead type)]:\n"
+                f"  - Possible Objection: {obj.objection} ({cat_display})\n"
+                f"  - Suggested Response Style (if Core confirms relevance): {obj.response_style}\n"
+                f"  - Reference Strategy Tip: {obj.ai_suggestion}\n"
             )
 
-    # Trust alert threshold enforcement
-    trust_alert_str = ""
-    if current_trust_score is not None and current_trust_score < settings.trust_alert_threshold:
-        trust_alert_str = (
-            f"\n  [⚠️ CRITICAL TRUST ALERT TRIGGERED (Trust: {int(current_trust_score * 100)}% < Threshold: {int(settings.trust_alert_threshold * 100)}%)]:\n"
-            f"  Prospect trust is compromised. MANDATORY DIRECTIVE: Engage '{playbook.style.trust_building_style}' style immediately.\n"
-            f"  Prioritize emotional validation, empathy acknowledgement, and rapport recovery before moving forward."
+    # Trust sensitivity guidance
+    trust_note_str = ""
+    if current_trust_score is not None and current_trust_score < settings.trust_sensitivity_threshold:
+        trust_note_str = (
+            f"\n  [Trust Sensitivity Note (Trust: {int(current_trust_score * 100)}% below sensitivity point {int(settings.trust_sensitivity_threshold * 100)}%)]:\n"
+            f"  Evidence suggests declining trust. Increase the weight given to trust-recovery strategies "
+            f"when selecting the next move — preferred methodology: '{playbook.style.trust_building_style}', "
+            f"if trust recovery is strategically appropriate given full conversational context."
         )
 
     lines = [
@@ -670,10 +686,19 @@ def serialize_playbook_prompt_section(
         f"- Coaching Style: Tone={tone} | Approach={comm_style} | Energy={energy} | Sentence={sentence} | Formality={formality} | Humor={humor}",
         f"- Methodology Style Choices: Trust={playbook.style.trust_building_style} | Objection Tone={playbook.style.objection_tone} | Discovery={playbook.style.discovery_style} | Close={playbook.style.closing_style} | Follow-Up={playbook.style.follow_up_style}",
         f"- Objection Response Sequence: {seq_order}",
-        f"- Runtime Sensitivity & Thresholds: Timing={settings.prompt_timing_sensitivity} | Emotion={settings.emotional_sensitivity} | Min Confidence={int(settings.objection_confidence_threshold*100)}% | Trust Alert={int(settings.trust_alert_threshold*100)}% | Cooldown={settings.prompt_cooldown_seconds}s",
+        f"- Runtime Sensitivity & Thresholds: Timing={settings.prompt_timing_sensitivity} | Emotion={settings.emotional_sensitivity} | Min Confidence={int(settings.objection_confidence_threshold*100)}% | Trust Sensitivity={int(settings.trust_sensitivity_threshold*100)}% | Cooldown={settings.prompt_cooldown_seconds}s",
+    ]
+
+    if settings.emotional_sensitivity == "Adaptive":
+        lines.append(
+            "- Note: Adaptive emotional sensitivity applies to live signals within THIS call only. "
+            "It does not create any permanent change to future calls, other users, or stored methodology."
+        )
+
+    lines.extend([
         "- Do / Don't Boundaries:\n" + do_dont_lines,
         "- Language Rules:\n" + lang_rules,
-    ]
+    ])
 
     if voice:
         lines.append(f"- Signature Voice Expressions:\n{voice}")
@@ -681,11 +706,15 @@ def serialize_playbook_prompt_section(
     if matching_obj_str:
         lines.append(matching_obj_str)
 
-    if trust_alert_str:
-        lines.append(trust_alert_str)
+    if trust_note_str:
+        lines.append(trust_note_str)
 
     lines.append(
-        "- Runtime Operational Constraint: Apply this methodology lens to guide HOW the response is formulated. Never invent unverified facts; always output exactly ONE concise prompt (<25 words) for the salesperson."
+        "- Runtime Operational Constraint: This methodology lens guides HOW a response is formulated and offers "
+        "suggested response styles and strategic preferences. The Core retains full authority to select a "
+        "different response style (Clarify, Validate, De-Risk, Reframe, etc.) if current conversational evidence "
+        "indicates a better strategic fit. Never invent unverified facts; always output exactly ONE concise "
+        "prompt (<25 words) for the salesperson."
     )
     return "\n".join(lines)
 
@@ -752,124 +781,6 @@ def calculate_playbook_completeness_score(pb: Playbook) -> int:
     return min(max(score, 20), 100)
 
 
-INDUSTRY_METHODOLOGY_BENCHMARKS: Dict[str, Dict[str, Any]] = {
-    "Real Estate": {
-        "benchmark_name": "Top Producer Real Estate Methodology Standard (NAR & Elite Coaching)",
-        "sample_size": 24,
-        "stages_median": 5.0,
-        "objections_median": 8.0,
-        "categories_target": 4,
-        "completeness_median": 88.0,
-        "composite_mean": 86.5,
-        "composite_std": 6.8,
-    },
-    "SaaS / Technology": {
-        "benchmark_name": "Enterprise SaaS MEDDPICC & Solution Selling Methodology Standard",
-        "sample_size": 32,
-        "stages_median": 6.0,
-        "objections_median": 9.0,
-        "categories_target": 4,
-        "completeness_median": 90.0,
-        "composite_mean": 89.0,
-        "composite_std": 5.5,
-    },
-    "Financial Services": {
-        "benchmark_name": "Fiduciary Wealth Advisory & Financial Services Methodology Standard",
-        "sample_size": 18,
-        "stages_median": 5.0,
-        "objections_median": 7.0,
-        "categories_target": 4,
-        "completeness_median": 85.0,
-        "composite_mean": 84.0,
-        "composite_std": 7.2,
-    },
-    "General": {
-        "benchmark_name": "Consultative B2B High-Trust Methodology Standard",
-        "sample_size": 20,
-        "stages_median": 5.0,
-        "objections_median": 7.0,
-        "categories_target": 4,
-        "completeness_median": 85.0,
-        "composite_mean": 85.0,
-        "composite_std": 6.5,
-    },
-}
-
-
-def _norm_cdf(x: float) -> float:
-    """Standard normal cumulative distribution function (error function calculation)."""
-    return 0.5 * (1.0 + math.erf(x / math.sqrt(2.0)))
-
-
-def get_cohort_benchmark_stats(
-    industry: Optional[str] = None,
-    store: Optional[PlaybookStore] = None,
-) -> Dict[str, Any]:
-    """Retrieve statistical benchmark baseline combined with active workspace playbooks."""
-    ind = (industry or "Real Estate").strip()
-    matched_key = "General"
-    for k in INDUSTRY_METHODOLOGY_BENCHMARKS:
-        if k.lower() in ind.lower() or ind.lower() in k.lower():
-            matched_key = k
-            break
-
-    baseline = INDUSTRY_METHODOLOGY_BENCHMARKS[matched_key].copy()
-
-    # Collect statistics from active workspace playbooks if store is accessible
-    saved_stages: List[int] = []
-    saved_objs: List[int] = []
-    saved_scores: List[float] = []
-
-    storage_dir = store.storage_dir if store else PLAYBOOKS_DIR
-    if storage_dir and storage_dir.exists():
-        for file in storage_dir.glob("*.json"):
-            try:
-                with open(file, "r", encoding="utf-8") as f:
-                    data = json.load(f)
-                stages = data.get("stages") or []
-                objs = data.get("objections") or []
-                q_score = data.get("quality_score") or data.get("completeness_score")
-                if stages:
-                    saved_stages.append(len(stages))
-                if objs:
-                    saved_objs.append(len(objs))
-                if q_score:
-                    saved_scores.append(float(q_score))
-            except Exception:
-                continue
-
-    # Blend baseline cohort with stored repository playbooks
-    total_cohort_count = baseline["sample_size"] + len(saved_stages)
-    if saved_stages:
-        median_stages = round(
-            (baseline["stages_median"] * baseline["sample_size"] + sum(saved_stages)) / total_cohort_count, 1
-        )
-        median_objs = round(
-            (baseline["objections_median"] * baseline["sample_size"] + sum(saved_objs)) / total_cohort_count, 1
-        )
-        mean_score = (
-            round((baseline["composite_mean"] * baseline["sample_size"] + sum(saved_scores)) / total_cohort_count, 1)
-            if saved_scores
-            else baseline["composite_mean"]
-        )
-    else:
-        median_stages = baseline["stages_median"]
-        median_objs = baseline["objections_median"]
-        mean_score = baseline["composite_mean"]
-
-    return {
-        "matched_industry": matched_key,
-        "benchmark_name": baseline["benchmark_name"],
-        "cohort_size": total_cohort_count,
-        "stored_workspace_playbooks": len(saved_stages),
-        "median_stages": median_stages,
-        "median_objections": median_objs,
-        "target_categories": baseline["categories_target"],
-        "mean_score": mean_score,
-        "score_std": baseline["composite_std"],
-    }
-
-
 async def ai_evaluate_playbook_quality(pb: Playbook) -> Optional[Dict[str, Any]]:
     """LLM reads the actual playbook content and judges methodology quality."""
     objections_summary = "\n".join([
@@ -915,9 +826,12 @@ Return ONLY valid JSON:
         try:
             import groq
             client = groq.Groq(api_key=api_key_groq, timeout=8.0)
+            groq_model = os.getenv("GROQ_MODEL", "qwen/qwen3.8-27b")
+            if "openai/gpt-oss" in groq_model or "llama" in groq_model:
+                groq_model = "qwen/qwen3.8-27b"
             def _call_groq():
                 resp = client.chat.completions.create(
-                    model=os.getenv("GROQ_MODEL", "llama-3.1-70b-versatile"),
+                    model=groq_model,
                     messages=[{"role": "user", "content": prompt}],
                     temperature=0.3,
                     response_format={"type": "json_object"},
@@ -981,15 +895,23 @@ Rules:
         try:
             import groq
             client = groq.Groq(api_key=api_key_groq, timeout=6.0)
+            groq_model = os.getenv("GROQ_FAST_MODEL") or os.getenv("GROQ_MODEL", "qwen/qwen3.8-27b")
+            if "openai/gpt-oss" in groq_model or "llama" in groq_model:
+                groq_model = "qwen/qwen3.8-27b"
             def _call():
                 resp = client.chat.completions.create(
-                    model=os.getenv("GROQ_FAST_MODEL", "llama-3.1-8b-instant"),
+                    model=groq_model,
                     messages=[{"role": "user", "content": summarize_prompt}],
                     temperature=0.6,
-                    max_tokens=120,
+                    max_tokens=150,
                 )
-                return resp.choices[0].message.content.strip()
-            return await asyncio.to_thread(_call)
+                text = (resp.choices[0].message.content or "").strip()
+                if "<think>" in text and "</think>" in text:
+                    text = text.split("</think>")[-1].strip()
+                return text if text else None
+            res = await asyncio.to_thread(_call)
+            if res:
+                return res
         except Exception as exc:
             LOGGER.warning("AI voice summary failed, will fall back: %s", exc)
 
@@ -1003,63 +925,35 @@ Rules:
                     model=os.getenv("OPENAI_MINI_MODEL", "gpt-4o-mini"),
                     messages=[{"role": "user", "content": summarize_prompt}],
                     temperature=0.6,
-                    max_tokens=120,
+                    max_tokens=150,
                 )
-                return resp.choices[0].message.content.strip()
-            return await asyncio.to_thread(_call)
+                return (resp.choices[0].message.content or "").strip()
+            res = await asyncio.to_thread(_call)
+            if res:
+                return res
         except Exception as exc:
             LOGGER.warning("AI voice summary (OpenAI) failed: %s", exc)
 
     return None
 
 
-def evaluate_playbook_structural_quality(
-    pb: Playbook,
-    store: Optional[PlaybookStore] = None,
-) -> Dict[str, Any]:
-    """Computes structural score and cohort comparison metrics synchronously."""
+def evaluate_playbook_structural_quality(pb: Playbook, store: Optional[PlaybookStore] = None) -> Dict[str, Any]:
     completeness = calculate_playbook_completeness_score(pb)
-
     num_stages = len(pb.stages)
     num_objs = len(pb.objections)
     categories = set()
     for o in pb.objections:
-        if isinstance(o.category, list):
-            categories.update(o.category)
-        else:
-            categories.add(str(o.category))
+        categories.update(o.category) if isinstance(o.category, list) else categories.add(str(o.category))
 
     cat_coverage = min(1.0, len(categories) / 4.0)
     stage_balance = min(1.0, num_stages / 6.0)
     obj_coverage = min(1.0, num_objs / 8.0)
 
-    # Blend completeness with structural methodology rigor
     base_score = int((completeness * 0.40) + (cat_coverage * 25) + (stage_balance * 20) + (obj_coverage * 15))
     quality_score = min(max(base_score, 50), 98)
 
-    # Statistical cohort comparison
-    industry_label = pb.basic_info.industry or "Real Estate"
-    cohort = get_cohort_benchmark_stats(industry=industry_label, store=store)
-
-    stages_delta = round(num_stages - cohort["median_stages"], 1)
-    objs_delta = round(num_objs - cohort["median_objections"], 1)
-
-    # Percentile rank against the cohort distribution
-    z_score = (quality_score - cohort["mean_score"]) / max(cohort["score_std"], 1.0)
-    percentile_rank = int(round(_norm_cdf(z_score) * 100))
-    percentile_rank = min(max(percentile_rank, 5), 99)
-
     rating = "Excellent" if quality_score >= 90 else ("Strong" if quality_score >= 80 else "Developing")
-    summary = (
-        "Great job! Your playbook methodology is complete and ready to use."
-        if quality_score >= 90
-        else "Good foundation. Broaden category coverage to strengthen versatility."
-    )
-
-    comparison_desc = (
-        f"Compared against {cohort['benchmark_name']} "
-        f"(N={cohort['cohort_size']} cohort; median {cohort['median_stages']} stages, {cohort['median_objections']} objections)"
-    )
+    summary = "Compared against internal baseline heuristics and other playbooks created in this workspace"
 
     return {
         "quality_score": quality_score,
@@ -1067,25 +961,12 @@ def evaluate_playbook_structural_quality(
         "completeness_score": completeness,
         "rating": rating,
         "summary": summary,
-        "benchmark_comparison": comparison_desc,
         "methodology_assessment": "Structural quality assessment based on methodology completeness and coverage",
         "quality_source": "structural_fallback",
-        "cohort_comparison_metrics": {
-            "industry": cohort["matched_industry"],
-            "cohort_name": cohort["benchmark_name"],
-            "cohort_size": cohort["cohort_size"],
-            "workspace_playbooks_analyzed": cohort["stored_workspace_playbooks"],
-            "cohort_median_stages": cohort["median_stages"],
-            "cohort_median_objections": cohort["median_objections"],
-            "stages_delta": stages_delta,
-            "objections_delta": objs_delta,
-            "category_coverage_ratio": f"{len(categories)}/{cohort['target_categories']}",
-            "percentile_rank": percentile_rank,
-        },
         "coverage_metrics": {
             "stages_count": num_stages,
             "objections_count": num_objs,
-            "category_diversity": f"{len(categories)} of {cohort['target_categories']} categories covered",
+            "category_diversity": f"{len(categories)} of 4 categories covered",
             "tone_calibration": pb.style.overall_tone,
         },
     }
@@ -1102,7 +983,7 @@ async def evaluate_playbook_quality_benchmark(
     store: Optional[PlaybookStore] = None,
 ) -> Dict[str, Any]:
     """Evaluates playbook quality by combining real LLM methodology judgment (60%)
-    with structural cohort benchmark analysis (40%).
+    with structural completeness and coverage analysis (40%).
 
     Gracefully falls back to structural scoring if LLM is unavailable or offline.
     """
@@ -1130,11 +1011,11 @@ async def evaluate_playbook_quality_benchmark(
     res["structural_score"] = structural_score
     res["llm_evaluation"] = llm_result
     res["quality_source"] = quality_source
+    res["summary"] = "Compared against internal baseline heuristics and other playbooks created in this workspace"
 
     if llm_result:
         if llm_result.get("coherence_feedback"):
             res["methodology_assessment"] = llm_result.get("coherence_feedback")
-            res["summary"] = llm_result.get("coherence_feedback")
         if llm_result.get("strengths"):
             res["strengths"] = llm_result.get("strengths")
         if llm_result.get("gaps"):
@@ -1424,7 +1305,7 @@ def get_playbook_router(store: Optional[PlaybookStore] = None) -> APIRouter:
 
     @router.post("/evaluate-quality")
     async def evaluate_quality_endpoint(req: PlaybookSaveRequest):
-        """Generates quality score and comparative cohort benchmark analysis against industry standards."""
+        """Generates quality score based on structural methodology completeness and LLM review."""
         stages_data = req.stages if req.stages is not None else [PlaybookStage(**s) for s in DEFAULT_STAGES]
         objections_data = req.objections if req.objections is not None else [PlaybookObjection(**o) for o in DEFAULT_OBJECTIONS]
         response_seq = req.response_sequence if req.response_sequence is not None else [ResponseSequenceStep(**sq) for sq in DEFAULT_RESPONSE_SEQUENCE]
@@ -1490,6 +1371,7 @@ def get_playbook_router(store: Optional[PlaybookStore] = None) -> APIRouter:
                     "confidence": round(conf, 3),
                     "threshold": playbook.style.runtime_settings.objection_confidence_threshold,
                     "threshold_met": True,
+                    "note": "lexical similarity only, not final relevance",
                 }
             else:
                 best_obj = None
@@ -1505,10 +1387,11 @@ def get_playbook_router(store: Optional[PlaybookStore] = None) -> APIRouter:
                     "confidence": round(best_conf, 3),
                     "threshold": playbook.style.runtime_settings.objection_confidence_threshold,
                     "threshold_met": False,
+                    "note": "lexical similarity only, not final relevance",
                 }
 
         alert_triggered = bool(
-            trust_score is not None and trust_score < playbook.style.runtime_settings.trust_alert_threshold
+            trust_score is not None and trust_score < playbook.style.runtime_settings.trust_sensitivity_threshold
         )
 
         top_conf = match_info["confidence"] if match_info else 0.0
@@ -1525,8 +1408,10 @@ def get_playbook_router(store: Optional[PlaybookStore] = None) -> APIRouter:
             "confidence": top_conf,
             "threshold_met": top_thresh_met,
             "trust_score": trust_score,
-            "trust_alert_threshold": playbook.style.runtime_settings.trust_alert_threshold,
+            "trust_sensitivity_threshold": playbook.style.runtime_settings.trust_sensitivity_threshold,
+            "trust_alert_threshold": playbook.style.runtime_settings.trust_sensitivity_threshold,
             "objection_confidence_threshold": playbook.style.runtime_settings.objection_confidence_threshold,
+            "trust_sensitivity_triggered": alert_triggered,
             "trust_alert_triggered": alert_triggered,
         }
 
@@ -1587,6 +1472,7 @@ def get_playbook_router(store: Optional[PlaybookStore] = None) -> APIRouter:
                     "confidence": round(conf, 3),
                     "threshold": pb.style.runtime_settings.objection_confidence_threshold,
                     "threshold_met": True,
+                    "note": "lexical similarity only, not final relevance",
                 }
             else:
                 best_obj = None
@@ -1602,10 +1488,11 @@ def get_playbook_router(store: Optional[PlaybookStore] = None) -> APIRouter:
                     "confidence": round(best_conf, 3),
                     "threshold": pb.style.runtime_settings.objection_confidence_threshold,
                     "threshold_met": False,
+                    "note": "lexical similarity only, not final relevance",
                 }
 
         alert_triggered = bool(
-            req.trust_score is not None and req.trust_score < pb.style.runtime_settings.trust_alert_threshold
+            req.trust_score is not None and req.trust_score < pb.style.runtime_settings.trust_sensitivity_threshold
         )
 
         top_conf = match_info["confidence"] if match_info else 0.0
@@ -1637,8 +1524,10 @@ def get_playbook_router(store: Optional[PlaybookStore] = None) -> APIRouter:
             "confidence": top_conf,
             "threshold_met": top_thresh_met,
             "trust_score": req.trust_score,
-            "trust_alert_threshold": pb.style.runtime_settings.trust_alert_threshold,
+            "trust_sensitivity_threshold": pb.style.runtime_settings.trust_sensitivity_threshold,
+            "trust_alert_threshold": pb.style.runtime_settings.trust_sensitivity_threshold,
             "objection_confidence_threshold": pb.style.runtime_settings.objection_confidence_threshold,
+            "trust_sensitivity_triggered": alert_triggered,
             "trust_alert_triggered": alert_triggered,
         }
 

@@ -257,7 +257,7 @@ def test_serialize_playbook_prompt_section():
     assert "### ACTIVE PLAYBOOK METHODOLOGY LENS: DANIEL G. METHOD ###" in prompt_section
     assert "Coaching Style: Tone=Confident" in prompt_section
     assert "Objection Response Sequence: Acknowledge -> Validate -> Reframe -> Guide Forward" in prompt_section
-    assert "Matched Objection Rule" in prompt_section
+    assert "Candidate Objection Match" in prompt_section
     assert "I don't want to pay commission." in prompt_section
     assert "Quantify" in prompt_section
     assert "Do / Don't Boundaries" in prompt_section
@@ -311,24 +311,26 @@ def test_objection_confidence_threshold_gating():
     assert match is None
 
 
-def test_trust_alert_threshold_enforcement():
-    """Verify trust_alert_threshold injects critical recovery directive when trust is below gate."""
+def test_trust_sensitivity_threshold_enforcement():
+    """Verify trust_sensitivity_threshold injects recovery guidance when trust is below sensitivity point."""
     from copilot.playbook import serialize_playbook_prompt_section
 
     info = PlaybookBasicInfo(name="Trust Test Playbook")
     pb = Playbook(basic_info=info)
-    pb.style.runtime_settings.trust_alert_threshold = 0.70
+    pb.style.runtime_settings.trust_sensitivity_threshold = 0.70
     pb.style.trust_building_style = "Validation-First"
 
-    # 1. Low trust score triggers alert
+    # 1. Low trust score triggers note
     low_trust_prompt = serialize_playbook_prompt_section(pb, current_trust_score=0.45)
-    assert "CRITICAL TRUST ALERT TRIGGERED" in low_trust_prompt
+    assert "Trust Sensitivity Note" in low_trust_prompt
     assert "Validation-First" in low_trust_prompt
-    assert "Prioritize emotional validation" in low_trust_prompt
+    assert "Increase the weight given to trust-recovery strategies" in low_trust_prompt
+    assert "CRITICAL TRUST ALERT TRIGGERED" not in low_trust_prompt
+    assert "MANDATORY" not in low_trust_prompt
 
-    # 2. Healthy trust score does not trigger alert
+    # 2. Healthy trust score does not trigger note
     healthy_trust_prompt = serialize_playbook_prompt_section(pb, current_trust_score=0.85)
-    assert "CRITICAL TRUST ALERT TRIGGERED" not in healthy_trust_prompt
+    assert "Trust Sensitivity Note" not in healthy_trust_prompt
 
 
 def test_multi_category_objection_support():
@@ -425,7 +427,7 @@ def test_ai_stage_tag_generator(client):
 
 
 def test_ai_quality_evaluation_benchmark(client):
-    """Verify quality evaluation endpoint returns real comparative cohort metrics and honest assessment copy."""
+    """Verify quality evaluation endpoint returns genuine structural completeness and coverage metrics."""
     payload = {
         "basic_info": {
             "name": "Daniel G. Method",
@@ -444,46 +446,38 @@ def test_ai_quality_evaluation_benchmark(client):
     assert "quality_score" in data
     assert "completeness_score" in data
     assert "rating" in data
-    assert "benchmark_comparison" in data
     assert "methodology_assessment" in data
-    assert "cohort_comparison_metrics" in data
+    assert "coverage_metrics" in data
+
+    # No fabricated cohort comparisons
+    assert "benchmark_comparison" not in data
+    assert "cohort_comparison_metrics" not in data
 
     assert data["quality_score"] >= 90
     assert data["rating"] == "Excellent"
     assert "Structural quality assessment" in data["methodology_assessment"]
 
-    metrics = data["cohort_comparison_metrics"]
-    assert metrics["industry"] == "Real Estate"
-    assert metrics["cohort_size"] >= 24
-    assert metrics["cohort_median_stages"] == 5.0
-    assert metrics["cohort_median_objections"] == 8.0
-    assert "stages_delta" in metrics
-    assert "objections_delta" in metrics
-    assert "category_coverage_ratio" in metrics
-    assert 5 <= metrics["percentile_rank"] <= 99
+    metrics = data["coverage_metrics"]
+    assert metrics["stages_count"] == 6
+    assert metrics["objections_count"] == 8
+    assert "category_diversity" in metrics
+    assert "4 categories covered" in metrics["category_diversity"]
 
 
-def test_cohort_benchmark_stats_and_industries():
-    """Verify get_cohort_benchmark_stats handles multiple industries with correct sample baselines."""
-    from copilot.playbook import get_cohort_benchmark_stats
+def test_evaluate_playbook_structural_quality_calculation():
+    """Verify evaluate_playbook_structural_quality calculates scores from completeness, coverage, and balance."""
+    from copilot.playbook import Playbook, PlaybookBasicInfo, evaluate_playbook_structural_quality
 
-    re_cohort = get_cohort_benchmark_stats(industry="Real Estate")
-    assert re_cohort["matched_industry"] == "Real Estate"
-    assert re_cohort["cohort_size"] >= 24
-    assert re_cohort["target_categories"] == 4
+    info = PlaybookBasicInfo(name="Structural Evaluation Playbook")
+    pb = Playbook(basic_info=info)
 
-    saas_cohort = get_cohort_benchmark_stats(industry="SaaS / Technology")
-    assert saas_cohort["matched_industry"] == "SaaS / Technology"
-    assert saas_cohort["cohort_size"] >= 32
-    assert saas_cohort["median_stages"] >= 5.0
-
-    fin_cohort = get_cohort_benchmark_stats(industry="Financial Services")
-    assert fin_cohort["matched_industry"] == "Financial Services"
-    assert fin_cohort["cohort_size"] >= 18
-
-    gen_cohort = get_cohort_benchmark_stats(industry="Unknown Industry")
-    assert gen_cohort["matched_industry"] == "General"
-    assert gen_cohort["cohort_size"] >= 20
+    res = evaluate_playbook_structural_quality(pb)
+    assert 50 <= res["quality_score"] <= 98
+    assert res["quality_score"] == res["structural_score"]
+    assert res["rating"] in ("Excellent", "Strong", "Developing")
+    assert "coverage_metrics" in res
+    assert "benchmark_comparison" not in res
+    assert "cohort_comparison_metrics" not in res
 
 
 def test_simulate_runtime_prompt_with_draft(client):
@@ -529,17 +523,20 @@ def test_simulate_runtime_prompt_with_draft(client):
     assert "prompt_section" in data
     prompt = data["prompt_section"]
     assert "### ACTIVE PLAYBOOK METHODOLOGY LENS: LIVE IN-MEMORY CLOSER ###" in prompt
-    assert "CRITICAL TRUST ALERT TRIGGERED" in prompt
+    assert "Trust Sensitivity Note" in prompt
+    assert "Candidate Objection Match" in prompt
     assert "DO NOT argue on pricing directly." in prompt
     assert "Always frame fees as investment." in prompt
     assert "I don't want to pay commission." in prompt
 
     # Introspection flags
+    assert data["trust_sensitivity_triggered"] is True
     assert data["trust_alert_triggered"] is True
     assert data["threshold_met"] is True
     assert data["confidence"] >= 0.70
     assert data["match_info"] is not None
     assert data["match_info"]["matched_objection"] == "I don't want to pay commission."
+    assert data["match_info"]["note"] == "lexical similarity only, not final relevance"
     assert "Financial" in data["match_info"]["category"]
     assert "Risk" in data["match_info"]["category"]
 
@@ -554,7 +551,7 @@ def test_simulate_runtime_prompt_with_saved_id(client, temp_store):
     """Verify POST /api/playbook/simulate-runtime-prompt using saved playbook ID with healthy trust."""
     info = PlaybookBasicInfo(name="Stored Architecture Playbook")
     pb = Playbook(id="pb_saved_sim", title="Stored Architecture Playbook", basic_info=info)
-    pb.style.runtime_settings.trust_alert_threshold = 0.60
+    pb.style.runtime_settings.trust_sensitivity_threshold = 0.60
     temp_store.save(pb)
 
     sim_payload = {
@@ -566,7 +563,9 @@ def test_simulate_runtime_prompt_with_saved_id(client, temp_store):
     assert res.status_code == 200
     data = res.json()
     assert data["playbook_id"] == "pb_saved_sim"
+    assert data["trust_sensitivity_triggered"] is False
     assert data["trust_alert_triggered"] is False
+    assert "Trust Sensitivity Note" not in data["prompt_section"]
     assert "CRITICAL TRUST ALERT TRIGGERED" not in data["prompt_section"]
     assert "display_summary" in data
     assert "Hey Stored," in data["display_summary"] or "Hey there," in data["display_summary"]
@@ -586,8 +585,10 @@ def test_get_runtime_prompt_introspection_endpoint(client, temp_store):
     data = res.json()
     assert data["playbook_id"] == "pb_intro_test"
     assert data["trust_score"] == 0.4
+    assert data["trust_sensitivity_triggered"] is True
     assert data["trust_alert_triggered"] is True
     assert data["match_info"] is not None
+    assert data["match_info"]["note"] == "lexical similarity only, not final relevance"
     assert data["threshold_met"] is True
     assert "ACTIVE PLAYBOOK METHODOLOGY LENS" in data["prompt_section"]
 
@@ -636,7 +637,7 @@ def test_runtime_settings_and_section3_persistence_in_api(client):
     rs = style["runtime_settings"]
     assert rs["prompt_cooldown_seconds"] == 7
     assert rs["objection_confidence_threshold"] == 0.82
-    assert rs["trust_alert_threshold"] == 0.68
+    assert rs["trust_sensitivity_threshold"] == 0.68
     assert rs["prompt_timing_sensitivity"] == "Proactive"
     assert rs["emotional_sensitivity"] == "High"
     assert any("DO NOT quote rates" in b for b in rs["do_dont_boundaries"])
@@ -673,8 +674,8 @@ async def test_ai_quality_evaluation_with_mocked_llm(monkeypatch):
     assert eval_res["quality_source"] == "ai_llm"
     assert eval_res["llm_evaluation"] == mock_llm_response
     assert "strengths" in eval_res
-    assert "gaps" in eval_res
-    assert eval_res["summary"] == "Highly coherent strategy progressing naturally to close."
+    assert eval_res["summary"] == "Compared against internal baseline heuristics and other playbooks created in this workspace"
+    assert eval_res["methodology_assessment"] == "Highly coherent strategy progressing naturally to close."
 
     # Check the 40% structural / 60% LLM formula
     structural_score = eval_res["structural_score"]
@@ -862,4 +863,123 @@ async def test_ai_summarize_playbook_voice_mocked_and_fallback(monkeypatch):
     res_mock = await ai_summarize_playbook_voice(pb, full_prompt)
     assert res_mock == mock_summary
     assert "Hey Salman" in res_mock
+
+
+def test_client_feedback_methodology_lens_points_1_to_5():
+    """Verify all 5 client feedback items:
+    1. Trust style removes 'MANDATORY' and 'CRITICAL TRUST ALERT TRIGGERED'.
+    2. trust_alert_threshold renamed to trust_sensitivity_threshold with backwards-compat alias.
+    3. Objection match labeled as 'Candidate Objection Match — Lexical Similarity' and match_info note.
+    4. Operational constraint explicitly preserves Core override authority.
+    5. Adaptive emotional sensitivity clarifies call-only scope and injects scoped note.
+    """
+    from copilot.playbook import (
+        Playbook,
+        PlaybookBasicInfo,
+        PlaybookObjection,
+        PlaybookRuntimeSettings,
+        serialize_playbook_prompt_section,
+    )
+
+    # Point 2: Backwards compatibility of alias in PlaybookRuntimeSettings
+    legacy_settings = PlaybookRuntimeSettings.model_validate({
+        "trust_alert_threshold": 0.62,
+        "prompt_timing": "Aggressive",
+    })
+    assert legacy_settings.trust_sensitivity_threshold == 0.62
+    assert legacy_settings.trust_alert_threshold == 0.62
+    assert legacy_settings.prompt_timing_sensitivity == "Aggressive"
+
+    # Property setter works
+    legacy_settings.trust_alert_threshold = 0.55
+    assert legacy_settings.trust_sensitivity_threshold == 0.55
+
+    # Point 5: Description check
+    field_desc = PlaybookRuntimeSettings.model_fields["emotional_sensitivity"].description
+    assert "Adaptive adjusts emphasis to live in-call signals only" in field_desc
+
+    # Setup playbook for prompt serialization
+    pb = Playbook(
+        title="Lens Alignment Playbook",
+        basic_info=PlaybookBasicInfo(name="Lens Alignment Playbook"),
+        objections=[
+            PlaybookObjection(
+                id="obj_cand_1",
+                objection="Why would I pay you guys a commission when I can sell it myself",
+                category=["Financial"],
+                response_style="Quantify",
+                ai_suggestion="Focus on net walkaway dollar amounts.",
+            )
+        ],
+    )
+    pb.style.trust_building_style = "Validation-First"
+    pb.style.runtime_settings.trust_sensitivity_threshold = 0.70
+    pb.style.runtime_settings.emotional_sensitivity = "Adaptive"
+
+    # Compile prompt with low trust and objection detected
+    prompt = serialize_playbook_prompt_section(
+        pb,
+        detected_objection="Why would I pay you a commission when I can sell myself?",
+        current_trust_score=0.45,
+    )
+
+    # Point 1 & 2: Trust Sensitivity Note, no "MANDATORY", no "CRITICAL TRUST ALERT"
+    assert "Trust Sensitivity Note (Trust: 45% below sensitivity point 70%)" in prompt
+    assert "CRITICAL TRUST ALERT TRIGGERED" not in prompt
+    assert "MANDATORY" not in prompt
+    assert "Increase the weight given to trust-recovery strategies" in prompt
+    assert "preferred methodology: 'Validation-First'" in prompt
+    assert "Trust Sensitivity=70%" in prompt
+
+    # Point 3: Candidate Objection Match with Lexical Similarity note
+    assert "[Candidate Objection Match — Lexical Similarity:" in prompt
+    assert "(reference signal only; final relevance should be determined using full conversational context, objection recurrence, and lead type)]" in prompt
+    assert "Suggested Response Style (if Core confirms relevance): Quantify" in prompt
+    assert "Reference Strategy Tip: Focus on net walkaway dollar amounts." in prompt
+    assert "[Matched Objection Rule" not in prompt
+
+    # Point 4: Explicit override constraint
+    expected_constraint = (
+        "- Runtime Operational Constraint: This methodology lens guides HOW a response is formulated and offers "
+        "suggested response styles and strategic preferences. The Core retains full authority to select a "
+        "different response style (Clarify, Validate, De-Risk, Reframe, etc.) if current conversational evidence "
+        "indicates a better strategic fit. Never invent unverified facts; always output exactly ONE concise "
+        "prompt (<25 words) for the salesperson."
+    )
+    assert expected_constraint in prompt
+
+    # Point 5: Adaptive scoped note
+    expected_adaptive_note = (
+        "- Note: Adaptive emotional sensitivity applies to live signals within THIS call only. "
+        "It does not create any permanent change to future calls, other users, or stored methodology."
+    )
+    assert expected_adaptive_note in prompt
+
+    # Verify that non-Adaptive does not include the scoped note
+    pb.style.runtime_settings.emotional_sensitivity = "Normal"
+    normal_prompt = serialize_playbook_prompt_section(pb, current_trust_score=0.45)
+    assert expected_adaptive_note not in normal_prompt
+
+
+def test_point_6_no_fabricated_benchmarks():
+    """Verify Point 6: complete removal of fabricated benchmark data structure and cohort functions."""
+    import copilot.playbook as pb_mod
+
+    # Step 1 & 2: Fabricated structures and helper functions must not exist
+    assert not hasattr(pb_mod, "INDUSTRY_METHODOLOGY_BENCHMARKS")
+    assert not hasattr(pb_mod, "_norm_cdf")
+    assert not hasattr(pb_mod, "get_cohort_benchmark_stats")
+
+    # Step 3: evaluate_playbook_structural_quality returns structural completeness with no claimed cohort
+    info = pb_mod.PlaybookBasicInfo(name="Unbenchmarked Playbook", industry="Real Estate")
+    pb = pb_mod.Playbook(basic_info=info)
+
+    eval_res = pb_mod.evaluate_playbook_structural_quality(pb)
+    assert "benchmark_comparison" not in eval_res
+    assert "cohort_comparison_metrics" not in eval_res
+    assert eval_res["quality_source"] == "structural_fallback"
+    assert "quality_score" in eval_res
+    assert "completeness_score" in eval_res
+    assert "coverage_metrics" in eval_res
+    assert eval_res["coverage_metrics"]["category_diversity"] == "4 of 4 categories covered"
 

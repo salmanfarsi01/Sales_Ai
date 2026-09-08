@@ -1,46 +1,48 @@
 {
-  "id": "pb_8722170093fa",
-  "title": "Daniel G. Method",
-  "status": "published",
+  "id": "pb_e4eee91a5091",
+  "title": "Follow Up Mastery",
+  "status": "draft",
   "current_step": 5,
-  "created_at": "2026-09-06T09:11:58.622983+00:00",
-  "updated_at": "2026-09-06T09:11:58.622983+00:00",
+  "created_at": "2026-09-08T04:06:50.796399+00:00",
+  "updated_at": "2026-09-08T04:06:50.798743+00:00",
   "is_readonly": false,
   "source": "custom",
   "basic_info": {
-    "name": "Daniel G. Method",
-    "short_description": "My approach to building trust and closing more high-value deals.",
-    "industry": "SaaS / Software",
+    "name": "Follow Up Mastery",
+    "short_description": "After meeting with a seller, following up is often met with more objections. Here’s how they should be handled. ",
+    "industry": "Real Estate",
     "lead_types": [
       "Expired Listings"
     ],
-    "experience_level": "Entry Level (0-1 yrs)",
-    "voice_phrases": "• \"Here's the thing\"\n• \"Bottom line\"\n• \"What I've seen is...\"\n• \"At the end of the day\"",
-    "philosophy": "1. showing transparency to gain trust\n2. giving reliable example to justify why our service will be best\n3. needed joyful appearance to client",
+    "experience_level": "Intermediate to Advanced",
+    "voice_phrases": "• \"What I've seen is...\" “I totally understand”.,.which is really why I think….first of all…",
+    "philosophy": "1. Establish trust through diagnostic questioning.\n2. Frame price in context of total value and net ROI.\n3. Guide the prospect with clear next steps.",
     "goals": [
-      "Build stronger trust"
+      "Build stronger trust",
+      "Increase appointments",
+      "Close more deals"
     ]
   },
   "style": {
-    "overall_tone": "Friendly",
-    "communication_style": "Solution-Oriented",
+    "overall_tone": "Confident",
+    "communication_style": "Consultative",
     "energy_level": "Medium",
-    "sentence_style": "Detailed & Structured",
-    "formality": "Casual & Conversational",
-    "humor_level": "Moderate",
-    "trust_building_style": "Validation-First",
-    "objection_tone": "Empathetic & Resilient",
-    "discovery_style": "Diagnostic / Question-Led",
-    "closing_style": "Low-Pressure Next-Step Commitment",
+    "sentence_style": "Short & Conversational",
+    "formality": "Professional",
+    "humor_level": "Light",
+    "trust_building_style": "Transparency-First",
+    "objection_tone": "Curious & Exploratory",
+    "discovery_style": "Problem-Agitation",
+    "closing_style": "Urgency-Framed",
     "follow_up_style": "Value-Added Persistence",
-    "voice_phrases": "• \"Here's the thing\"\n• \"Bottom line\"\n• \"What I've seen is...\"\n• \"At the end of the day\"",
-    "core_selling_principles": "1. showing transparency to gain trust\n2. giving reliable example to justify why our service will be best\n3. needed joyful appearance to client",
+    "voice_phrases": "• \"What I've seen is...\" “I totally understand”.,.which is really why I think….first of all…",
+    "core_selling_principles": "1. Establish trust through diagnostic questioning.\n2. Frame price in context of total value and net ROI.\n3. Guide the prospect with clear next steps.",
     "runtime_settings": {
-      "prompt_timing_sensitivity": "Normal",
-      "emotional_sensitivity": "High",
+      "prompt_timing_sensitivity": "Aggressive",
+      "emotional_sensitivity": "Adaptive",
       "objection_confidence_threshold": 0.75,
       "trust_alert_threshold": 0.7,
-      "prompt_cooldown_seconds": 4,
+      "prompt_cooldown_seconds": 1,
       "do_dont_boundaries": [
         "Do validate emotion before offering facts.",
         "Do keep teleprompts under 25 words.",
@@ -60,7 +62,7 @@
       "name": "Opening",
       "goal": "Set a positive tone and gain engagement.",
       "description": "Create rapport and get permission to have a conversation.",
-      "tag": "",
+      "tag": "Goal: Engage",
       "icon": "hand"
     },
     {
@@ -69,7 +71,7 @@
       "name": "Discovery",
       "goal": "Understand their motivation and timeline.",
       "description": "Ask questions and uncover their situation and needs.",
-      "tag": "",
+      "tag": "Goal: Understand",
       "icon": "search"
     },
     {
@@ -78,7 +80,7 @@
       "name": "Value Proposition",
       "goal": "Build credibility and differentiate yourself.",
       "description": "Position your value and show how you solve their problem.",
-      "tag": "",
+      "tag": "Goal: Differentiate",
       "icon": "diamond"
     },
     {
@@ -87,7 +89,7 @@
       "name": "Handle Objections",
       "goal": "Overcome doubt and strengthen confidence.",
       "description": "Address concerns and remove hesitation.",
-      "tag": "",
+      "tag": "Goal: Resolve",
       "icon": "shield"
     },
     {
@@ -96,7 +98,7 @@
       "name": "Close",
       "goal": "Get a commitment to move forward.",
       "description": "Guide them to commit to the next step.",
-      "tag": "",
+      "tag": "Goal: Commit",
       "icon": "target"
     },
     {
@@ -105,17 +107,8 @@
       "name": "Follow Up",
       "goal": "Stay top of mind and convert later.",
       "description": "Reinforce value and keep the momentum.",
-      "tag": "",
+      "tag": "Goal: Nurture",
       "icon": "phone"
-    },
-    {
-      "id": "stage_gtmjrzj",
-      "order": 7,
-      "name": "Initial meeting",
-      "goal": "Understand client requirement",
-      "description": "just tell me how can ai handle the initial situation when client not getting interested on our service",
-      "tag": "Goal: Discover",
-      "icon": "hand"
     }
   ],
   "objections": [
@@ -207,7 +200,8 @@
       "id": "obj_7",
       "objection": "We need to think about it.",
       "category": [
-        "Logistics"
+        "Logistics",
+        "Risk"
       ],
       "lead_types": [
         "Trust & Estate",
@@ -260,32 +254,51 @@
     }
   ],
   "completeness_score": 100,
-  "quality_score": 98,
+  "quality_score": 90,
   "quality_feedback": {
-    "quality_score": 98,
+    "quality_score": 90,
+    "structural_score": 98,
     "completeness_score": 100,
     "rating": "Excellent",
     "summary": "Great job! Your playbook methodology is complete and ready to use.",
-    "benchmark_comparison": "Compared against Consultative B2B High-Trust Methodology Standard (N=21 cohort; median 5.1 stages, 6.7 objections)",
+    "benchmark_comparison": "Compared against Top Producer Real Estate Methodology Standard (NAR & Elite Coaching) (N=33 cohort; median 5.4 stages, 7.8 objections)",
     "methodology_assessment": "Structural quality assessment based on methodology completeness and coverage",
+    "quality_source": "ai_llm",
     "cohort_comparison_metrics": {
-      "industry": "General",
-      "cohort_name": "Consultative B2B High-Trust Methodology Standard",
-      "cohort_size": 21,
-      "workspace_playbooks_analyzed": 1,
-      "cohort_median_stages": 5.1,
-      "cohort_median_objections": 6.7,
-      "stages_delta": 1.9,
-      "objections_delta": 1.3,
+      "industry": "Real Estate",
+      "cohort_name": "Top Producer Real Estate Methodology Standard (NAR & Elite Coaching)",
+      "cohort_size": 33,
+      "workspace_playbooks_analyzed": 9,
+      "cohort_median_stages": 5.4,
+      "cohort_median_objections": 7.8,
+      "stages_delta": 0.6,
+      "objections_delta": 0.2,
       "category_coverage_ratio": "4/4",
       "percentile_rank": 98
     },
     "coverage_metrics": {
-      "stages_count": 7,
+      "stages_count": 6,
       "objections_count": 8,
       "category_diversity": "4 of 4 categories covered",
-      "tone_calibration": "Friendly"
-    }
+      "tone_calibration": "Confident"
+    },
+    "llm_evaluation": {
+      "llm_quality_score": 85,
+      "strengths": [
+        "Actionable philosophy that aligns with consultative tone",
+        "Logical progression of stages from opening to follow‑up",
+        "Strategic objection handling tactics rather than generic responses",
+        "Good coverage of financial, logistics, relationship, and risk objections",
+        "Coherent system that ties philosophy to stages and objection library"
+      ]
+    },
+    "strengths": [
+      "Actionable philosophy that aligns with consultative tone",
+      "Logical progression of stages from opening to follow‑up",
+      "Strategic objection handling tactics rather than generic responses",
+      "Good coverage of financial, logistics, relationship, and risk objections",
+      "Coherent system that ties philosophy to stages and objection library"
+    ]
   },
   "metadata": {}
 }

@@ -1835,7 +1835,7 @@
         <div class="grid-3-col" style="margin-bottom: 20px;">
           <div class="form-group">
             <label class="form-label" for="trustBuildingStyleSelect">TRUST-BUILDING STYLE</label>
-            <span class="form-label-sub">Mandatory style when trust alert fires.</span>
+            <span class="form-label-sub">Preferred style when trust sensitivity triggers.</span>
             <select id="trustBuildingStyleSelect" class="select-dropdown" onchange="handleInputChange()">
               <option value="Validation-First" selected>Validation-First</option>
               <option value="Credibility-First">Credibility-First</option>
@@ -1846,95 +1846,96 @@
 
           <div class="form-group">
             <label class="form-label" for="objectionToneSelect">OBJECTION TONE</label>
-            <span class="form-label-sub">How AI shapes responses to pushback.</span>
+            <span class="form-label-sub">Behavioral posture under prospect pushback.</span>
             <select id="objectionToneSelect" class="select-dropdown" onchange="handleInputChange()">
               <option value="Empathetic & Resilient" selected>Empathetic & Resilient</option>
               <option value="Assertive & Reframing">Assertive & Reframing</option>
-              <option value="Curious & Exploratory">Curious & Exploratory</option>
-              <option value="Calm & Analytical">Calm & Analytical</option>
+              <option value="Curious & Collaborative">Curious & Collaborative</option>
+              <option value="Calm & Steady">Calm & Steady</option>
             </select>
           </div>
 
           <div class="form-group">
             <label class="form-label" for="discoveryStyleSelect">DISCOVERY STYLE</label>
-            <span class="form-label-sub">Style for uncovering needs and motives.</span>
+            <span class="form-label-sub">Approach to probing need, motive, and timeline.</span>
             <select id="discoveryStyleSelect" class="select-dropdown" onchange="handleInputChange()">
               <option value="Diagnostic / Question-Led" selected>Diagnostic / Question-Led</option>
-              <option value="Problem-Agitation">Problem-Agitation</option>
-              <option value="Conversational Inquiry">Conversational Inquiry</option>
-              <option value="Mutual Assessment">Mutual Assessment</option>
+              <option value="Conversational / Story-Led">Conversational / Story-Led</option>
+              <option value="Direct / Timeline-Focused">Direct / Timeline-Focused</option>
+              <option value="Value-First / Insight-Led">Value-First / Insight-Led</option>
             </select>
           </div>
         </div>
 
-        <div class="grid-2-col">
+        <div class="grid-2-col" style="margin-bottom: 20px;">
           <div class="form-group">
             <label class="form-label" for="closingStyleSelect">CLOSING STYLE</label>
-            <span class="form-label-sub">Framework for securing commitments.</span>
+            <span class="form-label-sub">Approach when asking for commitment or appointment.</span>
             <select id="closingStyleSelect" class="select-dropdown" onchange="handleInputChange()">
               <option value="Low-Pressure Next-Step Commitment" selected>Low-Pressure Next-Step Commitment</option>
-              <option value="Direct Close">Direct Close</option>
-              <option value="Alternative Choice">Alternative Choice</option>
-              <option value="Urgency-Framed">Urgency-Framed</option>
+              <option value="Assumptive Calendar Lock">Assumptive Calendar Lock</option>
+              <option value="Value-Exchange Close">Value-Exchange Close</option>
+              <option value="Choice-of-Two Commitment">Choice-of-Two Commitment</option>
             </select>
           </div>
 
           <div class="form-group">
             <label class="form-label" for="followUpStyleSelect">FOLLOW-UP STYLE</label>
-            <span class="form-label-sub">Persistence and cadence philosophy.</span>
+            <span class="form-label-sub">Persistence and cadence expectations for nurturing.</span>
             <select id="followUpStyleSelect" class="select-dropdown" onchange="handleInputChange()">
               <option value="Value-Added Persistence" selected>Value-Added Persistence</option>
-              <option value="Multi-Touch Education">Multi-Touch Education</option>
-              <option value="Time-Sensitive Check-in">Time-Sensitive Check-in</option>
-              <option value="Relationship Nurture">Relationship Nurture</option>
+              <option value="Rapid Action (<5 min)">Rapid Action (<5 min)</option>
+              <option value="Consultative Check-In">Consultative Check-In</option>
+              <option value="Relentless / High Frequency">Relentless / High Frequency</option>
             </select>
           </div>
         </div>
-      </div>
 
-      <!-- RUNTIME SENSITIVITY & THRESHOLD CONTROLS -->
-      <div class="card" style="margin-top: 20px;">
-        <div class="card-header">
-          <div class="card-icon-badge badge-mint">⚙️</div>
-          <div class="card-title-group">
-            <h2 class="card-title">Runtime Sensitivity & Threshold Controls</h2>
-            <p class="card-subtitle">Configure the exact thresholds that gate objection matching and trigger trust recovery alerts during live calls.</p>
+        <div class="form-divider"></div>
+
+        <!-- Spec Section 3: Runtime Sensitivity & Thresholds -->
+        <div class="section-title-wrap" style="margin-bottom: 16px;">
+          <div>
+            <h2 class="card-title">Runtime Sensitivity & Boundary Rules</h2>
+            <p class="card-subtitle">Operational parameters that govern LLM response timing, emotional sensitivity, and hard constraints.</p>
           </div>
         </div>
 
-        <div class="grid-3-col" style="margin-bottom: 20px;">
+        <div class="grid-2-col" style="margin-bottom: 20px;">
           <!-- Objection Confidence Threshold -->
           <div class="form-group">
             <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 4px;">
-              <label class="form-label" for="objConfSlider" style="margin-bottom: 0;">OBJECTION CONFIDENCE</label>
+              <label class="form-label" for="objConfSlider" style="margin-bottom: 0;">OBJECTION CONFIDENCE THRESHOLD</label>
               <span id="objConfDisplayBadge" class="tag-pill tag-pill-primary" style="font-size: 0.72rem; font-weight: 700;">75% Min Match</span>
             </div>
-            <span class="form-label-sub">Minimum similarity score to inject objection rule.</span>
+            <span class="form-label-sub">Minimum semantic similarity required to trigger objection-specific guidance.</span>
             <input type="range" id="objConfSlider" class="range-slider" min="0.50" max="0.95" step="0.05" value="0.75"
               oninput="document.getElementById('objConfDisplayBadge').innerText = Math.round(this.value * 100) + '% Min Match'; handleInputChange()">
             <div style="display: flex; justify-content: space-between; font-size: 0.7rem; color: var(--slate-400); margin-top: 4px;">
-              <span>50% (Permissive)</span>
+              <span>50% (Loose)</span>
               <span>75% (Spec Default)</span>
-              <span>95% (Strict)</span>
+              <span>95% (Exact Only)</span>
             </div>
           </div>
 
-          <!-- Trust Alert Threshold -->
+          <!-- Trust Sensitivity Threshold -->
           <div class="form-group">
             <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 4px;">
-              <label class="form-label" for="trustAlertSlider" style="margin-bottom: 0;">TRUST ALERT THRESHOLD</label>
-              <span id="trustAlertDisplayBadge" class="tag-pill tag-pill-warning" style="font-size: 0.72rem; font-weight: 700;">70% Critical Alert</span>
+              <label class="form-label" for="trustSensitivitySlider" style="margin-bottom: 0;">TRUST SENSITIVITY THRESHOLD</label>
+              <span id="trustSensitivityDisplayBadge" class="tag-pill tag-pill-warning" style="font-size: 0.72rem; font-weight: 700;">70% Sensitivity Point</span>
             </div>
-            <span class="form-label-sub">Triggers mandatory trust recovery below this score.</span>
-            <input type="range" id="trustAlertSlider" class="range-slider" min="0.50" max="0.90" step="0.05" value="0.70"
-              oninput="document.getElementById('trustAlertDisplayBadge').innerText = Math.round(this.value * 100) + '% Critical Alert'; handleInputChange(); syncSimTrustControlsToConfiguredThreshold()">
+            <span class="form-label-sub">Point below which Core weights trust recovery more heavily.</span>
+            <input type="range" id="trustSensitivitySlider" class="range-slider" min="0.50" max="0.90" step="0.05" value="0.70"
+              oninput="document.getElementById('trustSensitivityDisplayBadge').innerText = Math.round(this.value * 100) + '% Sensitivity Point'; handleInputChange(); syncSimTrustControlsToConfiguredThreshold()">
             <div style="display: flex; justify-content: space-between; font-size: 0.7rem; color: var(--slate-400); margin-top: 4px;">
               <span>50% (High Tolerance)</span>
               <span>70% (Spec Default)</span>
               <span>90% (Zero Tolerance)</span>
             </div>
           </div>
+        </div>
 
+        <div class="grid-2-col" style="margin-bottom: 20px;">
           <!-- Prompt Cooldown Seconds -->
           <div class="form-group">
             <label class="form-label" for="promptCooldownInput">PROMPT COOLDOWN (SECONDS)</label>
@@ -2322,8 +2323,7 @@ Avoid: 'cheap', 'hurry up', 'standard commission'</textarea>
                   <h3 style="font-size: 1.1rem; font-weight: 800; color: var(--slate-900); margin: 0;">Quality Check</h3>
                   <span id="qualitySourceBadge" class="tag-pill" style="font-size: 0.68rem; font-weight: 700; background: #e0f2fe; color: #0369a1; border: 1px solid #bae6fd;">AI-Reviewed</span>
                 </div>
-                <p id="qualityCheckSummary" style="font-size: 0.85rem; color: var(--slate-500); margin-top: 4px; margin-bottom: 2px;">Great job! Your playbook methodology is complete and ready to use.</p>
-                <div id="qualityBenchmarkDetail" style="font-size: 0.76rem; color: var(--slate-400); margin-top: 2px; font-style: italic;"></div>
+                <p id="qualityCheckSummary" style="font-size: 0.85rem; color: var(--slate-500); margin-top: 4px; margin-bottom: 2px;">Compared against internal baseline heuristics and other playbooks created in this workspace</p>
                 <div id="qualityLlmFeedback" style="margin-top: 8px; font-size: 0.8rem; color: #334155; line-height: 1.4; display: none; background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 6px; padding: 8px 12px;"></div>
               </div>
             </div>
@@ -2344,7 +2344,7 @@ Avoid: 'cheap', 'hurry up', 'standard commission'</textarea>
                 <span style="font-size: 1.4rem;">⚡</span>
                 <div>
                   <h3 style="font-size: 1.05rem; font-weight: 800; color: var(--slate-900);">Test Runtime Methodology Lens</h3>
-                  <p style="font-size: 0.8rem; color: var(--slate-500);">Simulate the compiled system instruction generated for live calls, testing semantic objection matching and trust alert triggers.</p>
+                  <p style="font-size: 0.8rem; color: var(--slate-500);">Simulate the compiled system instruction generated for live calls, testing semantic objection matching and trust sensitivity guidance.</p>
                 </div>
               </div>
               <span class="tag-pill tag-pill-primary" style="font-size: 0.72rem; font-weight: 700;">LIVE ENGINE TEST</span>
@@ -2375,13 +2375,13 @@ Avoid: 'cheap', 'hurry up', 'standard commission'</textarea>
                   oninput="updateSimTrustDisplay(this.value)">
                 <div style="display: flex; justify-content: space-between; font-size: 0.7rem; color: var(--slate-400); margin-top: 4px;">
                   <span>0.00 (Hostile)</span>
-                  <span id="simThresholdIndicatorLabel" style="color: #b45309; font-weight: 700;">0.70 (Alert Threshold)</span>
+                  <span id="simThresholdIndicatorLabel" style="color: #b45309; font-weight: 700;">0.70 (Sensitivity Threshold)</span>
                   <span>1.00 (High Trust)</span>
                 </div>
                 <div style="display: flex; gap: 6px; margin-top: 8px;">
                   <button type="button" class="btn-sm-preset" onclick="setSimTrust(0.85)">Normal (0.85)</button>
                   <button type="button" id="btnSimThresholdPreset" class="btn-sm-preset" onclick="setSimTrustToCurrentThreshold()">Threshold (0.70)</button>
-                  <button type="button" id="btnSimCriticalPreset" class="btn-sm-preset" style="color: #dc2626; border-color: #fecaca;" onclick="setSimTrustCritical()">Critical Alert (0.45)</button>
+                  <button type="button" id="btnSimCriticalPreset" class="btn-sm-preset" style="color: #dc2626; border-color: #fecaca;" onclick="setSimTrustCritical()">Below Sensitivity (0.45)</button>
                 </div>
               </div>
             </div>
@@ -2863,6 +2863,10 @@ Avoid: 'cheap', 'hurry up', 'standard commission'</textarea>
     function insertVoicePhrase(phrase) {
       const v = document.getElementById('voicePhrases');
       const cur = v.value.trim();
+      if (cur.includes(`"${phrase}"`)) {
+        showToast(`Already added: "${phrase}"`);
+        return;
+      }
       v.value = cur ? `${cur}\n• "${phrase}"` : `• "${phrase}"`;
       updateCharCounter('voicePhrases', 'voiceCounter', 500);
       handleInputChange();
@@ -3320,13 +3324,12 @@ Avoid: 'cheap', 'hurry up', 'standard commission'</textarea>
       const scoreEl = document.getElementById('qualityScoreDisplay');
       const badgeEl = document.getElementById('qualityBadgeLabel');
       const summaryEl = document.getElementById('qualityCheckSummary');
-      const benchEl = document.getElementById('qualityBenchmarkDetail');
       const srcBadge = document.getElementById('qualitySourceBadge');
       const feedbackEl = document.getElementById('qualityLlmFeedback');
 
       if (scoreEl) scoreEl.innerText = '--';
       if (badgeEl) badgeEl.innerText = 'Evaluating...';
-      if (summaryEl) summaryEl.innerText = 'Analyzing playbook methodology with LLM and industry cohort benchmarks...';
+      if (summaryEl) summaryEl.innerText = 'Analyzing playbook methodology completeness and structure...';
       if (srcBadge) {
         srcBadge.innerText = '⏳ AI Reviewing...';
         srcBadge.style.background = '#f1f5f9';
@@ -3345,8 +3348,7 @@ Avoid: 'cheap', 'hurry up', 'standard commission'</textarea>
           lastEvaluatedQualityScore = data.quality_score;
           if (scoreEl && data.quality_score) scoreEl.innerText = data.quality_score;
           if (badgeEl && data.rating) badgeEl.innerText = data.rating;
-          if (summaryEl && data.summary) summaryEl.innerText = data.summary;
-          if (benchEl && data.benchmark_comparison) benchEl.innerText = data.benchmark_comparison;
+          if (summaryEl) summaryEl.innerText = data.summary || 'Compared against internal baseline heuristics and other playbooks created in this workspace';
 
           if (srcBadge) {
             if (data.quality_source === 'ai_llm') {
@@ -3365,9 +3367,6 @@ Avoid: 'cheap', 'hurry up', 'standard commission'</textarea>
           if (feedbackEl) {
             if (data.llm_evaluation) {
               let fbHtml = '';
-              if (data.llm_evaluation.coherence_feedback) {
-                fbHtml += `<div style="font-weight: 700; color: #1e293b; margin-bottom: 4px;">🧠 Assessment: ${escapeHtml(data.llm_evaluation.coherence_feedback)}</div>`;
-              }
               if (data.llm_evaluation.strengths && data.llm_evaluation.strengths.length > 0) {
                 fbHtml += `<div style="color: #065f46; font-size: 0.78rem;"><strong>✓ Strengths:</strong> ${data.llm_evaluation.strengths.map(s => escapeHtml(s)).join(' • ')}</div>`;
               }
@@ -3375,7 +3374,7 @@ Avoid: 'cheap', 'hurry up', 'standard commission'</textarea>
                 fbHtml += `<div style="color: #b45309; font-size: 0.78rem; margin-top: 2px;"><strong>⚠️ Opportunities:</strong> ${data.llm_evaluation.gaps.map(g => escapeHtml(g)).join(' • ')}</div>`;
               }
               feedbackEl.innerHTML = fbHtml;
-              feedbackEl.style.display = 'block';
+              feedbackEl.style.display = fbHtml ? 'block' : 'none';
             } else {
               feedbackEl.style.display = 'none';
             }
@@ -3410,10 +3409,10 @@ Avoid: 'cheap', 'hurry up', 'standard commission'</textarea>
 
       const trustStyle = document.getElementById('trustBuildingStyleSelect')?.value || 'Validation-First';
       const objConf = Math.round((parseFloat(document.getElementById('objConfSlider')?.value || '0.75')) * 100);
-      const trustAlert = Math.round((parseFloat(document.getElementById('trustAlertSlider')?.value || '0.70')) * 100);
+      const trustSensitivity = Math.round((parseFloat(document.getElementById('trustSensitivitySlider')?.value || document.getElementById('trustAlertSlider')?.value || '0.70')) * 100);
       const cooldown = document.getElementById('promptCooldownInput')?.value || '4';
 
-      document.getElementById('sumStyleDesc').innerText = `Tone: ${selectedTone} • Trust: ${trustStyle} • Min Conf: ${objConf}% • Trust Alert: ${trustAlert}% • Cooldown: ${cooldown}s`;
+      document.getElementById('sumStyleDesc').innerText = `Tone: ${selectedTone} • Trust: ${trustStyle} • Min Conf: ${objConf}% • Trust Sensitivity: ${trustSensitivity}% • Cooldown: ${cooldown}s`;
       document.getElementById('sumStagesDesc').innerText = `${stages.length} stages defined from ${stages[0]?.name || 'Opening'} to ${stages[stages.length - 1]?.name || 'Follow Up'}`;
       document.getElementById('sumObjectionsDesc').innerText = `${objections.length} normalized objections • 4 canonical categories`;
 
@@ -3479,7 +3478,7 @@ Avoid: 'cheap', 'hurry up', 'standard commission'</textarea>
           core_selling_principles: document.getElementById('philosophyText')?.value || '',
           runtime_settings: {
             objection_confidence_threshold: parseFloat(document.getElementById('objConfSlider')?.value || '0.75'),
-            trust_alert_threshold: parseFloat(document.getElementById('trustAlertSlider')?.value || '0.70'),
+            trust_sensitivity_threshold: parseFloat(document.getElementById('trustSensitivitySlider')?.value || document.getElementById('trustAlertSlider')?.value || '0.70'),
             prompt_cooldown_seconds: parseInt(document.getElementById('promptCooldownInput')?.value || '4', 10),
             prompt_timing_sensitivity: document.getElementById('promptTimingSelect')?.value || 'Normal',
             emotional_sensitivity: document.getElementById('emotionalSensitivitySelect')?.value || 'Normal',
@@ -3583,9 +3582,12 @@ Avoid: 'cheap', 'hurry up', 'standard commission'</textarea>
             document.getElementById('objConfSlider').value = rs.objection_confidence_threshold;
             document.getElementById('objConfDisplayBadge').innerText = Math.round(rs.objection_confidence_threshold * 100) + '% Min Match';
           }
-          if (rs.trust_alert_threshold) {
-            document.getElementById('trustAlertSlider').value = rs.trust_alert_threshold;
-            document.getElementById('trustAlertDisplayBadge').innerText = Math.round(rs.trust_alert_threshold * 100) + '% Critical Alert';
+          const trustSens = rs.trust_sensitivity_threshold ?? rs.trust_alert_threshold;
+          if (trustSens !== undefined && trustSens !== null) {
+            const slider = document.getElementById('trustSensitivitySlider') || document.getElementById('trustAlertSlider');
+            if (slider) slider.value = trustSens;
+            const badge = document.getElementById('trustSensitivityDisplayBadge') || document.getElementById('trustAlertDisplayBadge');
+            if (badge) badge.innerText = Math.round(trustSens * 100) + '% Sensitivity Point';
           }
           if (rs.prompt_cooldown_seconds) document.getElementById('promptCooldownInput').value = rs.prompt_cooldown_seconds;
           if (rs.prompt_timing_sensitivity) document.getElementById('promptTimingSelect').value = rs.prompt_timing_sensitivity;
@@ -3681,9 +3683,12 @@ Avoid: 'cheap', 'hurry up', 'standard commission'</textarea>
             document.getElementById('objConfSlider').value = rs.objection_confidence_threshold;
             document.getElementById('objConfDisplayBadge').innerText = Math.round(rs.objection_confidence_threshold * 100) + '% Min Match';
           }
-          if (rs.trust_alert_threshold) {
-            document.getElementById('trustAlertSlider').value = rs.trust_alert_threshold;
-            document.getElementById('trustAlertDisplayBadge').innerText = Math.round(rs.trust_alert_threshold * 100) + '% Critical Alert';
+          const trustSens = rs.trust_sensitivity_threshold ?? rs.trust_alert_threshold;
+          if (trustSens !== undefined && trustSens !== null) {
+            const slider = document.getElementById('trustSensitivitySlider') || document.getElementById('trustAlertSlider');
+            if (slider) slider.value = trustSens;
+            const badge = document.getElementById('trustSensitivityDisplayBadge') || document.getElementById('trustAlertDisplayBadge');
+            if (badge) badge.innerText = Math.round(trustSens * 100) + '% Sensitivity Point';
           }
           if (rs.prompt_cooldown_seconds) document.getElementById('promptCooldownInput').value = rs.prompt_cooldown_seconds;
           if (rs.prompt_timing_sensitivity) document.getElementById('promptTimingSelect').value = rs.prompt_timing_sensitivity;
@@ -3729,31 +3734,32 @@ Avoid: 'cheap', 'hurry up', 'standard commission'</textarea>
     // Live Runtime Methodology Lens Simulation
     // ==========================================
 
-    function getActiveTrustAlertThreshold() {
-      const slider = document.getElementById('trustAlertSlider');
+    function getActiveTrustSensitivityThreshold() {
+      const slider = document.getElementById('trustSensitivitySlider') || document.getElementById('trustAlertSlider');
       return slider ? parseFloat(slider.value) : 0.70;
     }
+    const getActiveTrustAlertThreshold = getActiveTrustSensitivityThreshold;
 
     function syncSimTrustControlsToConfiguredThreshold() {
-      const thresh = getActiveTrustAlertThreshold();
+      const thresh = getActiveTrustSensitivityThreshold();
       const lbl = document.getElementById('simThresholdIndicatorLabel');
-      if (lbl) lbl.innerText = `${thresh.toFixed(2)} (Alert Threshold)`;
+      if (lbl) lbl.innerText = `${thresh.toFixed(2)} (Sensitivity Threshold)`;
       const btn = document.getElementById('btnSimThresholdPreset');
       if (btn) btn.innerText = `Threshold (${thresh.toFixed(2)})`;
       const critBtn = document.getElementById('btnSimCriticalPreset');
       const critVal = Math.max(0.10, Math.round((thresh - 0.25) * 100) / 100);
-      if (critBtn) critBtn.innerText = `Critical Alert (${critVal.toFixed(2)})`;
+      if (critBtn) critBtn.innerText = `Below Sensitivity (${critVal.toFixed(2)})`;
       const currentSliderVal = document.getElementById('simTrustSlider')?.value;
       if (currentSliderVal !== undefined) updateSimTrustDisplay(currentSliderVal);
     }
 
     function setSimTrustToCurrentThreshold() {
-      const thresh = getActiveTrustAlertThreshold();
+      const thresh = getActiveTrustSensitivityThreshold();
       setSimTrust(thresh);
     }
 
     function setSimTrustCritical() {
-      const thresh = getActiveTrustAlertThreshold();
+      const thresh = getActiveTrustSensitivityThreshold();
       const critVal = Math.max(0.10, Math.round((thresh - 0.25) * 100) / 100);
       setSimTrust(critVal);
     }
@@ -3769,7 +3775,7 @@ Avoid: 'cheap', 'hurry up', 'standard commission'</textarea>
 
     function updateSimTrustDisplay(val) {
       const num = parseFloat(val);
-      const thresh = getActiveTrustAlertThreshold();
+      const thresh = getActiveTrustSensitivityThreshold();
       const badge = document.getElementById('simTrustBadge');
       if (!badge) return;
 
@@ -3778,13 +3784,13 @@ Avoid: 'cheap', 'hurry up', 'standard commission'</textarea>
         badge.style.background = '#fef2f2';
         badge.style.color = '#b91c1c';
         badge.style.border = '1px solid #fecaca';
-        badge.innerText = `${num.toFixed(2)} (⚠️ Critical Alert < ${thresh.toFixed(2)})`;
+        badge.innerText = `${num.toFixed(2)} (⚠️ Below Sensitivity < ${thresh.toFixed(2)})`;
       } else if (Math.abs(num - thresh) < 0.001) {
         badge.className = 'tag-pill tag-pill-warning';
         badge.style.background = '#fffbeb';
         badge.style.color = '#b45309';
         badge.style.border = '1px solid #fde68a';
-        badge.innerText = `${num.toFixed(2)} (Threshold Border)`;
+        badge.innerText = `${num.toFixed(2)} (Sensitivity Border)`;
       } else {
         badge.className = 'tag-pill tag-pill-success';
         badge.style.background = '#ecfdf5';
@@ -3835,7 +3841,7 @@ Avoid: 'cheap', 'hurry up', 'standard commission'</textarea>
             const threshPct = Math.round(data.objection_confidence_threshold * 100);
             const catStr = Array.isArray(data.match_info.category) ? data.match_info.category.join('+') : data.match_info.category;
             pillsHtml += `<span class="tag-pill tag-pill-success" style="font-weight: 700; background: #ecfdf5; color: #065f46; border: 1px solid #a7f3d0;">
-              🎯 Matched: "${escapeHtml(data.match_info.objection)}" (${confPct}% &ge; ${threshPct}%) [${escapeHtml(catStr)}]
+              🎯 Candidate Match: "${escapeHtml(data.match_info.objection)}" (${confPct}% &ge; ${threshPct}%) [${escapeHtml(catStr)}]
             </span>`;
           } else {
             const confPct = Math.round(data.match_info.confidence * 100);
@@ -3846,13 +3852,15 @@ Avoid: 'cheap', 'hurry up', 'standard commission'</textarea>
           }
         }
 
-        if (data.trust_alert_triggered) {
+        const trustTriggered = Boolean(data.trust_sensitivity_triggered ?? data.trust_alert_triggered);
+        const trustThresh = data.trust_sensitivity_threshold ?? data.trust_alert_threshold ?? 0.70;
+        if (trustTriggered) {
           pillsHtml += `<span class="tag-pill" style="font-weight: 700; background: #fef2f2; color: #b91c1c; border: 1px solid #f87171;">
-            ⚠️ CRITICAL TRUST ALERT TRIGGERED (Trust &lt; ${Math.round(data.trust_alert_threshold * 100)}%)
+            ⚠️ Trust Sensitivity Note (Trust &lt; ${Math.round(trustThresh * 100)}%)
           </span>`;
         } else {
           pillsHtml += `<span class="tag-pill" style="font-weight: 600; background: #f1f5f9; color: #475569; border: 1px solid #cbd5e1;">
-            ✅ Trust Normal (&ge; ${Math.round(data.trust_alert_threshold * 100)}%)
+            ✅ Trust Stable (&ge; ${Math.round(trustThresh * 100)}%)
           </span>`;
         }
 
