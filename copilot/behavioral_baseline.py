@@ -104,17 +104,30 @@ class ProspectBaselineStore:
         self._write_data(data)
 
 
-def compute_sample_stats(samples: List[float], min_stddev_ratio: float = 0.08) -> SpeakerBaselineStats:
+DEFAULT_FEATURE_STDDEV_FLOORS: Dict[str, Tuple[float, float]] = {
+    # feature_name: (min_stddev_ratio, min_stddev_abs)
+    "speech_rate_wpm": (0.18, 15.0),        # 18% of mean, at least 15 WPM floor
+    "avg_pause_duration_ms": (0.25, 150.0), # 25% of mean, at least 150ms floor
+    "response_latency_ms": (0.30, 200.0),   # 30% of mean, at least 200ms floor
+    "turn_length_words": (0.35, 3.0),       # 35% of mean, at least 3 words floor
+}
+
+
+def compute_sample_stats(
+    samples: List[float],
+    min_stddev_ratio: float = 0.18,
+    min_stddev_abs: float = 1.0,
+) -> SpeakerBaselineStats:
     n = len(samples)
     if n == 0:
         return SpeakerBaselineStats(mean=0.0, stddev=1.0, sample_count=0)
     mean = sum(samples) / n
     if n == 1:
-        stddev = max(1.0, mean * min_stddev_ratio)
+        stddev = max(min_stddev_abs, mean * min_stddev_ratio)
     else:
         variance = sum((x - mean) ** 2 for x in samples) / (n - 1)
         stddev = math.sqrt(variance)
-        stddev = max(stddev, max(1.0, mean * min_stddev_ratio))
+        stddev = max(stddev, max(min_stddev_abs, mean * min_stddev_ratio))
     return SpeakerBaselineStats(mean=round(mean, 2), stddev=round(stddev, 2), sample_count=n)
 
 
@@ -185,10 +198,26 @@ class BaselineAndChangePointEngine:
         )
 
     def _recalculate_profiles(self, timestamp_ms: int) -> None:
-        speech_stats = compute_sample_stats(self.prospect_samples["speech_rate_wpm"])
-        pause_stats = compute_sample_stats(self.prospect_samples["avg_pause_duration_ms"])
-        latency_stats = compute_sample_stats(self.prospect_samples["response_latency_ms"])
-        turn_stats = compute_sample_stats(self.prospect_samples["turn_length_words"])
+        speech_stats = compute_sample_stats(
+            self.prospect_samples["speech_rate_wpm"],
+            min_stddev_ratio=DEFAULT_FEATURE_STDDEV_FLOORS["speech_rate_wpm"][0],
+            min_stddev_abs=DEFAULT_FEATURE_STDDEV_FLOORS["speech_rate_wpm"][1],
+        )
+        pause_stats = compute_sample_stats(
+            self.prospect_samples["avg_pause_duration_ms"],
+            min_stddev_ratio=DEFAULT_FEATURE_STDDEV_FLOORS["avg_pause_duration_ms"][0],
+            min_stddev_abs=DEFAULT_FEATURE_STDDEV_FLOORS["avg_pause_duration_ms"][1],
+        )
+        latency_stats = compute_sample_stats(
+            self.prospect_samples["response_latency_ms"],
+            min_stddev_ratio=DEFAULT_FEATURE_STDDEV_FLOORS["response_latency_ms"][0],
+            min_stddev_abs=DEFAULT_FEATURE_STDDEV_FLOORS["response_latency_ms"][1],
+        )
+        turn_stats = compute_sample_stats(
+            self.prospect_samples["turn_length_words"],
+            min_stddev_ratio=DEFAULT_FEATURE_STDDEV_FLOORS["turn_length_words"][0],
+            min_stddev_abs=DEFAULT_FEATURE_STDDEV_FLOORS["turn_length_words"][1],
+        )
 
         self.intra_call_profile = BaselineProfile(
             prospect_id=self.prospect_id,
@@ -290,8 +319,14 @@ class BaselineAndChangePointEngine:
         new_change_points: List[ChangePointEvent] = []
         is_anomalous_turn = False
         for feat, val in observed_features.items():
-            if feat == "speech_rate_wpm" and val <= 0.0:
-                continue
+            if feat == "speech_rate_wpm":
+                if val <= 0.0:
+                    continue
+                # Turns with fewer than 4 words have excessive timestamp quantization variance
+                # and should not trigger speech rate change-points on short confirmations
+                turn_words = observed_features.get("turn_length_words", 0.0)
+                if turn_words < 4.0:
+                    continue
 
             stat: SpeakerBaselineStats = getattr(active_profile, feat)
             if stat.stddev <= 0.001:

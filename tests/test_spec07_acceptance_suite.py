@@ -169,7 +169,8 @@ def test_spec07_test2_pricing_slowdown_stored_as_objective_evidence(tmp_path: Pa
         end_ms=89000,
         call_sid="call_spec07_t2",
     )
-    t_slow = timing_engine.process_utterance(slow_utt)
+    timing_engine.process_utterance(slow_utt)
+    t_slow = timing_engine.compute_snapshot_for_window(window_ms=10000, speaker_id="client")
     cps_slow = base_engine.update_with_utterance(slow_utt, t_slow)
 
     # Change-point event must be detected for speech deceleration

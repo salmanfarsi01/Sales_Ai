@@ -666,3 +666,88 @@ def test_change_point_baseline_source_tagging(tmp_path: Path):
     assert len(cps_intra) >= 1
     cp_intra = next(c for c in cps_intra if c.feature_name == "speech_rate_wpm")
     assert cp_intra.baseline_source == "intra_call"
+
+
+def test_recalibrated_variance_floor_prevents_false_anomalies_on_slow_speaker(tmp_path: Path):
+    """Verifies that natural micro-variation (e.g. 115 WPM from a 90 WPM baseline speaker)
+    and short conversational confirmations do NOT trigger false change-points.
+    Under the old min_stddev_ratio=0.08, stddev would be 7.2 WPM, causing 115 WPM to trip |z| = 3.47.
+    With recalibrated per-feature floor (ratio=0.18, min_abs=15 WPM), stddev >= 16.2 WPM, keeping |z| < 1.6.
+    """
+    store = ProspectBaselineStore(store_path=tmp_path / "baselines.json")
+    engine = BaselineAndChangePointEngine(
+        call_sid="call_slow_variance_test",
+        prospect_id="prospect_slow_var",
+        store=store,
+        intra_call_window_ms=60000,
+        min_calibration_turns=3,
+        min_cumulative_words=15,
+        z_threshold=2.0,
+    )
+    timing_engine = DeterministicTimingEngine()
+
+    # Establish steady, deliberate ~90-95 WPM baseline across 65s
+    steady_slow_turns = [
+        ("We are currently reviewing all vendor proposals with our evaluation board.", 1000, 8000),      # 11 words, 7s -> 94.3 WPM
+        ("The main requirement for our team is seamless integration with our database.", 15000, 23000),  # 12 words, 8s -> 90.0 WPM
+        ("We need to ensure compliance requirements are strictly met across all systems.", 40000, 48000), # 11 words, 8s -> 82.5 WPM
+        ("Our executive committee will make the final selection next month.", 55000, 63000),              # 10 words, 8s -> 75.0 WPM
+    ]
+
+    for text, start, end in steady_slow_turns:
+        utt = normalize_generic_transcript(text, "client", start, end, "call_slow_variance_test")
+        t_snap = timing_engine.process_utterance(utt)
+        engine.update_with_utterance(utt, t_snap)
+
+    assert engine.is_intra_call_locked is True
+    profile = engine.get_active_profile()
+    assert profile is not None
+    # Recalibrated stddev floor guarantees stddev >= max(15.0, mean * 0.18)
+    assert profile.speech_rate_wpm.stddev >= 15.0
+
+    # Test 1: Natural micro-variation turn (115 WPM - faster sentence, but still natural speech)
+    # Under old 0.08 ratio, this would have produced z = (115 - 88) / 7.0 = 3.86 (FALSE ANOMALY)
+    natural_faster_turn = normalize_generic_transcript(
+        text="That makes total sense and we certainly agree with that approach.", # 11 words, 6s -> 110 WPM
+        speaker_id="client",
+        start_ms=68000,
+        end_ms=74000,
+        call_sid="call_slow_variance_test",
+    )
+    timing_engine.process_utterance(natural_faster_turn)
+    t_faster = timing_engine.compute_snapshot_for_window(window_ms=10000, speaker_id="client")
+    cps_faster = engine.update_with_utterance(natural_faster_turn, t_faster)
+
+    # Must NOT trigger a false rate surge change-point
+    assert not any(cp.feature_name == "speech_rate_wpm" for cp in cps_faster)
+
+    # Test 2: Short conversational confirmation ("Yes, exactly.")
+    # Word count is 2 words, duration 1.2s -> raw WPM would be 100 WPM, but short turns (< 4 words)
+    # are protected from rate change-point false alerts.
+    short_utt = normalize_generic_transcript(
+        text="Yes, exactly.",
+        speaker_id="client",
+        start_ms=76000,
+        end_ms=77200,
+        call_sid="call_slow_variance_test",
+    )
+    timing_engine.process_utterance(short_utt)
+    t_short = timing_engine.compute_snapshot_for_window(window_ms=10000, speaker_id="client")
+    cps_short = engine.update_with_utterance(short_utt, t_short)
+
+    assert not any(cp.feature_name == "speech_rate_wpm" for cp in cps_short)
+
+    # Test 3: True genuine surge (240 WPM - frantic objection) MUST still trigger
+    surge_utt = normalize_generic_transcript(
+        text="Wait hold on that is completely ridiculous why would you ever quote that amount to us right now!",
+        speaker_id="client",
+        start_ms=80000,
+        end_ms=85000,
+        call_sid="call_slow_variance_test",
+    )
+    timing_engine.process_utterance(surge_utt)
+    t_surge = timing_engine.compute_snapshot_for_window(window_ms=10000, speaker_id="client")
+    cps_surge = engine.update_with_utterance(surge_utt, t_surge)
+
+    assert any(cp.feature_name == "speech_rate_wpm" and cp.direction == "surge" and cp.z_score >= 2.0 for cp in cps_surge)
+
