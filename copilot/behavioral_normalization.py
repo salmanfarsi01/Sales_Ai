@@ -13,6 +13,7 @@ class CallMetadata(BaseModel):
     stage: str = "Discovery"
     active_playbook: Optional[str] = None
     calibration_profile: Optional[str] = None
+    semantic_timeout_sec: Optional[float] = None
 
 
 class NormalizedWord(BaseModel):

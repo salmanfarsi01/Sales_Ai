@@ -1,0 +1,404 @@
+from __future__ import annotations
+
+import os
+import re
+import json
+import asyncio
+import logging
+from typing import List, Optional, Literal, Tuple, Any, Dict
+from pydantic import BaseModel, Field
+
+from .behavioral_normalization import NormalizedUtterance, CallMetadata
+
+LOGGER = logging.getLogger("copilot.behavioral_semantic")
+
+CONFIDENCE_BY_FEATURE: Dict[str, Dict[str, float]] = {
+    "llm": {
+        "boundary": 0.95,
+        "specificity": 0.95,
+        "future_language": 0.95,
+        "recurrence": 0.95,
+        "question_type": 0.95,
+        "agreement": 0.95,
+    },
+    "heuristic": {
+        "boundary": 0.95,
+        "specificity": 0.85,
+        "future_language": 0.85,
+        "recurrence": 0.80,
+        "question_type": 0.70,
+        "agreement": 0.65,
+    },
+}
+
+
+class SemanticFeatureSnapshot(BaseModel):
+    utterance_id: str
+    call_sid: str
+    speaker_id: Literal["salesperson", "client"]
+    extraction_mode: Literal["llm", "heuristic_timeout", "heuristic_error", "heuristic_offline"] = "llm"
+    recurrence_id: Optional[str] = None
+    recurrence_type: Literal[
+        "same_objection_repeated",
+        "concern_after_failed_reframe",
+        "positive_echo",
+        "boundary_repeated",
+        "scheduling_detail_repeated",
+        "scheduling_repeated",
+        "none"
+    ] = "none"
+    recurrence_count: int = 0
+    question_type: Literal["evaluation", "transactional", "clarifying", "hostile", "rhetorical", "none"] = "none"
+    specificity_score: float = Field(0.0, ge=0.0, le=1.0)
+    future_language_score: float = Field(0.0, ge=0.0, le=1.0)
+    boundary_score: float = Field(0.0, ge=0.0, le=1.0)
+    agreement_score: float = Field(0.0, ge=0.0, le=1.0)
+    filler_score: Optional[float] = None
+    is_filler_available: bool = False
+    boundary_confidence: float = Field(0.95, ge=0.0, le=1.0)
+    recurrence_confidence: float = Field(0.95, ge=0.0, le=1.0)
+    question_type_confidence: float = Field(0.95, ge=0.0, le=1.0)
+    specificity_confidence: float = Field(0.95, ge=0.0, le=1.0)
+    future_language_confidence: float = Field(0.95, ge=0.0, le=1.0)
+    agreement_confidence: float = Field(0.95, ge=0.0, le=1.0)
+    semantic_confidence: float = Field(1.0, ge=0.0, le=1.0)
+
+
+STOP_CONTACT_PATTERNS = [
+    r"\bdo\s+not\s+call\b",
+    r"\bdon['’]?t\s+call\b",
+    r"\bstop\s+calling\b",
+    r"\btake\s+me\s+off\b",
+    r"\bremove\s+(my\s+)?(number|name)\b",
+    r"\blose\s+my\s+number\b",
+    r"\bdo\s+not\s+contact\b",
+    r"\bdon['’]?t\s+contact\b",
+    r"\bstop\s+contacting\b",
+    r"\bstop\s+harassing\b",
+    r"\bnot\s+interested\b.*?\bdo\s+not\b",
+    r"\balready\s+(have\s+an?\s+agent|listed|under\s+contract|represented)\b",
+    r"\bunder\s+contract\b",
+    r"\b(another|an)\s+(agent|realtor|broker)\b",
+    r"\brepresented\s+by\b",
+    r"\bhave\s+an\s+exclusive\b",
+    r"\bcall\s+my\s+(attorney|lawyer)\b",
+]
+
+SPECIFICITY_PATTERNS = [
+    r"\$\s*\d+[\d,]*(\.\d+)?\s*(k|m|million|thousand)?\b",
+    r"\b\d+[\d,]*\s*(percent|%)\b",
+    r"\b\d+\s*(bed|bedroom|bath|bathroom|sqft|square\s+feet|days|months|weeks|years)\b",
+    r"\b(january|february|march|april|may|june|july|august|september|october|november|december)\b",
+    r"\b(monday|tuesday|wednesday|thursday|friday|saturday|sunday)\b",
+    r"\b(attorney|probate|tenant|landlord|contractor|escrow|appraiser|inspector)\b",
+]
+
+FUTURE_LANGUAGE_PATTERNS = [
+    r"\bwhen\s+(we|i)\s+(sell|list|move|close|relocate)\b",
+    r"\b(we|i)\s+(plan|intend|want)\s+to\s+(sell|list|move|close)\b",
+    r"\b(by|in|around)\s+(october|november|december|january|spring|summer|fall|next\s+month|the\s+end\s+of)\b",
+    r"\bonce\s+(the\s+tenant|we\s+finish|probate\s+clears|school\s+starts)\b",
+    r"\bour\s+timeline\s+is\b",
+]
+
+SUBSTANTIVE_AGREEMENT_PATTERNS = [
+    r"\b(yes|yeah|sure)\b.*?\b(tuesday|wednesday|thursday|friday|monday|tomorrow|\d+\s*(pm|am))\b",
+    r"\b(that\s+works|sounds\s+good|let['’]?s\s+do\s+that|i\s+agree|let['’]?s\s+meet)\b",
+    r"\bi\s+can\s+(do|meet|show|send)\b",
+]
+
+POLITE_AGREEMENT_PATTERNS = [
+    r"^(yeah|yes|okay|ok|sure|right|uh-huh|yep|gotcha)[\.\,\!]*$",
+]
+
+HOSTILE_QUESTION_PATTERNS = [
+    r"\bhow\s+did\s+you\s+(get|find)\s+my\b",
+    r"\bwho\s+gave\s+you\s+(this|my)\b",
+    r"\bwhy\s+are\s+you\s+(calling|bothering|contacting)\b",
+    r"\bwhy\s+(do|are)\s+you\s+(call|calling)\b",
+    r"\bwho\s+(is\s+this|are\s+you)\b",
+    r"\bwhat\s+do\s+you\s+want\b",
+]
+
+TRANSACTIONAL_QUESTION_PATTERNS = [
+    r"\bwhat\s+(is|are)\s+(your\s+)?([a-z]+\s+)?(commission|fee|fees|rate|cost|percentage)\b",
+    r"\bhow\s+much\s+(do\s+you\s+charge|is\s+it|does\s+it\s+cost)\b",
+    r"\bhow\s+long\s+is\s+the\s+listing\s+(agreement|contract)\b",
+    r"\b(commission|listing\s+fee|brokerage\s+fee|closing\s+costs)\b",
+]
+
+EVALUATION_QUESTION_PATTERNS = [
+    r"\bhow\s+do\s+you\s+(market|sell|find\s+buyers|differentiate)\b",
+    r"\bwhat\s+do\s+you\s+do\s+(differently|different)\b",
+    r"\bwhat\s+is\s+your\s+(strategy|track\s+record|experience)\b",
+]
+
+STOPWORDS = {
+    "a", "an", "the", "that", "this", "these", "those", "our", "your", "my", "we", "you",
+    "i", "us", "it", "to", "for", "in", "on", "at", "with", "still", "way", "too", "is",
+    "are", "was", "were", "and", "but", "or", "of", "as", "be", "so", "do", "does", "did",
+}
+
+
+class SemanticFeatureEngine:
+    def __init__(
+        self,
+        groq_client: Optional[Any] = None,
+        model: str = "llama-3.1-8b-instant",
+        timeout_seconds: float = 1.0,
+    ):
+        self.groq_client = groq_client
+        self.model = os.getenv("GROQ_FAST_MODEL", model)
+        self.timeout_seconds = float(os.getenv("BEHAVIORAL_SEMANTIC_TIMEOUT_SEC", str(timeout_seconds)))
+
+    def classify_boundary_deterministic(self, text: str) -> float:
+        cleaned = text.strip().lower()
+        for pat in STOP_CONTACT_PATTERNS:
+            if re.search(pat, cleaned, re.IGNORECASE):
+                return 1.0
+        return 0.0
+
+    def detect_semantic_recurrence(
+        self,
+        current_text: str,
+        history: List[NormalizedUtterance],
+        playbook_objections: Optional[List[Any]] = None,
+    ) -> Tuple[Optional[str], Literal["same_objection_repeated", "concern_after_failed_reframe", "positive_echo", "boundary_repeated", "scheduling_detail_repeated", "scheduling_repeated", "none"], int]:
+        cleaned = current_text.strip().lower()
+        if len(cleaned.split()) < 3:
+            return None, "none", 0
+
+        # Check boundary repeated
+        if self.classify_boundary_deterministic(cleaned) >= 0.8:
+            prior_boundaries = [
+                u for u in history
+                if u.speaker_id == "client" and self.classify_boundary_deterministic(u.text) >= 0.8
+            ]
+            if prior_boundaries:
+                return "BOUND_STOP_01", "boundary_repeated", len(prior_boundaries) + 1
+
+        # Check scheduling / value detail repeated
+        rep_recent = [u for u in history if u.speaker_id == "salesperson"]
+        if rep_recent:
+            last_rep_text = rep_recent[-1].text.lower()
+            rep_spec_matches = {
+                m.group(0).lower() for pat in (SPECIFICITY_PATTERNS + SUBSTANTIVE_AGREEMENT_PATTERNS)
+                for m in re.finditer(pat, last_rep_text)
+            }
+            if rep_spec_matches:
+                client_spec_matches = {
+                    m.group(0).lower() for pat in (SPECIFICITY_PATTERNS + SUBSTANTIVE_AGREEMENT_PATTERNS)
+                    for m in re.finditer(pat, cleaned)
+                }
+                if rep_spec_matches.intersection(client_spec_matches):
+                    return "SCHED_DETAIL_01", "scheduling_detail_repeated", 1
+
+        prior_sched = [
+            u for u in history
+            if u.speaker_id == "client" and any(re.search(pat, u.text.lower()) for pat in SUBSTANTIVE_AGREEMENT_PATTERNS)
+        ]
+        if prior_sched and any(re.search(pat, cleaned) for pat in SUBSTANTIVE_AGREEMENT_PATTERNS):
+            return "SCHED_DETAIL_01", "scheduling_detail_repeated", len(prior_sched) + 1
+
+        # Check positive echo of rep wording
+        rep_recent = [u for u in history if u.speaker_id == "salesperson"]
+        if rep_recent:
+            last_rep_words = set(re.findall(r"\b[a-z]{4,}\b", rep_recent[-1].text.lower()))
+            current_words = set(re.findall(r"\b[a-z]{4,}\b", cleaned))
+            overlap = last_rep_words.intersection(current_words)
+            if len(overlap) >= 3 and any(w in cleaned for w in ["yes", "exactly", "that's right", "makes sense", "agree"]):
+                return "ECHO_ALIGN_01", "positive_echo", 1
+
+        # Check objection recurrence against previous client utterances
+        raw_tokens = set(re.findall(r"\b[a-z]{3,}\b", cleaned))
+        tokens = {t for t in raw_tokens if t not in STOPWORDS}
+        for prev in reversed([u for u in history if u.speaker_id == "client"]):
+            prev_raw = set(re.findall(r"\b[a-z]{3,}\b", prev.text.lower()))
+            prev_tokens = {t for t in prev_raw if t not in STOPWORDS}
+            if not tokens or not prev_tokens:
+                continue
+            common = tokens.intersection(prev_tokens)
+            if not common:
+                continue
+            overlap_min = len(common) / min(len(tokens), len(prev_tokens))
+            overlap_max = len(common) / max(len(tokens), len(prev_tokens))
+            if overlap_min >= 0.5 or overlap_max >= 0.35:
+                intervening_rep = [
+                    u for u in history
+                    if u.speaker_id == "salesperson" and prev.end_ms <= u.start_ms
+                ]
+                rec_type = "concern_after_failed_reframe" if intervening_rep else "same_objection_repeated"
+                rec_id = f"OBJ_REC_{abs(hash(prev.text)) % 10000:04d}"
+                return rec_id, rec_type, 2
+
+        return None, "none", 0
+
+    def analyze_deterministic_heuristic(
+        self,
+        utterance: NormalizedUtterance,
+        context_history: List[NormalizedUtterance],
+        mode: Literal["heuristic_timeout", "heuristic_error", "heuristic_offline"] = "heuristic_offline",
+    ) -> SemanticFeatureSnapshot:
+        text = utterance.text.strip()
+        lower_text = text.lower()
+
+        boundary_score = self.classify_boundary_deterministic(text)
+        rec_id, rec_type, rec_count = self.detect_semantic_recurrence(text, context_history)
+
+        # Question Type
+        question_type: Literal["evaluation", "transactional", "clarifying", "hostile", "rhetorical", "none"] = "none"
+        if text.endswith("?") or any(lower_text.startswith(w) for w in ["what", "how", "why", "who", "when", "can", "is", "are", "do"]):
+            if any(re.search(pat, lower_text) for pat in HOSTILE_QUESTION_PATTERNS):
+                question_type = "hostile"
+            elif any(re.search(pat, lower_text) for pat in TRANSACTIONAL_QUESTION_PATTERNS):
+                question_type = "transactional"
+            elif any(re.search(pat, lower_text) for pat in EVALUATION_QUESTION_PATTERNS):
+                question_type = "evaluation"
+            elif any(w in lower_text for w in ["mean", "clarify", "repeat", "which", "say"]):
+                question_type = "clarifying"
+            else:
+                question_type = "evaluation"
+
+        # Specificity
+        spec_matches = sum(1 for pat in SPECIFICITY_PATTERNS if re.search(pat, lower_text))
+        specificity_score = min(1.0, spec_matches * 0.35)
+
+        # Future Language
+        future_matches = sum(1 for pat in FUTURE_LANGUAGE_PATTERNS if re.search(pat, lower_text))
+        future_language_score = min(1.0, future_matches * 0.5)
+
+        # Agreement
+        agreement_score = 0.0
+        if any(re.search(pat, lower_text) for pat in SUBSTANTIVE_AGREEMENT_PATTERNS):
+            agreement_score = 0.85
+        elif any(re.search(pat, lower_text) for pat in POLITE_AGREEMENT_PATTERNS):
+            agreement_score = 0.30
+
+        conf = CONFIDENCE_BY_FEATURE["heuristic"]
+
+        return SemanticFeatureSnapshot(
+            utterance_id=utterance.utterance_id,
+            call_sid=utterance.call_sid,
+            speaker_id=utterance.speaker_id,
+            extraction_mode=mode,
+            recurrence_id=rec_id,
+            recurrence_type=rec_type,
+            recurrence_count=rec_count,
+            question_type=question_type,
+            specificity_score=round(specificity_score, 2),
+            future_language_score=round(future_language_score, 2),
+            boundary_score=round(boundary_score, 2),
+            agreement_score=round(agreement_score, 2),
+            filler_score=None,
+            is_filler_available=False,
+            boundary_confidence=conf["boundary"],
+            recurrence_confidence=conf["recurrence"],
+            question_type_confidence=conf["question_type"],
+            specificity_confidence=conf["specificity"],
+            future_language_confidence=conf["future_language"],
+            agreement_confidence=conf["agreement"],
+            semantic_confidence=0.80,
+        )
+
+    async def analyze_turn_semantic(
+        self,
+        utterance: NormalizedUtterance,
+        context_history: List[NormalizedUtterance],
+        playbook_objections: Optional[List[Any]] = None,
+        call_metadata: Optional[CallMetadata] = None,
+    ) -> SemanticFeatureSnapshot:
+        # 1. Deterministic boundary filter runs first (zero false negatives)
+        boundary_score = self.classify_boundary_deterministic(utterance.text)
+        rec_id, rec_type, rec_count = self.detect_semantic_recurrence(
+            utterance.text, context_history, playbook_objections
+        )
+
+        timeout = (
+            call_metadata.semantic_timeout_sec
+            if call_metadata and call_metadata.semantic_timeout_sec is not None
+            else self.timeout_seconds
+        )
+
+        api_key_groq = os.getenv("GROQ_API_KEY")
+        if not api_key_groq or api_key_groq.startswith("mock_"):
+            return self.analyze_deterministic_heuristic(
+                utterance, context_history, mode="heuristic_offline"
+            )
+
+        prompt = (
+            f"You are an expert sales conversational linguist. Analyze this speaker turn.\n\n"
+            f"Context (last 2 turns):\n"
+            + "\n".join(f"- {u.speaker_id}: {u.text}" for u in context_history[-2:])
+            + f"\n\nCurrent turn ({utterance.speaker_id}): \"{utterance.text}\"\n\n"
+            f"Classify into valid JSON with these exact fields:\n"
+            f"- question_type: 'evaluation' | 'transactional' | 'clarifying' | 'hostile' | 'rhetorical' | 'none'\n"
+            f"- specificity_score: float 0.0 to 1.0 (dates, dollar amounts, named entities, hard numbers)\n"
+            f"- future_language_score: float 0.0 to 1.0 (operational future commitment vs vague hypotheticals)\n"
+            f"- agreement_score: float 0.0 to 1.0 (substantive meeting/pricing commitment ~0.8-1.0; polite nod like 'yeah' ~0.2-0.3)\n"
+            f"- boundary_score: float 0.0 to 1.0 (stop contact, already represented, privacy constraints)\n\n"
+            f"Output ONLY raw JSON."
+        )
+
+        try:
+            if self.groq_client is not None:
+                client = self.groq_client
+            else:
+                import groq
+                client = groq.Groq(api_key=api_key_groq, timeout=timeout)
+
+            def _call_groq():
+                resp = client.chat.completions.create(
+                    model=self.model,
+                    messages=[{"role": "user", "content": prompt}],
+                    temperature=0.1,
+                    max_tokens=120,
+                )
+                return resp.choices[0].message.content.strip()
+
+            raw_resp = await asyncio.wait_for(
+                asyncio.to_thread(_call_groq),
+                timeout=timeout,
+            )
+            if "<think>" in raw_resp and "</think>" in raw_resp:
+                raw_resp = raw_resp.split("</think>")[-1].strip()
+            raw_resp = raw_resp.strip("`").replace("json\n", "").strip()
+
+            parsed = json.loads(raw_resp)
+
+            # Ensure boundary deterministic override is respected
+            effective_boundary = max(boundary_score, float(parsed.get("boundary_score", 0.0)))
+            conf = CONFIDENCE_BY_FEATURE["llm"]
+
+            return SemanticFeatureSnapshot(
+                utterance_id=utterance.utterance_id,
+                call_sid=utterance.call_sid,
+                speaker_id=utterance.speaker_id,
+                extraction_mode="llm",
+                recurrence_id=rec_id,
+                recurrence_type=rec_type,
+                recurrence_count=rec_count,
+                question_type=parsed.get("question_type", "none"),
+                specificity_score=min(1.0, max(0.0, float(parsed.get("specificity_score", 0.0)))),
+                future_language_score=min(1.0, max(0.0, float(parsed.get("future_language_score", 0.0)))),
+                boundary_score=min(1.0, max(0.0, effective_boundary)),
+                agreement_score=min(1.0, max(0.0, float(parsed.get("agreement_score", 0.0)))),
+                filler_score=None,
+                is_filler_available=False,
+                boundary_confidence=conf["boundary"],
+                recurrence_confidence=conf["recurrence"],
+                question_type_confidence=conf["question_type"],
+                specificity_confidence=conf["specificity"],
+                future_language_confidence=conf["future_language"],
+                agreement_confidence=conf["agreement"],
+                semantic_confidence=0.95,
+            )
+        except asyncio.TimeoutError:
+            LOGGER.debug("Semantic LLM extraction timed out after %.2fs; falling back to heuristic", timeout)
+            return self.analyze_deterministic_heuristic(
+                utterance, context_history, mode="heuristic_timeout"
+            )
+        except Exception as exc:
+            LOGGER.debug("Semantic LLM extraction failed (%s); falling back to heuristic", exc)
+            return self.analyze_deterministic_heuristic(
+                utterance, context_history, mode="heuristic_error"
+            )

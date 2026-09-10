@@ -38,6 +38,8 @@ from .knowledge_upload import (
     safe_stem,
 )
 from .behavioral_normalization import normalize_deepgram_result, CallMetadata
+from .behavioral_timing import DeterministicTimingEngine, TimingFeatureSnapshot
+from .behavioral_semantic import SemanticFeatureEngine, SemanticFeatureSnapshot
 
 LOGGER = logging.getLogger("copilot.fastapi")
 STATIC = Path(__file__).resolve().parent.parent / "web"
@@ -56,6 +58,10 @@ class FastAPICopilot:
         self._client_history: dict[str, list[str]] = {}
         self._behavioral_buffer: dict[str, list[Any]] = {}
         self._call_metadata: dict[str, CallMetadata] = {}
+        self._timing_engines: dict[str, DeterministicTimingEngine] = {}
+        self._semantic_engine = SemanticFeatureEngine(self.groq)
+        self._latest_timing_snapshots: dict[str, TimingFeatureSnapshot] = {}
+        self._semantic_snapshots: dict[str, list[SemanticFeatureSnapshot]] = {}
         self.ingestion_jobs: dict[str, dict[str, Any]] = {}
 
         if settings.rag and settings.rag.rag_enabled:
@@ -735,6 +741,20 @@ class FastAPICopilot:
                                         )
                                         if norm_utt is not None:
                                             self._behavioral_buffer.setdefault(call_sid, []).append(norm_utt)
+                                            timing_engine = self._timing_engines.setdefault(
+                                                call_sid, DeterministicTimingEngine(call_sid=call_sid)
+                                            )
+                                            timing_snap = timing_engine.process_utterance(norm_utt)
+                                            self._latest_timing_snapshots[call_sid] = timing_snap
+                                            try:
+                                                sem_snap = await self._semantic_engine.analyze_turn_semantic(
+                                                    norm_utt,
+                                                    self._behavioral_buffer[call_sid][:-1],
+                                                    call_metadata=self._call_metadata.get(call_sid),
+                                                )
+                                                self._semantic_snapshots.setdefault(call_sid, []).append(sem_snap)
+                                            except Exception as sem_err:
+                                                LOGGER.warning("Semantic feature extraction failed for %s: %s", call_sid, sem_err)
         
                                         # Maintain client query history
                                         if role == "client":
@@ -1075,11 +1095,15 @@ class FastAPICopilot:
         async def get_call_behavioral_info(call_sid: str):
             utterances = self._behavioral_buffer.get(call_sid, [])
             meta = self._call_metadata.get(call_sid)
+            timing = self._latest_timing_snapshots.get(call_sid)
+            semantic = self._semantic_snapshots.get(call_sid, [])
             return {
                 "call_sid": call_sid,
                 "metadata": meta.model_dump() if meta else None,
                 "count": len(utterances),
                 "utterances": [u.model_dump() for u in utterances],
+                "latest_timing": timing.model_dump() if timing else None,
+                "semantic_snapshots": [s.model_dump() for s in semantic],
             }
 
         return app
