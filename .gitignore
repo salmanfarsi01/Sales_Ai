@@ -42,3 +42,8 @@ dist/
 
 # Jupyter
 .ipynb_checkpoints/
+
+# Database files
+*.db
+*.db-wal
+*.db-shm

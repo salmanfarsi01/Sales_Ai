@@ -519,3 +519,150 @@ def test_change_point_inherits_synthetic_timing_confidence_penalty(tmp_path: Pat
     assert len(cps) >= 1
     for cp in cps:
         assert cp.confidence == 0.5
+
+
+def test_change_point_baseline_source_tagging(tmp_path: Path):
+    store = ProspectBaselineStore(store_path=tmp_path / "baselines.json")
+    # Save a historical baseline for a repeat caller
+    historical = BaselineProfile(
+        prospect_id="prospect_tagged_1",
+        speech_rate_wpm=SpeakerBaselineStats(mean=140.0, stddev=10.0, sample_count=20),
+        avg_pause_duration_ms=SpeakerBaselineStats(mean=250.0, stddev=30.0, sample_count=20),
+        response_latency_ms=SpeakerBaselineStats(mean=350.0, stddev=40.0, sample_count=20),
+        turn_length_words=SpeakerBaselineStats(mean=8.0, stddev=2.0, sample_count=20),
+        call_count=2,
+        updated_at_ms=100000,
+    )
+    store.save_baseline("prospect_tagged_1", historical)
+
+    engine = BaselineAndChangePointEngine(
+        call_sid="call_tagged",
+        prospect_id="prospect_tagged_1",
+        store=store,
+        intra_call_window_ms=10000,
+        min_calibration_turns=3,
+        min_cumulative_words=15,
+        z_threshold=2.0,
+    )
+
+    # 1. Immediate turn at second 5 with extreme response latency (2000ms vs 350ms historical mean)
+    # The intra-call baseline is NOT yet locked. This deviation MUST be tagged as "historical_only"
+    utt1 = normalize_generic_transcript(
+        text="Wait... who is this again?",
+        speaker_id="client",
+        start_ms=2000,
+        end_ms=5000,
+        call_sid="call_tagged",
+    )
+    t1 = TimingFeatureSnapshot(
+        timestamp_ms=5000,
+        window_ms=60000,
+        speaker_id="client",
+        speech_rate_wpm=140.0,
+        avg_pause_duration_ms=250.0,
+        intra_turn_pause_count=1,
+        response_latency_ms=2000,
+        turn_length_words=5,
+        turn_duration_ms=3000,
+        timing_confidence=1.0,
+    )
+    cps1 = engine.update_with_utterance(utt1, t1)
+    assert len(cps1) >= 1
+    cp_hist = next(c for c in cps1 if c.feature_name == "response_latency_ms")
+    assert cp_hist.baseline_source == "historical_only"
+    assert engine.is_intra_call_locked is False
+
+    # 2. Feed turns 2 and 3 so the intra-call baseline locks and transitions to "blended"
+    for i in range(2, 4):
+        start = i * 4000
+        end = start + 3000
+        utt = normalize_generic_transcript(
+            text=f"This is normal follow up calibration turn {i} with clean wording.",
+            speaker_id="client",
+            start_ms=start,
+            end_ms=end,
+            call_sid="call_tagged",
+        )
+        t = TimingFeatureSnapshot(
+            timestamp_ms=end,
+            window_ms=60000,
+            speaker_id="client",
+            speech_rate_wpm=140.0,
+            avg_pause_duration_ms=250.0,
+            intra_turn_pause_count=1,
+            response_latency_ms=350,
+            turn_length_words=9,
+            turn_duration_ms=3000,
+            timing_confidence=1.0,
+        )
+        engine.update_with_utterance(utt, t)
+
+    assert engine.is_intra_call_locked is True
+
+    # 3. Subsequent turn with extreme speech rate drop (40 WPM vs 140 WPM blended mean)
+    # The intra-call baseline IS locked with history. This deviation MUST be tagged as "blended"
+    utt_slow = normalize_generic_transcript(
+        text="No... I... am... not... sure.",
+        speaker_id="client",
+        start_ms=17000,
+        end_ms=22000,
+        call_sid="call_tagged",
+    )
+    t_slow = TimingFeatureSnapshot(
+        timestamp_ms=22000,
+        window_ms=60000,
+        speaker_id="client",
+        speech_rate_wpm=40.0,
+        avg_pause_duration_ms=800.0,
+        intra_turn_pause_count=2,
+        response_latency_ms=350,
+        turn_length_words=6,
+        turn_duration_ms=5000,
+        timing_confidence=1.0,
+    )
+    cps_blended = engine.update_with_utterance(utt_slow, t_slow)
+    assert len(cps_blended) >= 1
+    cp_blended = next(c for c in cps_blended if c.feature_name == "speech_rate_wpm")
+    assert cp_blended.baseline_source == "blended"
+
+    # 4. First-time caller whose baseline locks must be tagged as "intra_call"
+    engine_first_time = BaselineAndChangePointEngine(
+        call_sid="call_first_time",
+        prospect_id="prospect_new_99",
+        store=store,
+        intra_call_window_ms=10000,
+        min_calibration_turns=3,
+        min_cumulative_words=15,
+        z_threshold=2.0,
+    )
+    for i in range(3):
+        start = i * 4000
+        end = start + 3000
+        utt = normalize_generic_transcript(
+            text=f"First time clean calibration turn number {i} for this prospect.",
+            speaker_id="client",
+            start_ms=start,
+            end_ms=end,
+            call_sid="call_first_time",
+        )
+        t = TimingFeatureSnapshot(
+            timestamp_ms=end,
+            window_ms=60000,
+            speaker_id="client",
+            speech_rate_wpm=140.0,
+            avg_pause_duration_ms=250.0,
+            intra_turn_pause_count=1,
+            response_latency_ms=350,
+            turn_length_words=9,
+            turn_duration_ms=3000,
+            timing_confidence=1.0,
+        )
+        engine_first_time.update_with_utterance(utt, t)
+
+    assert engine_first_time.is_intra_call_locked is True
+
+    # Spike on first-time caller -> "intra_call"
+    cps_intra = engine_first_time.update_with_utterance(utt_slow, t_slow)
+    assert len(cps_intra) >= 1
+    cp_intra = next(c for c in cps_intra if c.feature_name == "speech_rate_wpm")
+    assert cp_intra.baseline_source == "intra_call"

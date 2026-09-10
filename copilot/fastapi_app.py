@@ -45,6 +45,12 @@ from .behavioral_baseline import (
     ProspectBaselineStore,
     ChangePointEvent,
 )
+from .behavioral_evidence import (
+    MultiWindowAggregator,
+    SQLiteEvidenceLogStore,
+    MultiWindowEvidenceFrame,
+    BehavioralEvidenceSnapshot,
+)
 
 LOGGER = logging.getLogger("copilot.fastapi")
 STATIC = Path(__file__).resolve().parent.parent / "web"
@@ -70,6 +76,9 @@ class FastAPICopilot:
         self._prospect_baseline_store = ProspectBaselineStore()
         self._baseline_engines: dict[str, BaselineAndChangePointEngine] = {}
         self._change_points: dict[str, list[ChangePointEvent]] = {}
+        self._evidence_log_store = SQLiteEvidenceLogStore()
+        self._evidence_aggregators: dict[str, MultiWindowAggregator] = {}
+        self._latest_evidence_frames: dict[str, MultiWindowEvidenceFrame] = {}
         self.ingestion_jobs: dict[str, dict[str, Any]] = {}
 
         if settings.rag and settings.rag.rag_enabled:
@@ -602,6 +611,15 @@ class FastAPICopilot:
                 prospect_id=prospect_id_param,
                 store=self._prospect_baseline_store,
             )
+            timing_engine = self._timing_engines.setdefault(
+                call_sid, DeterministicTimingEngine(call_sid=call_sid)
+            )
+            self._evidence_aggregators[call_sid] = MultiWindowAggregator(
+                call_sid=call_sid,
+                timing_engine=timing_engine,
+                baseline_engine=self._baseline_engines[call_sid],
+                store=self._evidence_log_store,
+            )
             first_packet_twilio_ms: dict[str, int] = {}
 
             queue_size = max(256, self.settings.audio_queue_size)
@@ -781,6 +799,20 @@ class FastAPICopilot:
                                             new_cps = base_engine.update_with_utterance(norm_utt, timing_snap, sem_snap)
                                             if new_cps:
                                                 self._change_points.setdefault(call_sid, []).extend(new_cps)
+
+                                            aggregator = self._evidence_aggregators.setdefault(
+                                                call_sid,
+                                                MultiWindowAggregator(
+                                                    call_sid=call_sid,
+                                                    timing_engine=timing_engine,
+                                                    baseline_engine=base_engine,
+                                                    store=self._evidence_log_store,
+                                                ),
+                                            )
+                                            evidence_frame = aggregator.process_turn(
+                                                norm_utt, timing_snap, sem_snap, new_change_points=new_cps
+                                            )
+                                            self._latest_evidence_frames[call_sid] = evidence_frame
         
                                         # Maintain client query history
                                         if role == "client":
@@ -1130,6 +1162,7 @@ class FastAPICopilot:
             base_engine = self._baseline_engines.get(call_sid)
             active_profile = base_engine.get_active_profile() if base_engine else None
             cps = self._change_points.get(call_sid, [])
+            latest_frame = self._latest_evidence_frames.get(call_sid)
             return {
                 "call_sid": call_sid,
                 "metadata": meta.model_dump() if meta else None,
@@ -1139,7 +1172,32 @@ class FastAPICopilot:
                 "semantic_snapshots": [s.model_dump() for s in semantic],
                 "active_baseline": active_profile.model_dump() if active_profile else None,
                 "change_points": [cp.model_dump() for cp in cps],
+                "latest_evidence_frame": latest_frame.model_dump() if latest_frame else None,
             }
+
+        @app.get("/api/call/behavioral/{call_sid}/trace")
+        async def trace_behavioral_evidence(
+            call_sid: str,
+            evidence_id: Optional[str] = None,
+            start_ms: Optional[int] = None,
+            end_ms: Optional[int] = None,
+            horizon: Optional[str] = None,
+        ):
+            if evidence_id:
+                snaps = self._evidence_log_store.backward_trace([evidence_id])
+                if not snaps:
+                    raise HTTPException(status_code=404, detail="Evidence ID not found")
+                return {"count": len(snaps), "evidence": [s.model_dump() for s in snaps]}
+            elif start_ms is not None and end_ms is not None:
+                snaps = self._evidence_log_store.query_time_range(
+                    call_sid=call_sid, start_ms=start_ms, end_ms=end_ms, horizon=horizon
+                )
+                return {"count": len(snaps), "evidence": [s.model_dump() for s in snaps]}
+            else:
+                latest = self._latest_evidence_frames.get(call_sid)
+                if not latest:
+                    raise HTTPException(status_code=404, detail="No evidence frames found for call")
+                return latest.model_dump()
 
         return app
 

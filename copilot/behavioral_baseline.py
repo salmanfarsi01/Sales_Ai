@@ -51,6 +51,7 @@ class ChangePointEvent(BaseModel):
     delta: float
     z_score: float
     direction: Literal["surge", "drop"]
+    baseline_source: Literal["intra_call", "historical_only", "blended"] = "intra_call"
     semantic_context: Optional[Dict[str, Any]] = None
     confidence: float = Field(1.0, ge=0.0, le=1.0)
 
@@ -117,17 +118,24 @@ def compute_sample_stats(samples: List[float], min_stddev_ratio: float = 0.08) -
     return SpeakerBaselineStats(mean=round(mean, 2), stddev=round(stddev, 2), sample_count=n)
 
 
+DEFAULT_INTRA_CALL_WINDOW_MS: int = 60000
+DEFAULT_MAX_CALIBRATION_WINDOW_MS: int = 90000
+DEFAULT_MIN_CALIBRATION_TURNS: int = 3
+DEFAULT_MIN_CUMULATIVE_WORDS: int = 15
+DEFAULT_Z_THRESHOLD: float = 2.0
+
+
 class BaselineAndChangePointEngine:
     def __init__(
         self,
         call_sid: str,
         prospect_id: Optional[str] = None,
         store: Optional[ProspectBaselineStore] = None,
-        intra_call_window_ms: int = 60000,
-        max_calibration_window_ms: int = 90000,
-        min_calibration_turns: int = 3,
-        min_cumulative_words: int = 15,
-        z_threshold: float = 2.0,
+        intra_call_window_ms: int = DEFAULT_INTRA_CALL_WINDOW_MS,
+        max_calibration_window_ms: int = DEFAULT_MAX_CALIBRATION_WINDOW_MS,
+        min_calibration_turns: int = DEFAULT_MIN_CALIBRATION_TURNS,
+        min_cumulative_words: int = DEFAULT_MIN_CUMULATIVE_WORDS,
+        z_threshold: float = DEFAULT_Z_THRESHOLD,
     ):
         self.call_sid = call_sid
         self.prospect_id = prospect_id
@@ -218,14 +226,20 @@ class BaselineAndChangePointEngine:
         self._recalculate_profiles(timestamp_ms)
         self.is_intra_call_locked = True
 
-    def get_active_profile(self) -> Optional[BaselineProfile]:
-        if self.blended_profile is not None:
-            return self.blended_profile
-        if self.intra_call_profile is not None:
-            return self.intra_call_profile
+    def get_active_profile_and_source(
+        self,
+    ) -> Tuple[Optional[BaselineProfile], Optional[Literal["intra_call", "historical_only", "blended"]]]:
+        if self.is_intra_call_locked:
+            if self.historical_profile is not None:
+                return self.blended_profile, "blended"
+            return self.intra_call_profile or self.blended_profile, "intra_call"
         if self.historical_profile is not None:
-            return self.historical_profile
-        return None
+            return self.historical_profile, "historical_only"
+        return None, None
+
+    def get_active_profile(self) -> Optional[BaselineProfile]:
+        profile, _ = self.get_active_profile_and_source()
+        return profile
 
     def update_with_utterance(
         self,
@@ -269,8 +283,8 @@ class BaselineAndChangePointEngine:
                 self._lock_intra_call_baseline(timestamp_ms)
                 just_locked = True
 
-        active_profile = self.get_active_profile()
-        if active_profile is None:
+        active_profile, baseline_source = self.get_active_profile_and_source()
+        if active_profile is None or baseline_source is None:
             return []
 
         new_change_points: List[ChangePointEvent] = []
@@ -308,6 +322,7 @@ class BaselineAndChangePointEngine:
                     delta=delta,
                     z_score=round(z_score, 2),
                     direction=direction,
+                    baseline_source=baseline_source,
                     confidence=float(timing_snapshot.timing_confidence),
                     semantic_context=context_dict or None,
                 )
