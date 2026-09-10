@@ -51,6 +51,10 @@ from .behavioral_evidence import (
     MultiWindowEvidenceFrame,
     BehavioralEvidenceSnapshot,
 )
+from .behavioral_inference import (
+    DownstreamInferenceEngine,
+    DownstreamInferenceState,
+)
 
 LOGGER = logging.getLogger("copilot.fastapi")
 STATIC = Path(__file__).resolve().parent.parent / "web"
@@ -79,6 +83,8 @@ class FastAPICopilot:
         self._evidence_log_store = SQLiteEvidenceLogStore()
         self._evidence_aggregators: dict[str, MultiWindowAggregator] = {}
         self._latest_evidence_frames: dict[str, MultiWindowEvidenceFrame] = {}
+        self._inference_engine = DownstreamInferenceEngine()
+        self._latest_inference_states: dict[str, DownstreamInferenceState] = {}
         self.ingestion_jobs: dict[str, dict[str, Any]] = {}
 
         if settings.rag and settings.rag.rag_enabled:
@@ -813,6 +819,11 @@ class FastAPICopilot:
                                                 norm_utt, timing_snap, sem_snap, new_change_points=new_cps
                                             )
                                             self._latest_evidence_frames[call_sid] = evidence_frame
+                                            inference_state = self._inference_engine.compute_inference(
+                                                call_sid=call_sid,
+                                                current_frame=evidence_frame,
+                                            )
+                                            self._latest_inference_states[call_sid] = inference_state
         
                                         # Maintain client query history
                                         if role == "client":
@@ -1163,6 +1174,7 @@ class FastAPICopilot:
             active_profile = base_engine.get_active_profile() if base_engine else None
             cps = self._change_points.get(call_sid, [])
             latest_frame = self._latest_evidence_frames.get(call_sid)
+            latest_inference = self._latest_inference_states.get(call_sid)
             return {
                 "call_sid": call_sid,
                 "metadata": meta.model_dump() if meta else None,
@@ -1173,6 +1185,7 @@ class FastAPICopilot:
                 "active_baseline": active_profile.model_dump() if active_profile else None,
                 "change_points": [cp.model_dump() for cp in cps],
                 "latest_evidence_frame": latest_frame.model_dump() if latest_frame else None,
+                "latest_inference": latest_inference.model_dump() if latest_inference else None,
             }
 
         @app.get("/api/call/behavioral/{call_sid}/trace")
