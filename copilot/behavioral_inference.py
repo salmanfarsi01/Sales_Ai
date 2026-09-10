@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import time
 import uuid
 from abc import ABC, abstractmethod
 from typing import Any, Dict, List, Literal, Optional
@@ -34,6 +35,8 @@ class DownstreamInferenceState(BaseModel):
     inference_id: str = Field(default_factory=lambda: f"inf_{uuid.uuid4().hex[:12]}")
     call_sid: str
     timestamp_ms: int
+    state_version: int = Field(1, ge=1)
+    inference_latency_ms: float = Field(0.0, ge=0.0)
     trust: DimensionScore
     emotion: EmotionState
     pacing: DimensionScore
@@ -76,6 +79,8 @@ class InferenceScoringConfig(BaseModel):
     emotion_boundary_valence_penalty: float = Field(0.60, description="Negative valence impact of stop-contact boundary statement")
     emotion_recurrence_tension_boost: float = Field(0.25, description="Tension elevation when objections or concerns repeat without resolution")
     emotion_recurrence_valence_penalty: float = Field(0.35, description="Negative valence impact of unresolved recurrent objections")
+    emotion_failed_reframe_tension_boost: float = Field(0.15, description="Additional tension boost when concern repeats after failed rep reframe")
+    emotion_failed_reframe_valence_penalty: float = Field(0.15, description="Additional valence penalty when concern repeats after failed rep reframe")
     emotion_substantive_agreement_valence_boost: float = Field(0.50, description="Positive valence elevation for substantive agreement >= 0.70")
     emotion_substantive_agreement_tension_relief: float = Field(0.20, description="Tension relief when substantive agreement is achieved")
     emotion_polite_agreement_valence_boost: float = Field(0.15, description="Modest positive valence elevation for polite acknowledgments")
@@ -153,6 +158,7 @@ class DownstreamInferenceEngine:
     ):
         self.acoustic_provider = acoustic_provider or NullAcousticProvider()
         self.config = config or DEFAULT_INFERENCE_CONFIG
+        self._call_state_versions: Dict[str, int] = {}
 
     def compute_inference(
         self,
@@ -160,6 +166,9 @@ class DownstreamInferenceEngine:
         current_frame: MultiWindowEvidenceFrame,
         recent_frames: Optional[List[MultiWindowEvidenceFrame]] = None,
     ) -> DownstreamInferenceState:
+        start_t = time.monotonic()
+        version = self._call_state_versions.get(call_sid, 0) + 1
+        self._call_state_versions[call_sid] = version
         frames = (recent_frames or []) + [current_frame]
 
         any_window = next(iter(current_frame.windows.values())) if current_frame.windows else None
@@ -253,6 +262,10 @@ class DownstreamInferenceEngine:
                 tension_level += self.config.emotion_recurrence_tension_boost
                 valence -= self.config.emotion_recurrence_valence_penalty
                 emotion_signals.append(f"Recurrent concern ({sem_curr.recurrence_type})")
+                if sem_curr.recurrence_type == "concern_after_failed_reframe":
+                    tension_level += self.config.emotion_failed_reframe_tension_boost
+                    valence -= self.config.emotion_failed_reframe_valence_penalty
+                    emotion_signals.append("Prospect repeated concern following failed rep reframe attempt")
             if sem_curr.agreement_score >= 0.70:
                 valence += self.config.emotion_substantive_agreement_valence_boost
                 tension_level = max(0.05, tension_level - self.config.emotion_substantive_agreement_tension_relief)
@@ -458,9 +471,13 @@ class DownstreamInferenceEngine:
             "available" if self.acoustic_provider.is_available() else "unavailable"
         )
 
+        latency_ms = round((time.monotonic() - start_t) * 1000.0, 3)
+
         return DownstreamInferenceState(
             call_sid=call_sid,
             timestamp_ms=current_frame.timestamp_ms,
+            state_version=version,
+            inference_latency_ms=latency_ms,
             trust=trust,
             emotion=emotion,
             pacing=pacing,
