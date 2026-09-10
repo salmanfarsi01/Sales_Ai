@@ -446,3 +446,73 @@ def test_inference_scoring_config_custom_tuning(tmp_path: Path):
     assert inference.readiness.score >= 0.90
 
     store.close()
+
+
+def test_all_dimension_scores_strictly_clamped_under_extreme_signal_stacking(tmp_path: Path):
+    """Verifies that all 6 downstream dimensions have explicit code-level clamping
+    applied before Pydantic model construction, preventing validation errors
+    even under extreme stacked positive or negative signals (e.g., readiness > 1.20).
+    """
+    db_path = tmp_path / "test_clamping.db"
+    store = SQLiteEvidenceLogStore(db_path=db_path)
+    timing_engine = DeterministicTimingEngine()
+    aggregator = MultiWindowAggregator(
+        call_sid="call_extreme_stack",
+        timing_engine=timing_engine,
+        store=store,
+    )
+    inference_engine = DownstreamInferenceEngine()
+
+    # Utterance designed to trigger all positive readiness signals simultaneously:
+    # base (0.30) + scheduling_recurrence (0.35) + future_language (0.25) + agreement (0.20) + trust (0.10) = 1.20 unclipped
+    utt = normalize_generic_transcript(
+        text="Yes absolutely, let us commit to finalizing the deployment next Tuesday at 2 PM as discussed.",
+        speaker_id="client",
+        start_ms=1000,
+        end_ms=4500,
+        call_sid="call_extreme_stack",
+    )
+    t_snap = timing_engine.process_utterance(utt)
+    sem = SemanticFeatureSnapshot(
+        utterance_id=utt.utterance_id,
+        call_sid="call_extreme_stack",
+        speaker_id="client",
+        question_type="transactional",
+        recurrence_type="scheduling_detail_repeated",
+        future_language_score=0.90,
+        agreement_score=0.95,
+        specificity_score=0.90,
+        semantic_confidence=0.95,
+    )
+    frame = aggregator.process_turn(utt, t_snap, semantic_snapshot=sem)
+
+    # Compute inference - must execute cleanly without Pydantic ValidationError
+    inference = inference_engine.compute_inference(
+        call_sid="call_extreme_stack",
+        current_frame=frame,
+    )
+
+    # 1. Readiness would be 1.20 unclipped -> must be clamped to exactly 1.0
+    assert inference.readiness.score == 1.0
+    assert 0.0 <= inference.readiness.score <= 1.0
+
+    # 2. Pacing must be bounded within [0.05, 1.0]
+    assert 0.05 <= inference.pacing.score <= 1.0
+
+    # 3. Emotion tension and valence bounded
+    assert 0.0 <= inference.emotion.tension_level <= 1.0
+    assert -1.0 <= inference.emotion.expressed_valence <= 1.0
+
+    # 4. Engagement bounded
+    assert 0.05 <= inference.engagement.score <= 1.0
+
+    # 5. Trust bounded
+    assert 0.05 <= inference.trust.score <= 1.0
+
+    # 6. Momentum bounded
+    assert 0.05 <= inference.momentum.score <= 1.0
+
+    # 7. Overall confidence bounded
+    assert 0.0 <= inference.overall_confidence <= 1.0
+
+    store.close()

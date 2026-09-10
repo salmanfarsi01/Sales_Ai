@@ -114,6 +114,15 @@ class InferenceScoringConfig(BaseModel):
     readiness_trust_foundation_boost: float = Field(0.10, description="Readiness boost when supported by strong trust foundation (trust >= 0.75)")
     readiness_hard_boundary_override_score: float = Field(0.0, description="Deterministic zero override score when stop-contact boundary occurs")
 
+    # Bounding ranges
+    score_floor_active: float = Field(0.05, description="Active non-zero floor for continuous dimensions (pacing, engagement, trust, momentum)")
+    score_ceiling: float = Field(1.0, description="Standard maximum ceiling for all dimensions")
+    readiness_floor: float = Field(0.0, description="Absolute zero floor for readiness")
+    valence_min: float = Field(-1.0, description="Lower bound for emotional valence")
+    valence_max: float = Field(1.0, description="Upper bound for emotional valence")
+    tension_min: float = Field(0.0, description="Lower bound for conversational tension")
+    tension_max: float = Field(1.0, description="Upper bound for conversational tension")
+
 
 DEFAULT_INFERENCE_CONFIG = InferenceScoringConfig()
 
@@ -201,7 +210,7 @@ class DownstreamInferenceEngine:
             pacing_score -= self.config.pacing_interruption_penalty * min(3, interruptions)
             pacing_drivers.append(f"Cross-speaker interruptions detected ({interruptions})")
 
-        pacing_score = max(self.config.pacing_score_min, min(self.config.pacing_score_max, round(pacing_score, 2)))
+        pacing_score = max(self.config.score_floor_active, min(self.config.score_ceiling, round(pacing_score, 2)))
         pacing = DimensionScore(
             score=pacing_score,
             confidence=round(pacing_conf, 2),
@@ -252,8 +261,8 @@ class DownstreamInferenceEngine:
                 valence += self.config.emotion_polite_agreement_valence_boost
                 emotion_signals.append("Polite acknowledgment agreement")
 
-        tension_level = max(0.0, min(1.0, round(tension_level, 2)))
-        valence = max(-1.0, min(1.0, round(valence, 2)))
+        tension_level = max(self.config.tension_min, min(self.config.tension_max, round(tension_level, 2)))
+        valence = max(self.config.valence_min, min(self.config.valence_max, round(valence, 2)))
         emotion = EmotionState(
             expressed_valence=valence,
             tension_level=tension_level,
@@ -292,7 +301,7 @@ class DownstreamInferenceEngine:
             eng_score += self.config.engagement_specificity_boost
             eng_drivers.append(f"Specific details and facts provided (score: {sem_curr.specificity_score:.2f})")
 
-        eng_score = max(0.05, min(1.0, round(eng_score, 2)))
+        eng_score = max(self.config.score_floor_active, min(self.config.score_ceiling, round(eng_score, 2)))
         engagement = DimensionScore(
             score=eng_score,
             confidence=round(eng_conf, 2),
@@ -329,7 +338,7 @@ class DownstreamInferenceEngine:
             trust_score -= self.config.trust_constrained_response_penalty
             trust_drivers.append(f"Constrained monosyllabic responses ({t_len} words/turn)")
 
-        trust_score = max(0.05, min(1.0, round(trust_score, 2)))
+        trust_score = max(self.config.score_floor_active, min(self.config.score_ceiling, round(trust_score, 2)))
         trust = DimensionScore(
             score=trust_score,
             confidence=round(trust_conf, 2),
@@ -359,7 +368,7 @@ class DownstreamInferenceEngine:
                 mom_score -= self.config.momentum_hostile_question_penalty
                 mom_drivers.append("Hostile challenge stalls progress")
 
-        mom_score = max(0.05, min(1.0, round(mom_score, 2)))
+        mom_score = max(self.config.score_floor_active, min(self.config.score_ceiling, round(mom_score, 2)))
         momentum = DimensionScore(
             score=mom_score,
             confidence=round(mom_conf, 2),
@@ -406,7 +415,7 @@ class DownstreamInferenceEngine:
                 read_score += self.config.readiness_trust_foundation_boost
                 read_drivers.append(f"Supported by strong trust foundation ({trust_score:.2f})")
 
-        read_score = max(0.0, min(1.0, round(read_score, 2)))
+        read_score = max(self.config.readiness_floor, min(self.config.score_ceiling, round(read_score, 2)))
         readiness = DimensionScore(
             score=read_score,
             confidence=round(read_conf, 2),
