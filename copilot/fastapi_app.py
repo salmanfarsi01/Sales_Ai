@@ -40,6 +40,11 @@ from .knowledge_upload import (
 from .behavioral_normalization import normalize_deepgram_result, CallMetadata
 from .behavioral_timing import DeterministicTimingEngine, TimingFeatureSnapshot
 from .behavioral_semantic import SemanticFeatureEngine, SemanticFeatureSnapshot
+from .behavioral_baseline import (
+    BaselineAndChangePointEngine,
+    ProspectBaselineStore,
+    ChangePointEvent,
+)
 
 LOGGER = logging.getLogger("copilot.fastapi")
 STATIC = Path(__file__).resolve().parent.parent / "web"
@@ -62,6 +67,9 @@ class FastAPICopilot:
         self._semantic_engine = SemanticFeatureEngine(self.groq)
         self._latest_timing_snapshots: dict[str, TimingFeatureSnapshot] = {}
         self._semantic_snapshots: dict[str, list[SemanticFeatureSnapshot]] = {}
+        self._prospect_baseline_store = ProspectBaselineStore()
+        self._baseline_engines: dict[str, BaselineAndChangePointEngine] = {}
+        self._change_points: dict[str, list[ChangePointEvent]] = {}
         self.ingestion_jobs: dict[str, dict[str, Any]] = {}
 
         if settings.rag and settings.rag.rag_enabled:
@@ -589,6 +597,11 @@ class FastAPICopilot:
                 active_playbook=playbook_id_param,
                 calibration_profile=None,
             )
+            self._baseline_engines[call_sid] = BaselineAndChangePointEngine(
+                call_sid=call_sid,
+                prospect_id=prospect_id_param,
+                store=self._prospect_baseline_store,
+            )
             first_packet_twilio_ms: dict[str, int] = {}
 
             queue_size = max(256, self.settings.audio_queue_size)
@@ -746,6 +759,7 @@ class FastAPICopilot:
                                             )
                                             timing_snap = timing_engine.process_utterance(norm_utt)
                                             self._latest_timing_snapshots[call_sid] = timing_snap
+                                            sem_snap = None
                                             try:
                                                 sem_snap = await self._semantic_engine.analyze_turn_semantic(
                                                     norm_utt,
@@ -755,6 +769,18 @@ class FastAPICopilot:
                                                 self._semantic_snapshots.setdefault(call_sid, []).append(sem_snap)
                                             except Exception as sem_err:
                                                 LOGGER.warning("Semantic feature extraction failed for %s: %s", call_sid, sem_err)
+
+                                            base_engine = self._baseline_engines.setdefault(
+                                                call_sid,
+                                                BaselineAndChangePointEngine(
+                                                    call_sid=call_sid,
+                                                    prospect_id=self._call_metadata.get(call_sid, CallMetadata(call_id=call_sid)).prospect_id,
+                                                    store=self._prospect_baseline_store,
+                                                ),
+                                            )
+                                            new_cps = base_engine.update_with_utterance(norm_utt, timing_snap, sem_snap)
+                                            if new_cps:
+                                                self._change_points.setdefault(call_sid, []).extend(new_cps)
         
                                         # Maintain client query history
                                         if role == "client":
@@ -888,6 +914,10 @@ class FastAPICopilot:
                         }
                     }, call_sid=call_sid)
                 
+                if call_sid in self._baseline_engines:
+                    with suppress(Exception):
+                        self._baseline_engines[call_sid].finalize_and_persist()
+
                 await self.broadcast(tenant_id, {
                     "type": "call_end",
                     "data": {
@@ -1097,6 +1127,9 @@ class FastAPICopilot:
             meta = self._call_metadata.get(call_sid)
             timing = self._latest_timing_snapshots.get(call_sid)
             semantic = self._semantic_snapshots.get(call_sid, [])
+            base_engine = self._baseline_engines.get(call_sid)
+            active_profile = base_engine.get_active_profile() if base_engine else None
+            cps = self._change_points.get(call_sid, [])
             return {
                 "call_sid": call_sid,
                 "metadata": meta.model_dump() if meta else None,
@@ -1104,6 +1137,8 @@ class FastAPICopilot:
                 "utterances": [u.model_dump() for u in utterances],
                 "latest_timing": timing.model_dump() if timing else None,
                 "semantic_snapshots": [s.model_dump() for s in semantic],
+                "active_baseline": active_profile.model_dump() if active_profile else None,
+                "change_points": [cp.model_dump() for cp in cps],
             }
 
         return app
