@@ -174,6 +174,10 @@ def test_hard_boundary_override_forces_zero_readiness(tmp_path: Path):
     # Hard boundary zero override on readiness
     assert inference.readiness.score == 0.0
     assert any("hard boundary" in d.lower() for d in inference.readiness.drivers)
+    # Readiness confidence inherits the deterministic boundary detection confidence (0.95),
+    # bypassing smoothed multi-horizon timing that did not cause the override.
+    assert inference.readiness.confidence == 0.95
+    assert inference.readiness.contributing_evidence_ids == [frame.windows["current_utterance"].evidence_id]
 
     # Trust is penalized
     assert inference.trust.score <= 0.20
@@ -385,5 +389,60 @@ def test_baseline_source_tracking_in_inference(tmp_path: Path):
     )
 
     assert "historical_only" in inference.baseline_sources
+
+    store.close()
+
+
+def test_inference_scoring_config_custom_tuning(tmp_path: Path):
+    """Verifies that DownstreamInferenceEngine respects custom InferenceScoringConfig
+    calibration weights without hardcoded magic numbers.
+    """
+    from copilot.behavioral_inference import InferenceScoringConfig
+
+    custom_config = InferenceScoringConfig(
+        pacing_base_score=0.90,
+        trust_boundary_penalty=0.55,
+        readiness_scheduling_recurrence_boost=0.40,
+    )
+    inference_engine = DownstreamInferenceEngine(config=custom_config)
+
+    db_path = tmp_path / "test_config_tuning.db"
+    store = SQLiteEvidenceLogStore(db_path=db_path)
+    timing_engine = DeterministicTimingEngine()
+    aggregator = MultiWindowAggregator(
+        call_sid="call_custom_config",
+        timing_engine=timing_engine,
+        store=store,
+    )
+
+    utt = normalize_generic_transcript(
+        text="Can you call me next Monday at 10 AM to finalize the contracts?",
+        speaker_id="client",
+        start_ms=1000,
+        end_ms=4500,
+        call_sid="call_custom_config",
+    )
+    t_snap = timing_engine.process_utterance(utt)
+    sem = SemanticFeatureSnapshot(
+        utterance_id=utt.utterance_id,
+        call_sid="call_custom_config",
+        speaker_id="client",
+        question_type="transactional",
+        recurrence_type="scheduling_detail_repeated",
+        future_language_score=0.70,
+        agreement_score=0.75,
+        semantic_confidence=0.95,
+    )
+    frame = aggregator.process_turn(utt, t_snap, semantic_snapshot=sem)
+
+    inference = inference_engine.compute_inference(
+        call_sid="call_custom_config",
+        current_frame=frame,
+    )
+
+    # Base pacing reflects custom 0.90
+    assert inference.pacing.score >= 0.90
+    # Custom scheduling boost (0.40) applied to readiness
+    assert inference.readiness.score >= 0.90
 
     store.close()
