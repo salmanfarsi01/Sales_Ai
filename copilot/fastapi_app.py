@@ -37,6 +37,7 @@ from .knowledge_upload import (
     resolve_target,
     safe_stem,
 )
+from .behavioral_normalization import normalize_deepgram_result, CallMetadata
 
 LOGGER = logging.getLogger("copilot.fastapi")
 STATIC = Path(__file__).resolve().parent.parent / "web"
@@ -53,6 +54,8 @@ class FastAPICopilot:
         self.knowledge = LocalKnowledgeBase()
         self.dashboards: dict[str, list[dict[str, Any]]] = {}
         self._client_history: dict[str, list[str]] = {}
+        self._behavioral_buffer: dict[str, list[Any]] = {}
+        self._call_metadata: dict[str, CallMetadata] = {}
         self.ingestion_jobs: dict[str, dict[str, Any]] = {}
 
         if settings.rag and settings.rag.rag_enabled:
@@ -566,6 +569,22 @@ class FastAPICopilot:
 
             await websocket.accept()
             call_sid = call_sid_param or str(uuid.uuid4())
+            prospect_id_param = websocket.query_params.get("prospect_id")
+            lead_type_param = websocket.query_params.get("lead_type")
+            stage_param = websocket.query_params.get("stage", "Discovery")
+            playbook_id_param = websocket.query_params.get("playbook_id")
+
+            self._call_metadata[call_sid] = CallMetadata(
+                call_id=call_sid,
+                lead_type=lead_type_param or "Expired Listings",
+                user_id=salesman_id or "sales_rep",
+                prospect_id=prospect_id_param,
+                stage=stage_param or "Discovery",
+                active_playbook=playbook_id_param,
+                calibration_profile=None,
+            )
+            first_packet_twilio_ms: dict[str, int] = {}
+
             queue_size = max(256, self.settings.audio_queue_size)
             queues: dict[str, asyncio.Queue[bytes | object]] = {
                 "salesperson": asyncio.Queue(queue_size),
@@ -608,6 +627,12 @@ class FastAPICopilot:
                             role = "salesperson" if track == "inbound" else "client" if track == "outbound" else None
                             if role is None:
                                 continue
+                            if role not in first_packet_twilio_ms:
+                                raw_ts = media.get("timestamp")
+                                if raw_ts is not None and str(raw_ts).isdigit():
+                                    first_packet_twilio_ms[role] = int(raw_ts)
+                                else:
+                                    first_packet_twilio_ms[role] = max(0, int(round((monotonic() - call_started) * 1000)))
                             chunk = base64.b64decode(media.get("payload", ""))
                             packets[role] += 1
                             try:
@@ -699,6 +724,17 @@ class FastAPICopilot:
                                             "text": text,
                                             "elapsed_seconds": monotonic() - call_started,
                                         })
+
+                                        speaker_role = "salesperson" if role == "salesperson" else "client"
+                                        track_offset_ms = first_packet_twilio_ms.get(role, 0)
+                                        norm_utt = normalize_deepgram_result(
+                                            raw_result=event,
+                                            call_sid=call_sid,
+                                            speaker_id=speaker_role,
+                                            stream_offset_ms=track_offset_ms,
+                                        )
+                                        if norm_utt is not None:
+                                            self._behavioral_buffer.setdefault(call_sid, []).append(norm_utt)
         
                                         # Maintain client query history
                                         if role == "client":
@@ -1033,6 +1069,17 @@ class FastAPICopilot:
                 "playbook_id": folder.playbook_id,
                 "playbook_title": folder.playbook_title,
                 "calibration_summary": folder.calibration_summary_text,
+            }
+
+        @app.get("/api/call/behavioral/{call_sid}")
+        async def get_call_behavioral_info(call_sid: str):
+            utterances = self._behavioral_buffer.get(call_sid, [])
+            meta = self._call_metadata.get(call_sid)
+            return {
+                "call_sid": call_sid,
+                "metadata": meta.model_dump() if meta else None,
+                "count": len(utterances),
+                "utterances": [u.model_dump() for u in utterances],
             }
 
         return app

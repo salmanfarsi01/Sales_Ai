@@ -1,0 +1,306 @@
+{
+  "id": "pb_f3ba2bfbb279",
+  "title": "Daniel G. Method",
+  "status": "published",
+  "current_step": 5,
+  "created_at": "2026-09-10T02:57:47.041833+00:00",
+  "updated_at": "2026-09-10T02:57:47.041833+00:00",
+  "is_readonly": false,
+  "source": "custom",
+  "basic_info": {
+    "name": "Daniel G. Method",
+    "short_description": "My approach to building trust and closing more high-value deals.",
+    "industry": "Real Estate",
+    "lead_types": [
+      "Expired Listings"
+    ],
+    "experience_level": "Intermediate to Advanced",
+    "voice_phrases": "• \"Here's the thing\"\n• \"Bottom line\"",
+    "philosophy": "1. Establish trust through diagnostic questioning.\n2. Frame price in context of total value and net ROI.\n3. Guide the prospect with clear next steps.",
+    "goals": [
+      "Build stronger trust",
+      "Increase appointments",
+      "Close more deals"
+    ]
+  },
+  "style": {
+    "overall_tone": "Confident",
+    "communication_style": "Consultative",
+    "energy_level": "Medium",
+    "sentence_style": "Short & Conversational",
+    "formality": "Professional",
+    "humor_level": "Light",
+    "trust_building_style": "Validation-First",
+    "objection_tone": "Empathetic & Resilient",
+    "discovery_style": "Diagnostic / Question-Led",
+    "closing_style": "Low-Pressure Next-Step Commitment",
+    "follow_up_style": "Value-Added Persistence",
+    "voice_phrases": "• \"Here's the thing\"\n• \"Bottom line\"",
+    "core_selling_principles": "1. Establish trust through diagnostic questioning.\n2. Frame price in context of total value and net ROI.\n3. Guide the prospect with clear next steps.",
+    "runtime_settings": {
+      "prompt_timing_sensitivity": "Normal",
+      "emotional_sensitivity": "Normal",
+      "objection_confidence_threshold": 0.75,
+      "trust_sensitivity_threshold": 0.7,
+      "prompt_cooldown_seconds": 4,
+      "do_dont_boundaries": [
+        "Do validate emotion before offering facts.",
+        "Do keep teleprompts under 25 words.",
+        "Do not offer unauthorized price cuts.",
+        "Do not disparage competitors or existing agents."
+      ],
+      "language_rules": [
+        "Use: 'net proceeds', 'timeline clarity', 'direct buyers'",
+        "Avoid: 'cheap', 'hurry up', 'standard commission'"
+      ]
+    }
+  },
+  "stages": [
+    {
+      "id": "stage_opening",
+      "order": 1,
+      "name": "Opening",
+      "goal": "Set a positive tone and gain engagement.",
+      "description": "Create rapport and get permission to have a conversation.",
+      "tag": "Goal: Engage",
+      "icon": "hand"
+    },
+    {
+      "id": "stage_discovery",
+      "order": 2,
+      "name": "Discovery",
+      "goal": "Understand their motivation and timeline.",
+      "description": "Ask questions and uncover their situation and needs.",
+      "tag": "Goal: Understand",
+      "icon": "search"
+    },
+    {
+      "id": "stage_value_prop",
+      "order": 3,
+      "name": "Value Proposition",
+      "goal": "Build credibility and differentiate yourself.",
+      "description": "Position your value and show how you solve their problem.",
+      "tag": "Goal: Differentiate",
+      "icon": "diamond"
+    },
+    {
+      "id": "stage_objections",
+      "order": 4,
+      "name": "Handle Objections",
+      "goal": "Overcome doubt and strengthen confidence.",
+      "description": "Address concerns and remove hesitation.",
+      "tag": "Goal: Resolve",
+      "icon": "shield"
+    },
+    {
+      "id": "stage_close",
+      "order": 5,
+      "name": "Close",
+      "goal": "Get a commitment to move forward.",
+      "description": "Guide them to commit to the next step.",
+      "tag": "Goal: Commit",
+      "icon": "target"
+    },
+    {
+      "id": "stage_follow_up",
+      "order": 6,
+      "name": "Follow Up",
+      "goal": "Stay top of mind and convert later.",
+      "description": "Reinforce value and keep the momentum.",
+      "tag": "Goal: Nurture",
+      "icon": "phone"
+    }
+  ],
+  "objections": [
+    {
+      "id": "obj_1",
+      "objection": "I don't want to pay commission.",
+      "category": [
+        "Financial"
+      ],
+      "lead_types": [
+        "FSBO (For Sale By Owner)",
+        "Expired Listings"
+      ],
+      "response_style": "Reframe",
+      "ai_suggestion": "Instead of viewing commission as a cost, consider it an investment in expertise that drives higher sales; let's explore how our solutions can significantly increase your ROI and overall profitability.",
+      "user_comment": null,
+      "last_updated": "May 2, 2024"
+    },
+    {
+      "id": "obj_2",
+      "objection": "Not a good time to sell.",
+      "category": [
+        "Logistics"
+      ],
+      "lead_types": [
+        "Expired Listings",
+        "Absentee Owners"
+      ],
+      "response_style": "Future Pace",
+      "ai_suggestion": "Validate market uncertainty, then project seasonal equity growth.",
+      "user_comment": null,
+      "last_updated": "May 2, 2024"
+    },
+    {
+      "id": "obj_3",
+      "objection": "I already have an agent.",
+      "category": [
+        "Relationship"
+      ],
+      "lead_types": [
+        "Expired Listings",
+        "Pre-Expired Listings"
+      ],
+      "response_style": "Differentiate",
+      "ai_suggestion": "Respect loyalty, then ask diagnostic questions about current marketing reach.",
+      "user_comment": null,
+      "last_updated": "May 2, 2024"
+    },
+    {
+      "id": "obj_4",
+      "objection": "How did you get my number?",
+      "category": [
+        "Risk"
+      ],
+      "lead_types": [
+        "Circle Prospecting",
+        "Absentee Owners"
+      ],
+      "response_style": "Direct",
+      "ai_suggestion": "Be transparent about public records, then explain active buyer inquiries in area.",
+      "user_comment": null,
+      "last_updated": "May 2, 2024"
+    },
+    {
+      "id": "obj_5",
+      "objection": "I'm not interested.",
+      "category": [
+        "Relationship"
+      ],
+      "lead_types": [
+        "Past Clients & Sphere",
+        "Circle Prospecting"
+      ],
+      "response_style": "Validate",
+      "ai_suggestion": "Disarm friction: 'Understood, just curious if timing changed or if resolved?'",
+      "user_comment": null,
+      "last_updated": "May 2, 2024"
+    },
+    {
+      "id": "obj_6",
+      "objection": "We want to wait for interest rates to drop.",
+      "category": [
+        "Financial"
+      ],
+      "lead_types": [
+        "Investor / Cash Buyers",
+        "Pre-Foreclosure"
+      ],
+      "response_style": "Reframe",
+      "ai_suggestion": "Reframe trade-off between rate drops and buyer competition surges.",
+      "user_comment": null,
+      "last_updated": "May 2, 2024"
+    },
+    {
+      "id": "obj_7",
+      "objection": "We need to think about it.",
+      "category": [
+        "Logistics",
+        "Risk"
+      ],
+      "lead_types": [
+        "Trust & Estate",
+        "Probate",
+        "Divorce"
+      ],
+      "response_style": "Clarify",
+      "ai_suggestion": "Clarify whether it is timeline, estate steps, or family consensus.",
+      "user_comment": null,
+      "last_updated": "May 2, 2024"
+    },
+    {
+      "id": "obj_8",
+      "objection": "Send me information first.",
+      "category": [
+        "Risk"
+      ],
+      "lead_types": [
+        "Just Listed",
+        "Just Sold"
+      ],
+      "response_style": "De-Risk",
+      "ai_suggestion": "Offer 1-page market snapshot while locking in a brief calendar check-in.",
+      "user_comment": null,
+      "last_updated": "May 2, 2024"
+    }
+  ],
+  "response_sequence": [
+    {
+      "id": "seq_1",
+      "order": 1,
+      "name": "Acknowledge",
+      "icon": "mic"
+    },
+    {
+      "id": "seq_2",
+      "order": 2,
+      "name": "Validate",
+      "icon": "heart"
+    },
+    {
+      "id": "seq_3",
+      "order": 3,
+      "name": "Reframe",
+      "icon": "refresh"
+    },
+    {
+      "id": "seq_4",
+      "order": 4,
+      "name": "Guide Forward",
+      "icon": "file"
+    }
+  ],
+  "completeness_score": 100,
+  "quality_score": 82,
+  "quality_feedback": {
+    "quality_score": 82,
+    "structural_score": 98,
+    "completeness_score": 100,
+    "rating": "Strong",
+    "summary": "Good foundation. Broaden category coverage to strengthen versatility.",
+    "methodology_assessment": "The methodology presents a coherent, consultative system where diagnostic trust-building naturally leads to value-based pricing and structured objection handling.",
+    "quality_source": "ai_llm",
+    "coverage_metrics": {
+      "stages_count": 6,
+      "objections_count": 8,
+      "category_diversity": "4 of 4 categories covered",
+      "tone_calibration": "Confident"
+    },
+    "llm_evaluation": {
+      "llm_quality_score": 72,
+      "strengths": [
+        "The philosophy clearly links diagnostic questioning to value framing, creating a logical bridge from discovery to price justification.",
+        "The objection library covers a diverse range of common real estate scenarios, including financial, logistical, and relationship-based barriers.",
+        "The communication style and tone definitions are specific enough to guide consistent behavior across different conversation stages."
+      ],
+      "gaps": [
+        "The objection responses are high-level strategies (e.g., 'Reframe', 'Future Pace') rather than specific tactical scripts or logical arguments, limiting immediate usability.",
+        "The 'Value Proposition' stage description focuses on credibility and differentiation but lacks explicit guidance on how to quantify the 'net ROI' mentioned in the philosophy.",
+        "There is no explicit mechanism described for transitioning from 'Discovery' to 'Value Proposition' based on the diagnostic findings, leaving a potential gap in the flow."
+      ],
+      "coherence_feedback": "The methodology presents a coherent, consultative system where diagnostic trust-building naturally leads to value-based pricing and structured objection handling."
+    },
+    "strengths": [
+      "The philosophy clearly links diagnostic questioning to value framing, creating a logical bridge from discovery to price justification.",
+      "The objection library covers a diverse range of common real estate scenarios, including financial, logistical, and relationship-based barriers.",
+      "The communication style and tone definitions are specific enough to guide consistent behavior across different conversation stages."
+    ],
+    "gaps": [
+      "The objection responses are high-level strategies (e.g., 'Reframe', 'Future Pace') rather than specific tactical scripts or logical arguments, limiting immediate usability.",
+      "The 'Value Proposition' stage description focuses on credibility and differentiation but lacks explicit guidance on how to quantify the 'net ROI' mentioned in the philosophy.",
+      "There is no explicit mechanism described for transitioning from 'Discovery' to 'Value Proposition' based on the diagnostic findings, leaving a potential gap in the flow."
+    ]
+  },
+  "metadata": {}
+}
