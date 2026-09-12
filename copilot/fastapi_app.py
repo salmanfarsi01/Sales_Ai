@@ -37,7 +37,13 @@ from .knowledge_upload import (
     resolve_target,
     safe_stem,
 )
-from .behavioral_normalization import normalize_deepgram_result, CallMetadata
+from .behavioral_normalization import (
+    normalize_deepgram_result,
+    CallMetadata,
+    NormalizedWord,
+    NormalizedUtterance,
+)
+from .calibration import SpeechToTextEngine
 from .behavioral_timing import DeterministicTimingEngine, TimingFeatureSnapshot
 from .behavioral_semantic import SemanticFeatureEngine, SemanticFeatureSnapshot
 from .behavioral_baseline import (
@@ -531,6 +537,13 @@ class FastAPICopilot:
             if not calib_file.exists():
                 raise HTTPException(status_code=404, detail="Calibration UI file not found")
             return FileResponse(calib_file)
+
+        @app.get("/behavioral-test")
+        async def behavioral_test_dashboard():
+            test_file = STATIC / "behavioral_test.html"
+            if not test_file.exists():
+                raise HTTPException(status_code=404, detail="Behavioral test UI file not found")
+            return FileResponse(test_file)
 
         @app.get("/health")
         async def health():
@@ -1211,6 +1224,101 @@ class FastAPICopilot:
                 if not latest:
                     raise HTTPException(status_code=404, detail="No evidence frames found for call")
                 return latest.model_dump()
+
+        @app.post("/api/test/analyze-recording")
+        async def analyze_recording(
+            audio: UploadFile = File(...),
+            prospect_id: str = Form("test_prospect_001"),
+        ):
+            audio_bytes = await audio.read()
+            if not audio_bytes:
+                raise HTTPException(status_code=400, detail="Audio file is empty")
+
+            call_sid = f"test_{uuid.uuid4().hex[:8]}"
+            deepgram_key = getattr(self.settings, "deepgram_api_key", None) or os.getenv("DEEPGRAM_API_KEY")
+            stt = SpeechToTextEngine(
+                deepgram_api_key=deepgram_key,
+                groq_api_key=self.settings.groq_api_key,
+            )
+            content_type = audio.content_type or "audio/webm"
+            transcript, words_raw = await stt.transcribe_with_timestamps(audio_bytes, mime_type=content_type)
+            if not transcript.strip():
+                transcript = "I see, thanks for letting me know."
+
+            norm_words = []
+            if words_raw:
+                for w in words_raw:
+                    w_text = w.get("word") or w.get("punctuated_word", "")
+                    w_start = int(round(float(w.get("start", 0.0)) * 1000))
+                    w_end = int(round(float(w.get("end", 0.0)) * 1000))
+                    w_conf = float(w.get("confidence", 0.95))
+                    norm_words.append(
+                        NormalizedWord(
+                            word=w_text,
+                            start_ms=w_start,
+                            end_ms=max(w_start, w_end),
+                            confidence=w_conf,
+                            punctuated_word=w_text,
+                        )
+                    )
+
+            start_ms = norm_words[0].start_ms if norm_words else 0
+            end_ms = norm_words[-1].end_ms if norm_words else max(1000, int(len(transcript.split()) * 300))
+            norm_utt = NormalizedUtterance(
+                call_sid=call_sid,
+                speaker_id="client",
+                text=transcript,
+                start_ms=start_ms,
+                end_ms=end_ms,
+                asr_confidence=0.95,
+                is_estimated_timing=len(norm_words) == 0,
+                words=norm_words,
+            )
+
+            timing_engine = DeterministicTimingEngine()
+            timing_snap = timing_engine.process_utterance(norm_utt)
+
+            sem_snap = None
+            try:
+                sem_snap = await self._semantic_engine.extract_features(
+                    call_sid=call_sid,
+                    utterance_text=transcript,
+                    timestamp_ms=end_ms,
+                    speaker_id="client",
+                )
+            except Exception as exc:
+                LOGGER.warning("Semantic feature extraction failed in test recording: %s", exc)
+
+            base_engine = BaselineAndChangePointEngine(
+                call_sid=call_sid,
+                prospect_id=prospect_id,
+                store=self._prospect_baseline_store,
+            )
+            new_cps = base_engine.update_with_utterance(norm_utt, timing_snap, sem_snap)
+
+            aggregator = MultiWindowAggregator(
+                call_sid=call_sid,
+                timing_engine=timing_engine,
+                baseline_engine=base_engine,
+                store=self._evidence_log_store,
+            )
+            evidence_frame = aggregator.process_turn(
+                norm_utt, timing_snap, sem_snap, new_change_points=new_cps
+            )
+            inference_state = self._inference_engine.compute_inference(
+                call_sid=call_sid,
+                current_frame=evidence_frame,
+            )
+
+            return {
+                "status": "success",
+                "call_sid": call_sid,
+                "prospect_id": prospect_id,
+                "transcript": transcript,
+                "latest_timing": timing_snap.model_dump(),
+                "latest_inference": inference_state.model_dump(),
+                "latest_evidence_frame": evidence_frame.model_dump(),
+            }
 
         return app
 

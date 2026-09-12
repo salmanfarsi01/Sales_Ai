@@ -723,7 +723,7 @@ def test_recalibrated_variance_floor_prevents_false_anomalies_on_slow_speaker(tm
 
     # Test 2: Short conversational confirmation ("Yes, exactly.")
     # Word count is 2 words, duration 1.2s -> raw WPM would be 100 WPM, but short turns (< 4 words)
-    # are protected from rate change-point false alerts.
+    # are protected from rate change-point false alerts, pause absence drops, and backchannel length drops.
     short_utt = normalize_generic_transcript(
         text="Yes, exactly.",
         speaker_id="client",
@@ -735,7 +735,7 @@ def test_recalibrated_variance_floor_prevents_false_anomalies_on_slow_speaker(tm
     t_short = timing_engine.compute_snapshot_for_window(window_ms=10000, speaker_id="client")
     cps_short = engine.update_with_utterance(short_utt, t_short)
 
-    assert not any(cp.feature_name == "speech_rate_wpm" for cp in cps_short)
+    assert len(cps_short) == 0
 
     # Test 3: True genuine surge (240 WPM - frantic objection) MUST still trigger
     surge_utt = normalize_generic_transcript(
@@ -750,4 +750,98 @@ def test_recalibrated_variance_floor_prevents_false_anomalies_on_slow_speaker(tm
     cps_surge = engine.update_with_utterance(surge_utt, t_surge)
 
     assert any(cp.feature_name == "speech_rate_wpm" and cp.direction == "surge" and cp.z_score >= 2.0 for cp in cps_surge)
+
+
+def test_short_utterance_and_pause_gating_behavior(tmp_path: Path):
+    """Verifies that:
+    1. Utterances with 0 intra-turn pauses do NOT trigger false 'avg_pause_duration_ms' drop change-points.
+    2. Utterances with 0 intra-turn pauses do NOT pollute the baseline pause duration sample distribution.
+    3. Short utterances (< 4 words) do NOT pollute baseline speech rate with denominator quantization noise.
+    4. Legitimate response latency hesitations on short utterances (e.g. 3500ms before 'No.') ARE preserved
+       and successfully trigger response_latency_ms change-points.
+    """
+    store = ProspectBaselineStore(store_path=tmp_path / "baselines_pause_gate.json")
+    engine = BaselineAndChangePointEngine(
+        call_sid="call_pause_gate",
+        prospect_id="prospect_pause_gate",
+        store=store,
+        intra_call_window_ms=60000,
+        min_calibration_turns=3,
+        min_cumulative_words=15,
+        z_threshold=2.0,
+    )
+
+    # Establish baseline with explicit 400ms pause and 600ms latency
+    profile = BaselineProfile(
+        prospect_id="prospect_pause_gate",
+        speech_rate_wpm=SpeakerBaselineStats(mean=120.0, stddev=21.6, sample_count=10),
+        avg_pause_duration_ms=SpeakerBaselineStats(mean=400.0, stddev=150.0, sample_count=10),
+        response_latency_ms=SpeakerBaselineStats(mean=600.0, stddev=200.0, sample_count=10),
+        turn_length_words=SpeakerBaselineStats(mean=12.0, stddev=4.2, sample_count=10),
+        call_count=2,
+    )
+    store.save_baseline("prospect_pause_gate", profile)
+    engine = BaselineAndChangePointEngine(
+        call_sid="call_pause_gate",
+        prospect_id="prospect_pause_gate",
+        store=store,
+    )
+
+    # 1. Fluent 2-word acknowledgment: "Yes, definitely." (0 intra-turn pauses, normal latency 550ms)
+    utt_fluent = normalize_generic_transcript(
+        text="Yes, definitely.",
+        speaker_id="client",
+        start_ms=1000,
+        end_ms=2000,
+        call_sid="call_pause_gate",
+    )
+    t_fluent = TimingFeatureSnapshot(
+        timestamp_ms=2000,
+        window_ms=10000,
+        speaker_id="client",
+        speech_rate_wpm=120.0,
+        avg_pause_duration_ms=0.0,
+        intra_turn_pause_count=0,
+        response_latency_ms=550,
+        turn_length_words=2,
+        turn_duration_ms=1000,
+        timing_confidence=1.0,
+    )
+    cps_fluent = engine.update_with_utterance(utt_fluent, t_fluent)
+    # Must NOT produce pause drop (val=0) or turn length drop (val=2 backchannel)
+    assert len(cps_fluent) == 0
+
+    # Deviations check: pause duration and short-turn rate must NOT be flagged significant
+    devs = engine.compute_deviations(t_fluent)
+    pause_dev = next(d for d in devs if d.feature_name == "avg_pause_duration_ms")
+    assert pause_dev.is_significant is False
+    assert pause_dev.z_score == 0.0
+    assert pause_dev.is_measured is False
+
+    # 2. Prolonged hesitation before short 1-word response: "No." with 3500ms latency
+    utt_hesitant = normalize_generic_transcript(
+        text="No.",
+        speaker_id="client",
+        start_ms=6000,
+        end_ms=6500,
+        call_sid="call_pause_gate",
+    )
+    t_hesitant = TimingFeatureSnapshot(
+        timestamp_ms=6500,
+        window_ms=10000,
+        speaker_id="client",
+        speech_rate_wpm=120.0,
+        avg_pause_duration_ms=0.0,
+        intra_turn_pause_count=0,
+        response_latency_ms=3500, # (3500 - 600) / 200 = 14.5 -> surge!
+        turn_length_words=1,
+        turn_duration_ms=500,
+        timing_confidence=1.0,
+    )
+    cps_hesitant = engine.update_with_utterance(utt_hesitant, t_hesitant)
+    assert len(cps_hesitant) == 1
+    assert cps_hesitant[0].feature_name == "response_latency_ms"
+    assert cps_hesitant[0].direction == "surge"
+    assert cps_hesitant[0].z_score >= 2.0
+
 

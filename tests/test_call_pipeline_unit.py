@@ -419,3 +419,53 @@ async def test_parallel_rag_concurrency_simulation():
     assert "Special promotion" in results[1]
     assert len(history_log) == 1
     assert history_log[0]["content"] == utterance
+
+
+def test_behavioral_test_dashboard_and_analyze_recording(monkeypatch):
+    """Verify GET /behavioral-test serves the UI and POST /api/test/analyze-recording processes audio."""
+    client = TestClient(app)
+
+    # 1. UI route serves the dashboard
+    resp = client.get("/behavioral-test")
+    assert resp.status_code == 200
+    assert "Behavioral Signal Test Console" in resp.text
+    assert "#0EADAB" in resp.text
+
+    # 2. Mock STT to return deterministic transcript and word timestamps
+    from copilot.calibration import SpeechToTextEngine
+    async def mock_transcribe(*args, **kwargs):
+        return (
+            "We need to review this pricing proposal with our board next week.",
+            [
+                {"word": "We", "start": 0.1, "end": 0.3},
+                {"word": "need", "start": 0.35, "end": 0.6},
+                {"word": "to", "start": 0.65, "end": 0.8},
+                {"word": "review", "start": 0.85, "end": 1.2},
+                {"word": "this", "start": 1.25, "end": 1.45},
+                {"word": "pricing", "start": 1.5, "end": 1.9},
+                {"word": "proposal", "start": 2.2, "end": 2.7}, # intra-turn pause 300ms
+                {"word": "with", "start": 2.75, "end": 2.95},
+                {"word": "our", "start": 3.0, "end": 3.2},
+                {"word": "board", "start": 3.25, "end": 3.6},
+                {"word": "next", "start": 3.65, "end": 3.9},
+                {"word": "week.", "start": 3.95, "end": 4.3},
+            ]
+        )
+    monkeypatch.setattr(SpeechToTextEngine, "transcribe_with_timestamps", mock_transcribe)
+
+    # POST dummy audio to /api/test/analyze-recording
+    files = {"audio": ("test.webm", b"RIFFFAKEAUDIOBYTES", "audio/webm")}
+    data = {"prospect_id": "prospect_ui_test"}
+    post_resp = client.post("/api/test/analyze-recording", files=files, data=data)
+    assert post_resp.status_code == 200
+    res_data = post_resp.json()
+
+    assert res_data["status"] == "success"
+    assert "pricing proposal" in res_data["transcript"]
+    assert "latest_timing" in res_data
+    assert "latest_inference" in res_data
+    assert res_data["latest_timing"]["turn_length_words"] == 12
+    assert res_data["latest_inference"]["acoustic_evidence"] == "unavailable"
+    assert "trust" in res_data["latest_inference"]
+    assert "pacing" in res_data["latest_inference"]
+

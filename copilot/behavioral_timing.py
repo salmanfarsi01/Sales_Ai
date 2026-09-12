@@ -17,6 +17,10 @@ class TimingFeatureSnapshot(BaseModel):
     speech_rate_wpm: float = Field(0.0, ge=0.0)
     avg_pause_duration_ms: float = Field(0.0, ge=0.0)
     intra_turn_pause_count: int = Field(0, ge=0)
+    pause_measured: bool = Field(
+        default=False,
+        description="Explicit boolean distinguishing whether intra-turn pauses (>= 250ms) were measured versus absence of pauses",
+    )
     response_latency_ms: Optional[int] = None
     interruptions_60s: int = Field(0, ge=0)
     turn_length_words: int = Field(0, ge=0)
@@ -214,6 +218,7 @@ class DeterministicTimingEngine:
             speech_rate_wpm=speech_rate_wpm,
             avg_pause_duration_ms=round(avg_pause_duration_ms, 1),
             intra_turn_pause_count=intra_turn_pause_count,
+            pause_measured=intra_turn_pause_count > 0,
             response_latency_ms=response_latency_ms,
             interruptions_60s=interruptions_window,
             turn_length_words=turn_words,

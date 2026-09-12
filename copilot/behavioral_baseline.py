@@ -39,6 +39,10 @@ class FeatureDeviation(BaseModel):
     baseline_stddev: float
     z_score: float
     is_significant: bool
+    is_measured: bool = Field(
+        default=True,
+        description="True if the observed feature represents an actual measurement rather than absence of measurable data",
+    )
 
 
 class ChangePointEvent(BaseModel):
@@ -106,6 +110,21 @@ class ProspectBaselineStore:
 
 DEFAULT_FEATURE_STDDEV_FLOORS: Dict[str, Tuple[float, float]] = {
     # feature_name: (min_stddev_ratio, min_stddev_abs)
+    #
+    # Rationale for per-feature variance floor ratio differentiation:
+    # 1. speech_rate_wpm (18%, floor 15.0 WPM):
+    #    Speech rate has relatively tight physiological bounds in fluent adult speech (~10-15% CV).
+    #    An 18% floor (e.g. +/-32.4 WPM at 90 WPM) provides sufficient breathing room for natural
+    #    sentence-to-sentence cadence swings (75-115 WPM) without false-triggering |z| >= 2.0.
+    # 2. avg_pause_duration_ms (25%, floor 150.0 ms):
+    #    Intra-turn pauses are sensitive to ASR word-boundary alignment jitter (+/-50-100ms) and cognitive
+    #    micro-hesitations, demanding a wider 25% relative margin and a 150ms absolute floor.
+    # 3. response_latency_ms (30%, floor 200.0 ms):
+    #    Turn-taking latency is inherently noisy and context-dependent (rapid backchannels vs. thoughtful
+    #    deliberation), requiring a 30% margin and 200ms floor to prevent false hesitation alerts.
+    # 4. turn_length_words (35%, floor 3.0 words):
+    #    Turn length exhibits the highest natural dispersion in spontaneous dialogue (ranging from brief
+    #    acknowledgments to multi-sentence disclosures), requiring the widest relative floor (35%).
     "speech_rate_wpm": (0.18, 15.0),        # 18% of mean, at least 15 WPM floor
     "avg_pause_duration_ms": (0.25, 150.0), # 25% of mean, at least 150ms floor
     "response_latency_ms": (0.30, 200.0),   # 30% of mean, at least 200ms floor
@@ -296,8 +315,13 @@ class BaselineAndChangePointEngine:
         just_locked = False
         if not self.is_intra_call_locked:
             if is_clean_speech:
+                turn_words = observed_features.get("turn_length_words", 0.0)
                 for feat, val in observed_features.items():
-                    if feat == "speech_rate_wpm" and val <= 0.0:
+                    # Skip rate calculation on sub-4-word utterances due to denominator quantization noise
+                    if feat == "speech_rate_wpm" and (val <= 0.0 or turn_words < 4.0):
+                        continue
+                    # Skip pause duration when no intra-turn pauses occurred (absence of pause, not 0ms duration)
+                    if feat == "avg_pause_duration_ms" and val <= 0.0:
                         continue
                     self.prospect_samples[feat].append(val)
 
@@ -327,6 +351,23 @@ class BaselineAndChangePointEngine:
                 turn_words = observed_features.get("turn_length_words", 0.0)
                 if turn_words < 4.0:
                     continue
+
+            if feat == "avg_pause_duration_ms":
+                # Turns without intra-turn pauses (val <= 0.0) represent absence of pause data,
+                # NOT an anomalous drop in pause duration.
+                if val <= 0.0:
+                    continue
+                turn_words = observed_features.get("turn_length_words", 0.0)
+                if turn_words < 4.0:
+                    continue
+
+            if feat == "turn_length_words":
+                # Short conversational confirmations/backchannels (< 4 words like "Yes, exactly")
+                # are standard conversational mechanics and must not trip a turn length collapse anomaly.
+                if val < 4.0:
+                    stat: SpeakerBaselineStats = getattr(active_profile, feat)
+                    if val < stat.mean:
+                        continue
 
             stat: SpeakerBaselineStats = getattr(active_profile, feat)
             if stat.stddev <= 0.001:
@@ -365,8 +406,11 @@ class BaselineAndChangePointEngine:
                 self.change_points.append(event)
 
         if self.is_intra_call_locked and not just_locked and not is_anomalous_turn and is_clean_speech:
+            turn_words = observed_features.get("turn_length_words", 0.0)
             for feat, val in observed_features.items():
-                if feat == "speech_rate_wpm" and val <= 0.0:
+                if feat == "speech_rate_wpm" and (val <= 0.0 or turn_words < 4.0):
+                    continue
+                if feat == "avg_pause_duration_ms" and val <= 0.0:
                     continue
                 self.prospect_samples[feat].append(val)
             self._recalculate_profiles(timestamp_ms)
@@ -389,9 +433,27 @@ class BaselineAndChangePointEngine:
             observed_features["response_latency_ms"] = float(timing_snapshot.response_latency_ms)
 
         deviations: List[FeatureDeviation] = []
+        turn_words = observed_features.get("turn_length_words", 0.0)
         for feat, val in observed_features.items():
             stat: SpeakerBaselineStats = getattr(active_profile, feat)
-            z = (val - stat.mean) / stat.stddev if stat.stddev > 0.001 else 0.0
+
+            if feat == "avg_pause_duration_ms" and val <= 0.0:
+                z = 0.0
+                is_sig = False
+                is_meas = False
+            elif feat == "speech_rate_wpm" and (val <= 0.0 or turn_words < 4.0):
+                z = 0.0
+                is_sig = False
+                is_meas = False
+            elif feat == "turn_length_words" and val < 4.0 and val < stat.mean:
+                z = (val - stat.mean) / stat.stddev if stat.stddev > 0.001 else 0.0
+                is_sig = False
+                is_meas = True
+            else:
+                z = (val - stat.mean) / stat.stddev if stat.stddev > 0.001 else 0.0
+                is_sig = abs(z) >= self.z_threshold
+                is_meas = True
+
             deviations.append(
                 FeatureDeviation(
                     feature_name=feat,
@@ -399,7 +461,8 @@ class BaselineAndChangePointEngine:
                     baseline_mean=stat.mean,
                     baseline_stddev=stat.stddev,
                     z_score=round(z, 2),
-                    is_significant=abs(z) >= self.z_threshold,
+                    is_significant=is_sig,
+                    is_measured=is_meas,
                 )
             )
 

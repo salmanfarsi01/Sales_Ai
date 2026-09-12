@@ -67,6 +67,7 @@ def test_timing_engine_intra_turn_pauses_and_synthetic_penalty():
     snap1 = engine.process_utterance(utt_observed)
     assert snap1.intra_turn_pause_count == 2
     assert snap1.avg_pause_duration_ms == 350.0
+    assert snap1.pause_measured is True
     assert snap1.timing_confidence == 1.0
 
     # 2. Synthetic timing fallback: must not count synthetic spacing and must penalize confidence
@@ -82,6 +83,7 @@ def test_timing_engine_intra_turn_pauses_and_synthetic_penalty():
     snap2 = engine.process_utterance(utt_synthetic)
     assert snap2.intra_turn_pause_count == 0
     assert snap2.avg_pause_duration_ms == 0.0
+    assert snap2.pause_measured is False
     assert snap2.timing_confidence == 0.5
 
 
