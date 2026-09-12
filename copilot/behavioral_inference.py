@@ -260,7 +260,7 @@ class DownstreamInferenceEngine:
             else sem_curr
         )
         if sem_emotion is not None:
-            if sem_emotion.boundary_score > 0.0:
+            if sem_emotion.boundary_score >= 0.80:
                 tension_level += self.config.emotion_boundary_tension_boost
                 valence -= self.config.emotion_boundary_valence_penalty
                 emotion_signals.append("Hard boundary / stop-contact marker")
@@ -346,7 +346,7 @@ class DownstreamInferenceEngine:
             else (w_full.semantic_features if w_full else sem_curr)
         )
         if sem_trust is not None:
-            if sem_trust.boundary_score > 0.0:
+            if sem_trust.boundary_score >= 0.80:
                 trust_score -= self.config.trust_boundary_penalty
                 trust_drivers.append("Boundary statement suppresses trust")
             if sem_trust.recurrence_type == "positive_echo":
@@ -411,7 +411,7 @@ class DownstreamInferenceEngine:
         read_drivers: List[str] = []
 
         # Hard boundary instantly sets readiness to zero
-        if sem_curr is not None and sem_curr.boundary_score > 0.0:
+        if sem_curr is not None and sem_curr.boundary_score >= 0.80:
             read_score = self.config.readiness_hard_boundary_override_score
             read_drivers.append("Hard boundary encountered: readiness overridden to 0.0")
             # The override is driven deterministically by the boundary detection alone.

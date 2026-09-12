@@ -77,19 +77,28 @@ STOP_CONTACT_PATTERNS = [
     r"\bdon['’]?t\s+call\b",
     r"\bstop\s+calling\b",
     r"\btake\s+me\s+off\b",
+    r"\b(take|remove)\s+(my\s+)?(name|number|info|information)\s+off\b",
     r"\bremove\s+(my\s+)?(number|name)\b",
     r"\blose\s+my\s+number\b",
-    r"\bdo\s+not\s+contact\b",
-    r"\bdon['’]?t\s+contact\b",
+    r"\bdo\s+not\s+(ever\s+)?contact\b",
+    r"\bdon['’]?t\s+(ever\s+)?contact\b",
     r"\bstop\s+contacting\b",
+    r"\b(do\s+not|don['’]?t|rather\s+you\s+didn['’]?t|prefer\s+you\s+didn['’]?t|stop)\s+reach(ing)?\s+out\b",
+    r"\bnot\s+reach\s+out\b",
+    r"\b(prefer|rather)\s+not\s+to\s+be\s+contacted\b",
     r"\bstop\s+harassing\b",
-    r"\bnot\s+interested\b.*?\bdo\s+not\b",
-    r"\balready\s+(have\s+an?\s+agent|listed|under\s+contract|represented)\b",
+    r"\bleave\s+me\s+alone\b",
+    r"\bnot\s+interested\b.*?\b(do\s+not|don['’]?t)\s+(call|contact|reach|message|bother|email|text)\b",
+    r"\balready\s+(have\s+an?\s+agent|listed|under\s+contract|represented|signed)\b",
     r"\bunder\s+contract\b",
+    r"\b(working|signed)\s+with\s+(another|someone|an?\s+agent|a\s+realtor|a\s+broker)\b",
+    r"\b(have|got)\s+an?\s+(agent|realtor|broker)\b",
     r"\b(another|an)\s+(agent|realtor|broker)\b",
     r"\brepresented\s+by\b",
     r"\bhave\s+an\s+exclusive\b",
     r"\bcall\s+my\s+(attorney|lawyer)\b",
+    r"\b(put\s+me\s+on\s+the|on\s+the|to\s+the)\s+do\s+not\s+call\b",
+    r"\bdnc\s+list\b",
 ]
 
 SPECIFICITY_PATTERNS = [
@@ -149,6 +158,12 @@ STOPWORDS = {
     "a", "an", "the", "that", "this", "these", "those", "our", "your", "my", "we", "you",
     "i", "us", "it", "to", "for", "in", "on", "at", "with", "still", "way", "too", "is",
     "are", "was", "were", "and", "but", "or", "of", "as", "be", "so", "do", "does", "did",
+    "just", "really", "honestly", "hear", "heard", "see", "seen", "look", "what", "where",
+    "when", "why", "how", "here", "there", "right", "well", "like", "feel", "feels",
+    "about", "out", "then", "now", "not", "no", "yes", "yeah", "ok", "okay", "sure",
+    "get", "got", "can", "could", "would", "should", "have", "has", "had", "been",
+    "much", "more", "most", "some", "any", "all", "very", "even", "actually", "mean",
+    "think", "know", "something", "someone", "everything", "anything", "thing", "things",
 }
 
 
@@ -289,7 +304,7 @@ class SemanticFeatureEngine:
 
         conf_profile = "heuristic_bypass" if is_bypass else "heuristic"
         conf = CONFIDENCE_BY_FEATURE[conf_profile]
-        sem_conf = round(min(conf.values()), 2) if is_bypass else 0.80
+        sem_conf = round(min(conf.values()), 2)
 
         return SemanticFeatureSnapshot(
             utterance_id=utterance.utterance_id,
@@ -360,7 +375,7 @@ class SemanticFeatureEngine:
             f"- specificity_score: float 0.0 to 1.0 (dates, dollar amounts, named entities, hard numbers)\n"
             f"- future_language_score: float 0.0 to 1.0 (operational future commitment vs vague hypotheticals)\n"
             f"- agreement_score: float 0.0 to 1.0 (substantive meeting/pricing commitment ~0.8-1.0; polite nod like 'yeah' ~0.2-0.3)\n"
-            f"- boundary_score: float 0.0 to 1.0 (stop contact, already represented, privacy constraints)\n\n"
+            f"- boundary_score: float 0.0 or 1.0 (STRICT: 1.0 ONLY for explicit stop-contact, DNC, existing broker representation, or legal threats. Exploring options, general hesitation, or reluctance MUST be 0.0)\n\n"
             f"Output ONLY raw JSON."
         )
 
@@ -393,8 +408,12 @@ class SemanticFeatureEngine:
 
             parsed = json.loads(raw_resp)
 
-            # Ensure boundary deterministic override is respected
-            effective_boundary = max(boundary_score, float(parsed.get("boundary_score", 0.0)))
+            # Boundary detection is high-stakes compliance (zero false negatives from regex,
+            # zero false positives from LLM hallucinations).
+            # A deterministic regex match always produces 1.0.
+            # An LLM output is only accepted as a boundary if >= 0.80.
+            llm_boundary = float(parsed.get("boundary_score", 0.0))
+            effective_boundary = 1.0 if (boundary_score >= 0.8 or llm_boundary >= 0.8) else 0.0
             conf = CONFIDENCE_BY_FEATURE["llm"]
 
             return SemanticFeatureSnapshot(

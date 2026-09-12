@@ -892,3 +892,58 @@ def test_short_utterance_and_pause_gating_behavior(tmp_path: Path):
     assert cps_hesitant[0].z_score >= 2.0
 
 
+def test_baseline_collection_skips_sub_2_word_fragments_from_turn_length_mean():
+    """
+    Verifies that isolated 1-word breath tokens ('case.', 'So.') are excluded from
+    turn_length_words sample collection, preventing artificial deflation of the
+    prospect's mean turn length baseline.
+    """
+    engine = BaselineAndChangePointEngine(
+        call_sid="call_fragment_deflation_test",
+        prospect_id="prospect_frag_test",
+        intra_call_window_ms=60000,
+        min_calibration_turns=3,
+        min_cumulative_words=15,
+    )
+
+    # Sequence of turns: 3 substantial turns + 2 single-word breath fragments
+    turns = [
+        # Turn 1: 10 words (1s - 6s)
+        ("We are looking at our options for selling our home.", 1000, 6000, 10),
+        # Turn 2: 1-word breath fragment from Deepgram ASR split (8s - 9s)
+        ("case.", 8000, 9000, 1),
+        # Turn 3: 12 words (15s - 22s)
+        ("We want to know what the current market value would be.", 15000, 22000, 12),
+        # Turn 4: 1-word particle (30s - 31s)
+        ("So.", 30000, 31000, 1),
+        # Turn 5: 8 words (55s - 62s) -> triggers lock (elapsed > 60s, turns >= 3, words >= 15)
+        ("Let me know when you can come visit.", 55000, 62000, 8),
+    ]
+
+    for text, start, end, words in turns:
+        u = normalize_generic_transcript(text, "client", start, end, "call_fragment_deflation_test")
+        t = TimingFeatureSnapshot(
+            timestamp_ms=end,
+            window_ms=60000,
+            speaker_id="client",
+            speech_rate_wpm=120.0,
+            avg_pause_duration_ms=0.0,
+            turn_length_words=words,
+        )
+        engine.update_with_utterance(u, t)
+
+    # Verify baseline is locked
+    assert engine.is_intra_call_locked is True
+    active_profile = engine.get_active_profile()
+    assert active_profile is not None
+
+    # turn_length_words samples must contain ONLY the substantial turns [10, 12, 8]
+    assert engine.prospect_samples["turn_length_words"] == [10.0, 12.0, 8.0]
+
+    # Mean turn length MUST be exactly 10.0 words (30 / 3)
+    # If 1-word fragments had polluted the samples, mean would have deflated to 6.4 (32 / 5)!
+    assert active_profile.turn_length_words.mean == 10.0
+    assert active_profile.turn_length_words.sample_count == 3
+
+
+

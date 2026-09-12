@@ -23,6 +23,17 @@ def test_boundary_detection_zero_false_negatives():
         "We are under contract with another realtor.",
         "Lose my number and stop contacting me.",
         "Do not contact my family, call my attorney.",
+        "I'd rather you didn't reach out for a while.",
+        "Please don't contact me about this again.",
+        "We're actually working with someone already.",
+        "I prefer not to be contacted anymore.",
+        "Please leave me alone.",
+        "We already signed with a realtor last week.",
+        "Do not reach out to this number.",
+        "I'd appreciate it if you don't call this number again.",
+        "take my number off your list",
+        "Stop reaching out please.",
+        "Put me on the do not call list.",
     ]
 
     for phrase in boundary_phrases:
@@ -34,6 +45,15 @@ def test_boundary_detection_zero_false_negatives():
         "We are thinking about selling in the spring.",
         "Can you send me some market comps?",
         "I need to discuss this with my spouse.",
+        "So we have been looking at a few different options for a while now, honestly.",
+        "We are not in rush exactly, but our lease is up in four months.",
+        "I'm not sure if now is the right time for us.",
+        "We're looking for something with three bedrooms and a nice yard.",
+        "The budget is around 450k, maybe up to 500k if it's really turnkey.",
+        "What kind of commission structure do you typically work with?",
+        "Yeah that sounds reasonable, let's talk next Tuesday.",
+        "We were burned before by another deal that fell through on financing.",
+        "I'm not interested in the townhouse, but do not want to rule out the other listing either.",
     ]
 
     for phrase in benign_phrases:
@@ -225,7 +245,8 @@ async def test_groq_timeout_fallback_is_immediate_and_non_blocking(monkeypatch):
     assert snapshot.boundary_confidence == 0.95
     assert snapshot.agreement_confidence == 0.65
     assert snapshot.question_type_confidence == 0.70
-    assert snapshot.semantic_confidence == 0.80
+    # Overall semantic_confidence reflects the weakest link of the heuristic profile (0.65)
+    assert snapshot.semantic_confidence == 0.65
 
 
 @pytest.mark.asyncio
@@ -319,4 +340,205 @@ async def test_short_fragment_bypass_per_feature_confidence():
 
     # Overall semantic_confidence reflects the weakest link of the bypass profile (0.50)
     assert snap.semantic_confidence == 0.50
+
+
+@pytest.mark.asyncio
+async def test_benign_explorative_turn_rejects_soft_llm_boundary_hallucination(monkeypatch):
+    """
+    Verifies that when an LLM returns a soft hallucinated boundary (e.g. 0.60) on benign
+    explorative speech ('looking at options'), the engine filters it to 0.0 because
+    neither the deterministic regex nor high-confidence LLM threshold (>= 0.80) was met.
+    """
+    monkeypatch.setenv("GROQ_API_KEY", "gsk_test_mock_key_for_boundary")
+
+    class MockChatCompletions:
+        def create(self, *args, **kwargs):
+            class Msg:
+                content = (
+                    '{"question_type": "none", "specificity_score": 0.1, '
+                    '"future_language_score": 0.0, "agreement_score": 0.0, '
+                    '"boundary_score": 0.6}'
+                )
+            class Choice:
+                message = Msg()
+            class Resp:
+                choices = [Choice()]
+            return Resp()
+
+    class MockGroqClient:
+        chat = type("Chat", (), {"completions": MockChatCompletions()})()
+
+    engine = SemanticFeatureEngine(groq_client=MockGroqClient())
+    turn = normalize_generic_transcript(
+        text="So we have been looking at a few different options for a while now, honestly.",
+        speaker_id="client",
+        start_ms=1000,
+        end_ms=5000,
+        call_sid="call_boundary_test",
+    )
+
+    snap = await engine.analyze_turn_semantic(turn, [])
+    assert snap.extraction_mode == "llm"
+    # Soft LLM hallucination (0.60) MUST be filtered to 0.0
+    assert snap.boundary_score == 0.0
+
+
+@pytest.mark.asyncio
+async def test_soft_but_genuine_boundary_statement_still_triggers_override(monkeypatch, tmp_path):
+    """
+    Adversarial test verifying zero false negatives for genuine, softly-worded boundary phrasing:
+    1. Deterministic regex catches soft boundaries ('I'd rather you didn't reach out',
+       'working with someone already', 'leave me alone') with boundary_score=1.0.
+    2. Even under an uncalibrated / conservative LLM returning sub-0.80 scores (e.g. 0.65),
+       effective_boundary remains 1.0 because regex carries zero-false-negative responsibility.
+    3. The resulting boundary_score (1.0) feeds into MultiWindowAggregator and DownstreamInferenceEngine,
+       successfully triggering the hard zero override on Readiness (0.0), suppressing Trust,
+       and raising tension in Emotion.
+    """
+    from copilot.behavioral_evidence import MultiWindowAggregator, SQLiteEvidenceLogStore
+    from copilot.behavioral_inference import DownstreamInferenceEngine
+    from copilot.behavioral_timing import DeterministicTimingEngine
+
+    monkeypatch.setenv("GROQ_API_KEY", "gsk_test_mock_key_for_boundary")
+
+    # Mock LLM returning a conservative / borderline score (0.65)
+    class MockChatCompletions:
+        def create(self, *args, **kwargs):
+            class Msg:
+                content = (
+                    '{"question_type": "none", "specificity_score": 0.0, '
+                    '"future_language_score": 0.0, "agreement_score": 0.0, '
+                    '"boundary_score": 0.65}'
+                )
+            class Choice:
+                message = Msg()
+            class Resp:
+                choices = [Choice()]
+            return Resp()
+
+    class MockGroqClient:
+        chat = type("Chat", (), {"completions": MockChatCompletions()})()
+
+    engine = SemanticFeatureEngine(groq_client=MockGroqClient())
+
+    soft_boundary_turns = [
+        "I'd rather you didn't reach out for a while.",
+        "Please don't contact me about this again.",
+        "We're actually working with someone already.",
+        "I prefer not to be contacted anymore.",
+        "Please leave me alone.",
+        "We already signed with a realtor last week.",
+    ]
+
+    for text in soft_boundary_turns:
+        turn = normalize_generic_transcript(
+            text=text,
+            speaker_id="client",
+            start_ms=1000,
+            end_ms=4000,
+            call_sid="call_soft_boundary",
+        )
+
+        snap = await engine.analyze_turn_semantic(turn, [])
+        # Deterministic regex + effective_boundary ensures 1.0 despite LLM scoring 0.65
+        assert snap.boundary_score == 1.0, f"Failed zero-false-negative contract on: '{text}'"
+
+        # Now verify full downstream inference override
+        db_path = tmp_path / f"test_{abs(hash(text))}.db"
+        store = SQLiteEvidenceLogStore(db_path=db_path)
+        timing_engine = DeterministicTimingEngine()
+        aggregator = MultiWindowAggregator(
+            call_sid="call_soft_boundary",
+            timing_engine=timing_engine,
+            store=store,
+        )
+        inference_engine = DownstreamInferenceEngine()
+
+        t_snap = timing_engine.process_utterance(turn)
+        frame = aggregator.process_turn(turn, t_snap, semantic_snapshot=snap)
+        inference = inference_engine.compute_inference(
+            call_sid="call_soft_boundary",
+            current_frame=frame,
+        )
+
+        # 1. Readiness is hard-overridden to 0.0
+        assert inference.readiness.score == 0.0
+        assert any("hard boundary" in d.lower() for d in inference.readiness.drivers)
+        assert inference.readiness.confidence == 0.95
+
+        # 2. Trust is heavily suppressed
+        assert inference.trust.score <= 0.20
+        assert any("boundary" in d.lower() for d in inference.trust.drivers)
+
+        # 3. Emotion records hard boundary signal
+        assert any("boundary" in s.lower() for s in inference.emotion.observable_signals)
+        store.close()
+
+
+def test_same_speaker_consecutive_objection_recurrence_with_conversational_framing():
+    """
+    Verifies that same-speaker consecutive turns repeating an objection are detected as
+    'same_objection_repeated' even when surrounded by conversational framing / filler words
+    and slight phonetic ASR variations (e.g. 'five person' instead of 'five percent').
+    """
+    engine = SemanticFeatureEngine()
+
+    t13 = normalize_generic_transcript(
+        text="Honestly, a five person commission feels pretty steep for what's involved here.",
+        speaker_id="client",
+        start_ms=44855,
+        end_ms=50555,
+        call_sid="call_monologue_test",
+    )
+    t14_text = "I hear you, but five person still just does not see it right with me."
+
+    rec_id, rec_type, rec_count = engine.detect_semantic_recurrence(t14_text, [t13])
+    assert rec_type == "same_objection_repeated"
+    assert rec_count == 2
+    assert rec_id is not None
+
+
+def test_recurrence_adversarial_rejects_incidental_word_overlap():
+    """
+    Adversarial test verifying that two genuinely different turns sharing 1 or 2 incidental
+    content words do NOT produce false positive objection recurrence:
+    1. 'the closing timeline worries me' vs 'the closing paperwork is confusing' (only shares 'closing')
+       -> must be 'none'.
+    2. 'We looked at that house on the market with the large yard' vs
+       'Is another house entering the market in that neighborhood soon?' (shares 'house' and 'market')
+       -> must be 'none'.
+    3. 'The closing timeline worries me' vs 'The closing timeline is really unclear to us'
+       (genuine repeat of closing timeline concern sharing 'closing' and 'timeline' with high overlap)
+       -> must be 'same_objection_repeated'.
+    """
+    engine = SemanticFeatureEngine()
+
+    # 1. Shared single incidental word ('closing') across distinct concerns (timeline vs paperwork)
+    t1 = normalize_generic_transcript("The closing timeline worries me.", "client", 1000, 3000, "call_adv")
+    t2_text = "The closing paperwork is confusing."
+    r_id, r_type, r_count = engine.detect_semantic_recurrence(t2_text, [t1])
+    assert r_type == "none"
+
+    # 2. Shared incidental topic nouns ('house', 'market') across distinct non-objection utterances
+    t3 = normalize_generic_transcript(
+        "We looked at that house on the market with the large yard.",
+        "client",
+        4000,
+        7000,
+        "call_adv",
+    )
+    t4_text = "Is another house entering the market in that neighborhood soon?"
+    r_id2, r_type2, r_count2 = engine.detect_semantic_recurrence(t4_text, [t3])
+    assert r_type2 == "none"
+
+    # 3. Genuine recurrence of closing timeline concern
+    t5_text = "The closing timeline is really unclear to us."
+    r_id3, r_type3, r_count3 = engine.detect_semantic_recurrence(t5_text, [t1])
+    assert r_type3 == "same_objection_repeated"
+    assert r_count3 == 2
+    assert r_id3 is not None
+
+
+
+
 

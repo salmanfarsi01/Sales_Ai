@@ -327,6 +327,9 @@ class BaselineAndChangePointEngine:
                     # Skip pause duration when no intra-turn pauses occurred (absence of pause, not 0ms duration)
                     if feat == "avg_pause_duration_ms" and val <= 0.0:
                         continue
+                    # Skip turn length on sub-2-word fragments to prevent 1-word breath tokens from deflating baseline mean
+                    if feat == "turn_length_words" and val < 2.0:
+                        continue
                     self.prospect_samples[feat].append(val)
 
             elapsed_ms = timestamp_ms - self.earliest_sample_ms
@@ -426,6 +429,8 @@ class BaselineAndChangePointEngine:
                 if feat == "speech_rate_wpm" and (val <= 0.0 or turn_words < 4.0):
                     continue
                 if feat == "avg_pause_duration_ms" and val <= 0.0:
+                    continue
+                if feat == "turn_length_words" and val < 2.0:
                     continue
                 self.prospect_samples[feat].append(val)
             self._recalculate_profiles(timestamp_ms)

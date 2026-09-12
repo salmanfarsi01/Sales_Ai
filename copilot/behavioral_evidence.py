@@ -320,23 +320,38 @@ class MultiWindowAggregator:
         # 2. Boundary: persistent within the window (max score)
         snap_boundary = max(snaps, key=lambda s: s.boundary_score)
         max_boundary = snap_boundary.boundary_score
+        boundary_conf = (
+            snap_boundary.boundary_confidence if max_boundary > 0.0 else min(s.boundary_confidence for s in snaps)
+        )
 
         # 3. Question: find latest active question in the window
         active_q = next((s for s in reversed(snaps) if s.question_type != "none"), None)
         q_type = active_q.question_type if active_q else "none"
+        q_conf = active_q.question_type_confidence if active_q else min(s.question_type_confidence for s in snaps)
 
         # 4. Continuous scores: peak presence in this window horizon
-        # Per-feature confidences track the snapshot that provided the peak measurement
+        # Per-feature confidences track the snapshot that provided the peak measurement (or weakest link if unmeasured 0.0)
         snap_spec = max(snaps, key=lambda s: s.specificity_score)
         max_spec = snap_spec.specificity_score
+        spec_conf = snap_spec.specificity_confidence if max_spec > 0.0 else min(s.specificity_confidence for s in snaps)
 
         snap_future = max(snaps, key=lambda s: s.future_language_score)
         max_future = snap_future.future_language_score
+        future_conf = (
+            snap_future.future_language_confidence if max_future > 0.0 else min(s.future_language_confidence for s in snaps)
+        )
 
         snap_agree = max(snaps, key=lambda s: s.agreement_score)
         max_agree = snap_agree.agreement_score
+        agree_conf = snap_agree.agreement_confidence if max_agree > 0.0 else min(s.agreement_confidence for s in snaps)
 
-        # 5. Extraction mode: "llm" only if all snaps used LLM, "mixed" if partial, else heuristic
+        rec_conf = active_rec.recurrence_confidence if active_rec else min(s.recurrence_confidence for s in snaps)
+
+        # 5. Extraction mode:
+        # - "llm" only if 100% of snaps in the window used LLM
+        # - "mixed" if partial (both LLM and heuristic turns present)
+        # - When 0% used LLM, peak severity wins: error > timeout > offline
+        #   (An earlier API exception or timeout is not masked by a subsequent clean offline bypass)
         all_llm = all(s.extraction_mode == "llm" for s in snaps)
         has_llm = any(s.extraction_mode == "llm" for s in snaps)
         if all_llm:
@@ -344,9 +359,23 @@ class MultiWindowAggregator:
         elif has_llm:
             mode = "mixed"
         else:
-            mode = latest.extraction_mode
+            heuristic_modes = {s.extraction_mode for s in snaps}
+            if "heuristic_error" in heuristic_modes:
+                mode = "heuristic_error"
+            elif "heuristic_timeout" in heuristic_modes:
+                mode = "heuristic_timeout"
+            else:
+                mode = "heuristic_offline"
 
-        min_conf = min(s.semantic_confidence for s in snaps)
+        window_confidences = [
+            round(boundary_conf, 2),
+            round(rec_conf, 2),
+            round(q_conf, 2),
+            round(spec_conf, 2),
+            round(future_conf, 2),
+            round(agree_conf, 2),
+        ]
+        window_sem_conf = round(min(window_confidences), 2)
 
         return SemanticFeatureSnapshot(
             utterance_id=latest.utterance_id,
@@ -361,17 +390,13 @@ class MultiWindowAggregator:
             future_language_score=round(max_future, 2),
             boundary_score=round(max_boundary, 2),
             agreement_score=round(max_agree, 2),
-            boundary_confidence=round(snap_boundary.boundary_confidence, 2),
-            recurrence_confidence=round(
-                active_rec.recurrence_confidence if active_rec else min(s.recurrence_confidence for s in snaps), 2
-            ),
-            question_type_confidence=round(
-                active_q.question_type_confidence if active_q else min(s.question_type_confidence for s in snaps), 2
-            ),
-            specificity_confidence=round(snap_spec.specificity_confidence, 2),
-            future_language_confidence=round(snap_future.future_language_confidence, 2),
-            agreement_confidence=round(snap_agree.agreement_confidence, 2),
-            semantic_confidence=round(min_conf, 2),
+            boundary_confidence=window_confidences[0],
+            recurrence_confidence=window_confidences[1],
+            question_type_confidence=window_confidences[2],
+            specificity_confidence=window_confidences[3],
+            future_language_confidence=window_confidences[4],
+            agreement_confidence=window_confidences[5],
+            semantic_confidence=window_sem_conf,
         )
 
     def process_turn(

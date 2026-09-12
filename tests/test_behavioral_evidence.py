@@ -455,3 +455,177 @@ def test_semantic_aggregation_recurrence_count_coupled_to_active_event(tmp_path:
 
     store.close()
 
+
+def test_semantic_aggregation_heuristic_mode_peak_severity_precedence(tmp_path):
+    """
+    Verifies that when 0% of contributing snapshots in a window used LLM:
+    1. 'heuristic_error' takes precedence over 'heuristic_timeout' and 'heuristic_offline'.
+    2. 'heuristic_timeout' takes precedence over 'heuristic_offline'.
+    3. An earlier extraction failure or timeout is NEVER masked by a subsequent clean offline bypass.
+    """
+    store = SQLiteEvidenceLogStore(tmp_path / "test_modes.db")
+    timing_engine = DeterministicTimingEngine()
+    aggregator = MultiWindowAggregator(
+        call_sid="call_sev_test",
+        timing_engine=timing_engine,
+        store=store,
+    )
+
+    # Turn 1 at 2s: Extraction threw an exception (heuristic_error)
+    u1 = normalize_generic_transcript("What is your fee?", "client", 1000, 2000, "call_sev_test")
+    s1 = SemanticFeatureSnapshot(
+        utterance_id=u1.utterance_id,
+        call_sid="call_sev_test",
+        speaker_id="client",
+        extraction_mode="heuristic_error",
+        question_type="transactional",
+        semantic_confidence=0.65,
+    )
+    t1 = timing_engine.process_utterance(u1)
+    aggregator.process_turn(u1, t1, semantic_snapshot=s1)
+
+    # Turn 2 at 5s: Clean offline bypass for 1-word nod (heuristic_offline)
+    u2 = normalize_generic_transcript("Right.", "client", 4000, 5000, "call_sev_test")
+    s2 = SemanticFeatureSnapshot(
+        utterance_id=u2.utterance_id,
+        call_sid="call_sev_test",
+        speaker_id="client",
+        extraction_mode="heuristic_offline",
+        agreement_score=0.30,
+        specificity_confidence=0.50,
+        future_language_confidence=0.50,
+        agreement_confidence=0.65,
+        semantic_confidence=0.50,
+    )
+    t2 = timing_engine.process_utterance(u2)
+    frame = aggregator.process_turn(u2, t2, semantic_snapshot=s2)
+
+    w_10s = frame.windows["last_5_10s"]
+    assert w_10s.semantic_features is not None
+    # Peak severity rule: heuristic_error must NOT be masked by subsequent heuristic_offline
+    assert w_10s.semantic_features.extraction_mode == "heuristic_error"
+    # min confidence across the window is 0.50
+    assert w_10s.semantic_features.semantic_confidence == 0.50
+
+    # Turn 3 at 8s: Timeout fallback
+    u3 = normalize_generic_transcript("Can we meet next week?", "client", 6000, 8000, "call_sev_test")
+    s3 = SemanticFeatureSnapshot(
+        utterance_id=u3.utterance_id,
+        call_sid="call_sev_test",
+        speaker_id="client",
+        extraction_mode="heuristic_timeout",
+        semantic_confidence=0.65,
+    )
+    # New aggregator instance to test timeout > offline without error
+    timing_engine2 = DeterministicTimingEngine()
+    aggregator2 = MultiWindowAggregator(
+        call_sid="call_sev_test2",
+        timing_engine=timing_engine2,
+        store=store,
+    )
+    t3 = timing_engine2.process_utterance(u3)
+    aggregator2.process_turn(u3, t3, semantic_snapshot=s3)
+
+    # Turn 4: Offline bypass
+    u4 = normalize_generic_transcript("Yep.", "client", 9000, 10000, "call_sev_test2")
+    s4 = SemanticFeatureSnapshot(
+        utterance_id=u4.utterance_id,
+        call_sid="call_sev_test2",
+        speaker_id="client",
+        extraction_mode="heuristic_offline",
+        semantic_confidence=0.50,
+    )
+    t4 = timing_engine2.process_utterance(u4)
+    frame2 = aggregator2.process_turn(u4, t4, semantic_snapshot=s4)
+
+    w2_10s = frame2.windows["last_5_10s"]
+    # Peak severity rule: heuristic_timeout takes precedence over heuristic_offline
+    assert w2_10s.semantic_features.extraction_mode == "heuristic_timeout"
+
+    store.close()
+
+
+def test_window_semantic_confidence_matches_weakest_link_of_constituent_features(tmp_path):
+    """
+    Verifies that a window's aggregated semantic_confidence is mathematically consistent with
+    the weakest link among the actual 6 feature confidences in that window snapshot:
+    - If a feature has a positively measured peak disclosure (e.g. specificity 0.85 from LLM @ 0.95 conf),
+      its confidence is 0.95.
+    - A superseded 0.0 unmeasured value from an earlier bypass turn does NOT drag down
+      window semantic_confidence below the confidence of the features actually present in the snapshot.
+    """
+    store = SQLiteEvidenceLogStore(tmp_path / "test_conf_cons.db")
+    timing_engine = DeterministicTimingEngine()
+    aggregator = MultiWindowAggregator(
+        call_sid="call_conf_test",
+        timing_engine=timing_engine,
+        store=store,
+    )
+
+    # Turn 1: 1-word bypass turn with 0.50 unmeasured specificity/future
+    u1 = normalize_generic_transcript("But", "client", 1000, 1500, "call_conf_test")
+    s1 = SemanticFeatureSnapshot(
+        utterance_id=u1.utterance_id,
+        call_sid="call_conf_test",
+        speaker_id="client",
+        extraction_mode="heuristic_offline",
+        specificity_score=0.0,
+        specificity_confidence=0.50,
+        future_language_score=0.0,
+        future_language_confidence=0.50,
+        agreement_score=0.0,
+        agreement_confidence=0.65,
+        question_type_confidence=0.70,
+        recurrence_confidence=0.80,
+        boundary_confidence=0.95,
+        semantic_confidence=0.50,
+    )
+    t1 = timing_engine.process_utterance(u1)
+    aggregator.process_turn(u1, t1, semantic_snapshot=s1)
+
+    # Turn 2: Rich LLM disclosure with 0.95 conf across features
+    u2 = normalize_generic_transcript("Our lease renews in five months.", "client", 2000, 4500, "call_conf_test")
+    s2 = SemanticFeatureSnapshot(
+        utterance_id=u2.utterance_id,
+        call_sid="call_conf_test",
+        speaker_id="client",
+        extraction_mode="llm",
+        specificity_score=0.85,
+        specificity_confidence=0.95,
+        future_language_score=0.90,
+        future_language_confidence=0.95,
+        agreement_score=0.10,
+        agreement_confidence=0.95,
+        question_type_confidence=0.95,
+        recurrence_confidence=0.95,
+        boundary_confidence=0.95,
+        semantic_confidence=0.95,
+    )
+    t2 = timing_engine.process_utterance(u2)
+    frame = aggregator.process_turn(u2, t2, semantic_snapshot=s2)
+
+    w = frame.windows["last_5_10s"].semantic_features
+    assert w is not None
+    # Peak disclosure scores were adopted from Turn 2
+    assert w.specificity_score == 0.85
+    assert w.specificity_confidence == 0.95
+    assert w.future_language_score == 0.90
+    assert w.future_language_confidence == 0.95
+
+    # Overall semantic_confidence is exactly min() of the window's 6 constituent feature confidences
+    expected_min = min([
+        w.boundary_confidence,
+        w.recurrence_confidence,
+        w.question_type_confidence,
+        w.specificity_confidence,
+        w.future_language_confidence,
+        w.agreement_confidence,
+    ])
+    assert w.semantic_confidence == expected_min
+    # And specifically, semantic_confidence cannot be 0.50 when all features are >= 0.70
+    assert w.semantic_confidence >= 0.70
+    assert w.semantic_confidence > 0.50
+
+    store.close()
+
+

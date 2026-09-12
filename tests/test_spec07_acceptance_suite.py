@@ -449,7 +449,7 @@ def test_spec07_test6_latency_budget_under_10ms(tmp_path: Path):
 
     latencies_ms = []
     for i in range(50):
-        t_start = time.monotonic()
+        t_start = time.perf_counter()
 
         utt = normalize_generic_transcript(
             text=f"Turn {i} discussing software capabilities and deployment options.",
@@ -465,7 +465,7 @@ def test_spec07_test6_latency_budget_under_10ms(tmp_path: Path):
             current_frame=frame,
         )
 
-        elapsed_ms = (time.monotonic() - t_start) * 1000.0
+        elapsed_ms = (time.perf_counter() - t_start) * 1000.0
         latencies_ms.append(elapsed_ms)
 
     # Discard cold-start turn 0 for steady-state SLA evaluation
