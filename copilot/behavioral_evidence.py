@@ -289,6 +289,91 @@ class MultiWindowAggregator:
             return 0.5
         return round(client_duration / total, 3)
 
+    def _aggregate_semantic_for_window(
+        self,
+        window_utts: List[NormalizedUtterance],
+        fallback_snap: Optional[SemanticFeatureSnapshot] = None,
+    ) -> Optional[SemanticFeatureSnapshot]:
+        """Aggregates semantic evidence across all contributing utterances in a window horizon.
+        Preserves active objections/recurrence, persistent boundary markers, and peak disclosure scores.
+        """
+        if not window_utts:
+            return fallback_snap
+
+        window_utt_ids = {u.utterance_id for u in window_utts}
+        snaps = [s for s in self.semantic_snapshots if s.utterance_id in window_utt_ids]
+        if not snaps:
+            return fallback_snap
+
+        if len(snaps) == 1:
+            return snaps[0]
+
+        latest = snaps[-1]
+
+        # 1. Recurrence: find most recent active objection or recurrence in this window.
+        # rec_count must come strictly from active_rec to prevent pairing a 1st occurrence with an older turn's count.
+        active_rec = next((s for s in reversed(snaps) if s.recurrence_type != "none"), None)
+        rec_type = active_rec.recurrence_type if active_rec else "none"
+        rec_id = active_rec.recurrence_id if active_rec else None
+        rec_count = active_rec.recurrence_count if active_rec else 0
+
+        # 2. Boundary: persistent within the window (max score)
+        snap_boundary = max(snaps, key=lambda s: s.boundary_score)
+        max_boundary = snap_boundary.boundary_score
+
+        # 3. Question: find latest active question in the window
+        active_q = next((s for s in reversed(snaps) if s.question_type != "none"), None)
+        q_type = active_q.question_type if active_q else "none"
+
+        # 4. Continuous scores: peak presence in this window horizon
+        # Per-feature confidences track the snapshot that provided the peak measurement
+        snap_spec = max(snaps, key=lambda s: s.specificity_score)
+        max_spec = snap_spec.specificity_score
+
+        snap_future = max(snaps, key=lambda s: s.future_language_score)
+        max_future = snap_future.future_language_score
+
+        snap_agree = max(snaps, key=lambda s: s.agreement_score)
+        max_agree = snap_agree.agreement_score
+
+        # 5. Extraction mode: "llm" only if all snaps used LLM, "mixed" if partial, else heuristic
+        all_llm = all(s.extraction_mode == "llm" for s in snaps)
+        has_llm = any(s.extraction_mode == "llm" for s in snaps)
+        if all_llm:
+            mode = "llm"
+        elif has_llm:
+            mode = "mixed"
+        else:
+            mode = latest.extraction_mode
+
+        min_conf = min(s.semantic_confidence for s in snaps)
+
+        return SemanticFeatureSnapshot(
+            utterance_id=latest.utterance_id,
+            call_sid=self.call_sid,
+            speaker_id=latest.speaker_id,
+            extraction_mode=mode,
+            recurrence_id=rec_id,
+            recurrence_type=rec_type,
+            recurrence_count=rec_count,
+            question_type=q_type,
+            specificity_score=round(max_spec, 2),
+            future_language_score=round(max_future, 2),
+            boundary_score=round(max_boundary, 2),
+            agreement_score=round(max_agree, 2),
+            boundary_confidence=round(snap_boundary.boundary_confidence, 2),
+            recurrence_confidence=round(
+                active_rec.recurrence_confidence if active_rec else min(s.recurrence_confidence for s in snaps), 2
+            ),
+            question_type_confidence=round(
+                active_q.question_type_confidence if active_q else min(s.question_type_confidence for s in snaps), 2
+            ),
+            specificity_confidence=round(snap_spec.specificity_confidence, 2),
+            future_language_confidence=round(snap_future.future_language_confidence, 2),
+            agreement_confidence=round(snap_agree.agreement_confidence, 2),
+            semantic_confidence=round(min_conf, 2),
+        )
+
     def process_turn(
         self,
         utterance: NormalizedUtterance,
@@ -393,6 +478,9 @@ class MultiWindowAggregator:
             h_confidence = min(h_conf_candidates)
 
             talk_ratio = self._compute_talk_ratio(window_utts)
+            h_semantic = self._aggregate_semantic_for_window(
+                window_utts, fallback_snap=semantic_snapshot
+            )
 
             windows[horizon] = BehavioralEvidenceSnapshot(
                 evidence_id=f"ev_{self.call_sid}_{timestamp_ms}_{horizon}",
@@ -401,7 +489,7 @@ class MultiWindowAggregator:
                 horizon=horizon,
                 window_duration_ms=duration_ms,
                 timing_features=h_timing,
-                semantic_features=semantic_snapshot,
+                semantic_features=h_semantic,
                 deviations=h_deviations,
                 change_points=window_cps,
                 talk_ratio_client=talk_ratio,

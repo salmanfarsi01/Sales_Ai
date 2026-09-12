@@ -264,3 +264,59 @@ async def test_per_call_semantic_timeout_via_call_metadata(monkeypatch):
     assert snapshot.boundary_confidence == 0.95
     assert snapshot.agreement_confidence == 0.65
     assert snapshot.question_type_confidence == 0.70
+
+
+def test_relative_temporal_specificity_heuristic():
+    """Verifies that relative temporal anchors and spelled-out numerals
+    ("four months", "two year old", "last month") produce high specificity in heuristic mode.
+    """
+    engine = SemanticFeatureEngine()
+    turn = normalize_generic_transcript(
+        text="Well, it was listed for four months with another agent last month, and my two year old kid needs space so we want to sell.",
+        speaker_id="client",
+        start_ms=0,
+        end_ms=4000,
+        call_sid="call_rel_spec",
+    )
+
+    snap = engine.analyze_deterministic_heuristic(turn, [], mode="heuristic_offline")
+    assert snap.specificity_score >= 0.60
+    assert snap.extraction_mode == "heuristic_offline"
+
+
+@pytest.mark.asyncio
+async def test_short_fragment_bypass_per_feature_confidence():
+    """
+    Verifies that a 1-word fragment ("case."):
+    1. Bypasses LLM network calls directly via heuristic_offline.
+    2. Reports honest unmeasured confidences (0.50) for skipped dimensions (specificity, future language).
+    3. Retains evaluated confidences for deterministic regex (boundary: 0.95, agreement: 0.65).
+    """
+    engine = SemanticFeatureEngine()
+    fragment_turn = normalize_generic_transcript(
+        text="case.",
+        speaker_id="client",
+        start_ms=5000,
+        end_ms=6000,
+        call_sid="call_fragment_test",
+    )
+
+    snap = await engine.analyze_turn_semantic(fragment_turn, [])
+    assert snap.extraction_mode == "heuristic_offline"
+    assert snap.specificity_score == 0.0
+    assert snap.future_language_score == 0.0
+    assert snap.boundary_score == 0.0
+
+    # Unmeasured features honestly report 0.50 (neutral prior), NEVER a fake 0.85/0.90!
+    assert snap.specificity_confidence == 0.50
+    assert snap.future_language_confidence == 0.50
+
+    # Evaluated features reflect deterministic certainty
+    assert snap.boundary_confidence == 0.95
+    assert snap.recurrence_confidence == 0.80
+    assert snap.agreement_confidence == 0.65
+    assert snap.question_type_confidence == 0.70
+
+    # Overall semantic_confidence reflects the weakest link of the bypass profile (0.50)
+    assert snap.semantic_confidence == 0.50
+

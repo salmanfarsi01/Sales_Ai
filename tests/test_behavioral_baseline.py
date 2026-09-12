@@ -156,6 +156,53 @@ def test_baseline_sufficiency_gate_rejects_premature_lock(tmp_path: Path):
     assert store.get_baseline("prospect_short_1") is None
 
 
+def test_baseline_sufficiency_gate_rejects_90s_fallback_with_insufficient_words(tmp_path: Path):
+    """
+    Verifies that exceeding the 90s maximum calibration window with >= 3 turns
+    STILL refuses to lock if cumulative words < 15.
+    Prevents sub-4-word utterances from locking a dummy 0.0 WPM baseline.
+    """
+    store = ProspectBaselineStore(store_path=tmp_path / "baselines.json")
+    engine = BaselineAndChangePointEngine(
+        call_sid="call_90s_sparse",
+        prospect_id="prospect_90s_sparse",
+        store=store,
+        intra_call_window_ms=60000,
+        max_calibration_window_ms=90000,
+        min_calibration_turns=3,
+        min_cumulative_words=15,
+    )
+
+    # Turn 1 at 5s: "No" (1 word)
+    u1 = normalize_generic_transcript("No", speaker_id="client", start_ms=5000, end_ms=6000, call_sid="call_90s_sparse")
+    t1 = TimingFeatureSnapshot(timestamp_ms=6000, window_ms=60000, speaker_id="client", speech_rate_wpm=60.0, avg_pause_duration_ms=0.0, turn_length_words=1)
+    engine.update_with_utterance(u1, t1)
+
+    # Turn 2 at 45s: "Not sure" (2 words)
+    u2 = normalize_generic_transcript("Not sure", speaker_id="client", start_ms=45000, end_ms=46500, call_sid="call_90s_sparse")
+    t2 = TimingFeatureSnapshot(timestamp_ms=46500, window_ms=60000, speaker_id="client", speech_rate_wpm=80.0, avg_pause_duration_ms=0.0, turn_length_words=2)
+    engine.update_with_utterance(u2, t2)
+
+    # Turn 3 at 95s: "Maybe later" (2 words)
+    # Elapsed time = 97000 - 5000 = 92000ms (> 90000ms max window)
+    # Turns = 3 (>= 3 min calibration turns)
+    # Words = 1 + 2 + 2 = 5 (< 15 min cumulative words)
+    u3 = normalize_generic_transcript("Maybe later", speaker_id="client", start_ms=95000, end_ms=97000, call_sid="call_90s_sparse")
+    t3 = TimingFeatureSnapshot(timestamp_ms=97000, window_ms=60000, speaker_id="client", speech_rate_wpm=60.0, avg_pause_duration_ms=0.0, turn_length_words=2)
+    cps3 = engine.update_with_utterance(u3, t3)
+
+    # Baseline MUST NOT lock despite 92s elapsed and 3 turns
+    assert engine.is_intra_call_locked is False
+    assert engine.get_active_profile() is None
+    assert len(cps3) == 0
+    assert engine.compute_deviations(t3) == []
+
+    # Teardown at call close must also refuse to persist an uncalibrated 5-word baseline
+    final_profile = engine.finalize_and_persist()
+    assert final_profile is None
+    assert store.get_baseline("prospect_90s_sparse") is None
+
+
 def test_adaptive_clean_baseline_refinement_quarantines_outliers(tmp_path: Path):
     store = ProspectBaselineStore(store_path=tmp_path / "baselines.json")
     engine = BaselineAndChangePointEngine(

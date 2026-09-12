@@ -43,6 +43,10 @@ class FeatureDeviation(BaseModel):
         default=True,
         description="True if the observed feature represents an actual measurement rather than absence of measurable data",
     )
+    baseline_source: Optional[Literal["intra_call", "historical_only", "blended"]] = Field(
+        default=None,
+        description="Baseline distribution source against which this deviation was computed",
+    )
 
 
 class ChangePointEvent(BaseModel):
@@ -329,10 +333,21 @@ class BaselineAndChangePointEngine:
             turn_count = len(self.prospect_samples["turn_length_words"])
             total_words = sum(self.prospect_samples["turn_length_words"])
 
-            sufficient_speech = turn_count >= self.min_calibration_turns and total_words >= self.min_cumulative_words
-            if (elapsed_ms >= self.intra_call_window_ms and sufficient_speech) or (
-                elapsed_ms >= self.max_calibration_window_ms and turn_count >= self.min_calibration_turns
-            ):
+            sufficient_speech = (
+                turn_count >= self.min_calibration_turns
+                and total_words >= self.min_cumulative_words
+            )
+            # Baseline sufficiency gate:
+            # We strictly enforce all conditions together:
+            # 1. elapsed_ms >= intra_call_window_ms (>= 60s)
+            # 2. turn_count >= min_calibration_turns (>= 3 clean turns)
+            # 3. total_words >= min_cumulative_words (>= 15 words)
+            #
+            # We NEVER allow elapsed time (even reaching max_calibration_window_ms)
+            # to bypass the word-count requirement. If a sparse speaker speaks only
+            # sub-4-word utterances across 90s, rate calculation filters them out, leaving
+            # 0 samples and producing a corrupted 0.0 WPM baseline that explodes on subsequent turns.
+            if elapsed_ms >= self.intra_call_window_ms and sufficient_speech:
                 self._lock_intra_call_baseline(timestamp_ms)
                 just_locked = True
 
@@ -420,8 +435,8 @@ class BaselineAndChangePointEngine:
     def compute_deviations(
         self, timing_snapshot: TimingFeatureSnapshot
     ) -> List[FeatureDeviation]:
-        active_profile = self.get_active_profile()
-        if active_profile is None:
+        active_profile, baseline_source = self.get_active_profile_and_source()
+        if active_profile is None or baseline_source is None:
             return []
 
         observed_features: Dict[str, float] = {
@@ -463,6 +478,7 @@ class BaselineAndChangePointEngine:
                     z_score=round(z, 2),
                     is_significant=is_sig,
                     is_measured=is_meas,
+                    baseline_source=baseline_source,
                 )
             )
 
@@ -470,8 +486,13 @@ class BaselineAndChangePointEngine:
 
     def finalize_and_persist(self) -> Optional[BaselineProfile]:
         turn_count = len(self.prospect_samples["turn_length_words"])
+        total_words = sum(self.prospect_samples["turn_length_words"])
+        sufficient_speech = (
+            turn_count >= self.min_calibration_turns
+            and total_words >= self.min_cumulative_words
+        )
         if not self.is_intra_call_locked:
-            if turn_count >= self.min_calibration_turns:
+            if sufficient_speech:
                 self._lock_intra_call_baseline(timestamp_ms=0)
             else:
                 return None

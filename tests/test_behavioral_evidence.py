@@ -292,3 +292,166 @@ def test_evidence_confidence_weakest_link_minimum_rule(tmp_path: Path):
 
     store.close()
 
+
+def test_semantic_aggregation_preserves_objections_across_horizons(tmp_path: Path):
+    """
+    Verifies that semantic evidence aggregates across multi-window horizons.
+    An objection raised in an earlier turn within last_20_30s and last_60_90s
+    must NOT be erased from those windows when a new neutral 1-word turn occurs.
+    """
+    db_path = tmp_path / "test_sem_agg.db"
+    store = SQLiteEvidenceLogStore(db_path=db_path)
+    timing_engine = DeterministicTimingEngine()
+    aggregator = MultiWindowAggregator(
+        call_sid="call_sem_agg",
+        timing_engine=timing_engine,
+        store=store,
+    )
+
+    # Turn 1 at 5s: Client raises a strong commission objection with high specificity
+    utt1 = normalize_generic_transcript(
+        text="Your 6% commission rate is way too high compared to Redfin.",
+        speaker_id="client",
+        start_ms=2000,
+        end_ms=6000,
+        call_sid="call_sem_agg",
+    )
+    sem1 = SemanticFeatureSnapshot(
+        utterance_id=utt1.utterance_id,
+        call_sid="call_sem_agg",
+        speaker_id="client",
+        question_type="evaluation",
+        recurrence_id="OBJ_COMMISSION_01",
+        recurrence_type="same_objection_repeated",
+        recurrence_count=1,
+        specificity_score=0.85,
+        future_language_score=0.10,
+        boundary_score=0.0,
+        agreement_score=0.0,
+        semantic_confidence=0.95,
+    )
+    t1 = timing_engine.process_utterance(utt1)
+    aggregator.process_turn(utt1, t1, semantic_snapshot=sem1)
+
+    # Turn 2 at 12s: Salesperson responds
+    utt2 = normalize_generic_transcript(
+        text="I understand your concern about rates.",
+        speaker_id="salesperson",
+        start_ms=8000,
+        end_ms=12000,
+        call_sid="call_sem_agg",
+    )
+    t2 = timing_engine.process_utterance(utt2)
+    aggregator.process_turn(utt2, t2)
+
+    # Turn 3 at 20s: Client gives a brief breath continuation: "case."
+    utt3 = normalize_generic_transcript(
+        text="case.",
+        speaker_id="client",
+        start_ms=18000,
+        end_ms=20000,
+        call_sid="call_sem_agg",
+    )
+    sem3 = SemanticFeatureSnapshot(
+        utterance_id=utt3.utterance_id,
+        call_sid="call_sem_agg",
+        speaker_id="client",
+        question_type="none",
+        recurrence_type="none",
+        recurrence_count=0,
+        specificity_score=0.0,
+        future_language_score=0.0,
+        boundary_score=0.0,
+        agreement_score=0.0,
+        semantic_confidence=0.90,
+    )
+    t3 = timing_engine.process_utterance(utt3)
+    frame3 = aggregator.process_turn(utt3, t3, semantic_snapshot=sem3)
+
+    # 1. Immediate current_utterance reflects Turn 3's neutral state
+    w_curr = frame3.windows["current_utterance"]
+    assert w_curr.semantic_features is not None
+    assert w_curr.semantic_features.recurrence_type == "none"
+    assert w_curr.semantic_features.specificity_score == 0.0
+
+    # 2. last_20_30s (spans 0 - 20s) covers Turn 1!
+    # It MUST retain the objection and peak specificity from Turn 1!
+    w_30s = frame3.windows["last_20_30s"]
+    assert w_30s.semantic_features is not None
+    assert w_30s.semantic_features.recurrence_type == "same_objection_repeated"
+    assert w_30s.semantic_features.specificity_score == 0.85
+
+    # 3. last_60_90s also covers Turn 1
+    w_60s = frame3.windows["last_60_90s"]
+    assert w_60s.semantic_features is not None
+    assert w_60s.semantic_features.recurrence_type == "same_objection_repeated"
+    assert w_60s.semantic_features.specificity_score == 0.85
+
+    store.close()
+
+
+def test_semantic_aggregation_recurrence_count_coupled_to_active_event(tmp_path: Path):
+    """
+    Verifies that when a newer recurrence event (e.g. positive_echo, count=1) follows
+    an older recurrence event (e.g. same_objection_repeated, count=3) in the same window,
+    the aggregated snapshot couples recurrence_count strictly to the active event (count=1, NOT 3),
+    and extraction_mode honestly reports 'mixed'.
+    """
+    db_path = tmp_path / "test_rec_coupling.db"
+    store = SQLiteEvidenceLogStore(db_path=db_path)
+    timing_engine = DeterministicTimingEngine()
+    aggregator = MultiWindowAggregator(
+        call_sid="call_rec_coupling",
+        timing_engine=timing_engine,
+        store=store,
+    )
+
+    # Turn 1 at 4s: Older 3rd-occurrence objection via LLM
+    u1 = normalize_generic_transcript("Your fee is too high.", "client", 1000, 4000, "call_rec_coupling")
+    s1 = SemanticFeatureSnapshot(
+        utterance_id=u1.utterance_id,
+        call_sid="call_rec_coupling",
+        speaker_id="client",
+        extraction_mode="llm",
+        recurrence_type="same_objection_repeated",
+        recurrence_count=3,
+        specificity_score=0.80,
+        specificity_confidence=0.95,
+    )
+    t1 = timing_engine.process_utterance(u1)
+    aggregator.process_turn(u1, t1, semantic_snapshot=s1)
+
+    # Turn 2 at 10s: Salesperson speaks
+    u2 = normalize_generic_transcript("Let's look at net proceeds.", "salesperson", 6000, 10000, "call_rec_coupling")
+    t2 = timing_engine.process_utterance(u2)
+    aggregator.process_turn(u2, t2)
+
+    # Turn 3 at 16s: Newer 1st-occurrence positive_echo via heuristic_offline
+    u3 = normalize_generic_transcript("Net proceeds make sense.", "client", 13000, 16000, "call_rec_coupling")
+    s3 = SemanticFeatureSnapshot(
+        utterance_id=u3.utterance_id,
+        call_sid="call_rec_coupling",
+        speaker_id="client",
+        extraction_mode="heuristic_offline",
+        recurrence_type="positive_echo",
+        recurrence_count=1,
+        specificity_score=0.0,
+        specificity_confidence=0.50,
+    )
+    t3 = timing_engine.process_utterance(u3)
+    frame = aggregator.process_turn(u3, t3, semantic_snapshot=s3)
+
+    w_30s = frame.windows["last_20_30s"]
+    assert w_30s.semantic_features is not None
+    # Recurrence type is the latest active event
+    assert w_30s.semantic_features.recurrence_type == "positive_echo"
+    # Recurrence count MUST be 1 (from s3), NEVER 3 (from s1)!
+    assert w_30s.semantic_features.recurrence_count == 1
+    # Mode honestly reports 'mixed' because s1 was 'llm' and s3 was 'heuristic_offline'
+    assert w_30s.semantic_features.extraction_mode == "mixed"
+    # Peak specificity is 0.80 and its confidence is 0.95 (inherited from s1)
+    assert w_30s.semantic_features.specificity_score == 0.80
+    assert w_30s.semantic_features.specificity_confidence == 0.95
+
+    store.close()
+

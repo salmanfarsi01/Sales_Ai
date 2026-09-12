@@ -468,4 +468,113 @@ def test_behavioral_test_dashboard_and_analyze_recording(monkeypatch):
     assert res_data["latest_inference"]["acoustic_evidence"] == "unavailable"
     assert "trust" in res_data["latest_inference"]
     assert "pacing" in res_data["latest_inference"]
+    # With 1 single turn, baseline sufficiency gate (>=3) is NOT satisfied -> sources is honestly []
+    assert res_data["latest_inference"]["baseline_sources"] == []
+    assert res_data["is_baseline_locked"] is False
+
+
+def test_behavioral_batch_recording_multi_turn_segmentation(monkeypatch):
+    """Verify that multi-segment batch recording splits into sequential turns,
+    strictly enforces the production 60s/3-turn/15-word sufficiency gate,
+    locks the baseline once all three conditions are met, and honestly populates baseline_sources.
+    """
+    client = TestClient(app)
+    from copilot.calibration import SpeechToTextEngine
+
+    # Realistic 65-second multi-turn sequence: 4 turns, 20 words across 67 seconds
+    async def mock_multi_turn_transcribe(*args, **kwargs):
+        return (
+            "We want to sell. It was listed for four months. My two year old needs space. Can we meet tomorrow?",
+            [
+                # Turn 1: 1.0 - 4.0s (4 words)
+                {"word": "We", "start": 1.0, "end": 1.5},
+                {"word": "want", "start": 1.8, "end": 2.2},
+                {"word": "to", "start": 2.4, "end": 2.8},
+                {"word": "sell.", "punctuated_word": "sell.", "start": 3.0, "end": 4.0},
+                # pause until 15s -> boundary 1
+                # Turn 2: 15.0 - 20.0s (6 words)
+                {"word": "It", "start": 15.0, "end": 15.5},
+                {"word": "was", "start": 15.8, "end": 16.3},
+                {"word": "listed", "start": 16.6, "end": 17.2},
+                {"word": "for", "start": 17.5, "end": 18.0},
+                {"word": "four", "start": 18.3, "end": 19.0},
+                {"word": "months.", "punctuated_word": "months.", "start": 19.2, "end": 20.0},
+                # pause until 40s -> boundary 2
+                # Turn 3: 40.0 - 46.0s (6 words)
+                {"word": "My", "start": 40.0, "end": 40.5},
+                {"word": "two", "start": 40.8, "end": 41.5},
+                {"word": "year", "start": 41.8, "end": 42.6},
+                {"word": "old", "start": 43.0, "end": 43.7},
+                {"word": "needs", "start": 44.0, "end": 44.8},
+                {"word": "space.", "punctuated_word": "space.", "start": 45.1, "end": 46.0},
+                # pause until 62s -> boundary 3
+                # Turn 4: 62.0 - 67.0s (4 words) -> elapsed 67s - 1s = 66s >= 60s, words=20 >= 15
+                {"word": "Can", "start": 62.0, "end": 62.8},
+                {"word": "we", "start": 63.2, "end": 64.0},
+                {"word": "meet", "start": 64.4, "end": 65.2},
+                {"word": "tomorrow?", "punctuated_word": "tomorrow?", "start": 65.6, "end": 67.0},
+            ]
+        )
+    monkeypatch.setattr(SpeechToTextEngine, "transcribe_with_timestamps", mock_multi_turn_transcribe)
+
+    files = {"audio": ("test_multi.webm", b"RIFFFAKEMULTIAUDIO", "audio/webm")}
+    data = {"prospect_id": "prospect_multi_turn_test"}
+    post_resp = client.post("/api/test/analyze-recording", files=files, data=data)
+    assert post_resp.status_code == 200
+    res_data = post_resp.json()
+
+    assert res_data["status"] == "success"
+    assert res_data["turns_processed"] == 4
+    assert len(res_data["utterances"]) == 4
+    # With 4 clean turns, 20 words, and 66s elapsed, all 3 sufficiency conditions are satisfied!
+    assert res_data["is_baseline_locked"] is True
+    assert "intra_call" in res_data["latest_inference"]["baseline_sources"]
+    assert len(res_data["latest_evidence_frame"]["windows"]["last_5_10s"]["deviations"]) > 0
+
+
+def test_batch_recording_sufficiency_gate_rejects_insufficient_time_and_words(monkeypatch):
+    """Verify that 3 short turns totaling only 20 seconds and 12 words STRICTLY REFUSE
+    to lock the baseline under the production gate (requires >=60s elapsed AND >=15 cumulative words).
+    """
+    client = TestClient(app)
+    from copilot.calibration import SpeechToTextEngine
+
+    # 3 short turns across only 20 seconds, totaling 12 words
+    async def mock_short_multi_turn(*args, **kwargs):
+        return (
+            "Hello who is calling. I am not sure. Call me next week.",
+            [
+                # Turn 1: 1.0 - 2.5s (4 words)
+                {"word": "Hello", "start": 1.0, "end": 1.3},
+                {"word": "who", "start": 1.4, "end": 1.7},
+                {"word": "is", "start": 1.8, "end": 2.0},
+                {"word": "calling.", "punctuated_word": "calling.", "start": 2.1, "end": 2.5},
+                # Turn 2: 8.0 - 10.0s (4 words)
+                {"word": "I", "start": 8.0, "end": 8.3},
+                {"word": "am", "start": 8.4, "end": 8.7},
+                {"word": "not", "start": 8.8, "end": 9.2},
+                {"word": "sure.", "punctuated_word": "sure.", "start": 9.3, "end": 10.0},
+                # Turn 3: 17.0 - 20.0s (4 words) -> total elapsed 20s - 1s = 19s (<60s), total words = 12 (<15)
+                {"word": "Call", "start": 17.0, "end": 17.5},
+                {"word": "me", "start": 17.8, "end": 18.2},
+                {"word": "next", "start": 18.5, "end": 19.0},
+                {"word": "week.", "punctuated_word": "week.", "start": 19.3, "end": 20.0},
+            ]
+        )
+    monkeypatch.setattr(SpeechToTextEngine, "transcribe_with_timestamps", mock_short_multi_turn)
+
+    files = {"audio": ("test_insufficient.webm", b"RIFFINSUFFICIENTBYTES", "audio/webm")}
+    data = {"prospect_id": "prospect_insufficient_test"}
+    post_resp = client.post("/api/test/analyze-recording", files=files, data=data)
+    assert post_resp.status_code == 200
+    res_data = post_resp.json()
+
+    assert res_data["status"] == "success"
+    assert res_data["turns_processed"] == 3
+    assert len(res_data["utterances"]) == 3
+    # Gate fails both time (<60s) and word count (<15) checks -> MUST NOT LOCK!
+    assert res_data["is_baseline_locked"] is False
+    assert res_data["latest_inference"]["baseline_sources"] == []
+    assert len(res_data["latest_evidence_frame"]["windows"]["last_5_10s"]["deviations"]) == 0
+
 

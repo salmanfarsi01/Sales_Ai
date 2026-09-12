@@ -42,6 +42,7 @@ from .behavioral_normalization import (
     CallMetadata,
     NormalizedWord,
     NormalizedUtterance,
+    segment_audio_transcript_turns,
 )
 from .calibration import SpeechToTextEngine
 from .behavioral_timing import DeterministicTimingEngine, TimingFeatureSnapshot
@@ -50,6 +51,7 @@ from .behavioral_baseline import (
     BaselineAndChangePointEngine,
     ProspectBaselineStore,
     ChangePointEvent,
+    DEFAULT_INTRA_CALL_WINDOW_MS,
 )
 from .behavioral_evidence import (
     MultiWindowAggregator,
@@ -1241,83 +1243,91 @@ class FastAPICopilot:
                 groq_api_key=self.settings.groq_api_key,
             )
             content_type = audio.content_type or "audio/webm"
-            transcript, words_raw = await stt.transcribe_with_timestamps(audio_bytes, mime_type=content_type)
-            if not transcript.strip():
+            transcript, words_raw = await stt.transcribe_with_timestamps(
+                audio_bytes, mime_type=content_type, utt_split=0.5
+            )
+            raw_utterances = getattr(stt, "latest_raw_utterances", None) or []
+            transcript = transcript.strip() if transcript else ""
+            if not transcript:
                 transcript = "I see, thanks for letting me know."
 
-            norm_words = []
-            if words_raw:
-                for w in words_raw:
-                    w_text = w.get("word") or w.get("punctuated_word", "")
-                    w_start = int(round(float(w.get("start", 0.0)) * 1000))
-                    w_end = int(round(float(w.get("end", 0.0)) * 1000))
-                    w_conf = float(w.get("confidence", 0.95))
-                    norm_words.append(
-                        NormalizedWord(
-                            word=w_text,
-                            start_ms=w_start,
-                            end_ms=max(w_start, w_end),
-                            confidence=w_conf,
-                            punctuated_word=w_text,
-                        )
-                    )
-
-            start_ms = norm_words[0].start_ms if norm_words else 0
-            end_ms = norm_words[-1].end_ms if norm_words else max(1000, int(len(transcript.split()) * 300))
-            norm_utt = NormalizedUtterance(
+            segmented_utts = segment_audio_transcript_turns(
+                words_raw=words_raw,
+                transcript=transcript,
                 call_sid=call_sid,
                 speaker_id="client",
-                text=transcript,
-                start_ms=start_ms,
-                end_ms=end_ms,
-                asr_confidence=0.95,
-                is_estimated_timing=len(norm_words) == 0,
-                words=norm_words,
+                raw_utterances=raw_utterances,
+                min_pause_split_ms=500,
             )
 
             timing_engine = DeterministicTimingEngine()
-            timing_snap = timing_engine.process_utterance(norm_utt)
-
-            sem_snap = None
-            try:
-                sem_snap = await self._semantic_engine.extract_features(
-                    call_sid=call_sid,
-                    utterance_text=transcript,
-                    timestamp_ms=end_ms,
-                    speaker_id="client",
-                )
-            except Exception as exc:
-                LOGGER.warning("Semantic feature extraction failed in test recording: %s", exc)
-
+            cal_window_ms = int(os.getenv("BEHAVIORAL_CALIBRATION_WINDOW_MS", str(DEFAULT_INTRA_CALL_WINDOW_MS)))
             base_engine = BaselineAndChangePointEngine(
                 call_sid=call_sid,
                 prospect_id=prospect_id,
                 store=self._prospect_baseline_store,
+                intra_call_window_ms=cal_window_ms,
             )
-            new_cps = base_engine.update_with_utterance(norm_utt, timing_snap, sem_snap)
-
             aggregator = MultiWindowAggregator(
                 call_sid=call_sid,
                 timing_engine=timing_engine,
                 baseline_engine=base_engine,
                 store=self._evidence_log_store,
             )
-            evidence_frame = aggregator.process_turn(
-                norm_utt, timing_snap, sem_snap, new_change_points=new_cps
-            )
-            inference_state = self._inference_engine.compute_inference(
-                call_sid=call_sid,
-                current_frame=evidence_frame,
-            )
+
+            context_history = []
+            last_timing_snap = None
+            last_sem_snap = None
+            last_evidence_frame = None
+            last_inference_state = None
+
+            for norm_utt in segmented_utts:
+                timing_snap = timing_engine.process_utterance(norm_utt)
+                last_timing_snap = timing_snap
+
+                sem_snap = None
+                try:
+                    sem_snap = await self._semantic_engine.analyze_turn_semantic(
+                        utterance=norm_utt,
+                        context_history=context_history,
+                    )
+                except Exception as exc:
+                    LOGGER.warning("Semantic feature extraction failed in test recording: %s", exc)
+                last_sem_snap = sem_snap
+                context_history.append(norm_utt)
+
+                new_cps = base_engine.update_with_utterance(norm_utt, timing_snap, sem_snap)
+                evidence_frame = aggregator.process_turn(
+                    norm_utt, timing_snap, sem_snap, new_change_points=new_cps
+                )
+                last_evidence_frame = evidence_frame
+
+                inference_state = self._inference_engine.compute_inference(
+                    call_sid=call_sid,
+                    current_frame=evidence_frame,
+                )
+                last_inference_state = inference_state
 
             return {
                 "status": "success",
                 "call_sid": call_sid,
                 "prospect_id": prospect_id,
+                "turns_processed": len(segmented_utts),
+                "is_baseline_locked": base_engine.is_intra_call_locked,
                 "transcript": transcript,
-                "latest_timing": timing_snap.model_dump(),
-                "latest_inference": inference_state.model_dump(),
-                "latest_evidence_frame": evidence_frame.model_dump(),
+                "utterances": [
+                    {
+                        "turn_index": idx + 1,
+                        "text": u.text,
+                        "start_ms": u.start_ms,
+                        "end_ms": u.end_ms,
+                        "words_count": len(u.words),
+                    }
+                    for idx, u in enumerate(segmented_utts)
+                ],
+                "latest_timing": last_timing_snap.model_dump() if last_timing_snap else {},
+                "latest_inference": last_inference_state.model_dump() if last_inference_state else {},
+                "latest_evidence_frame": last_evidence_frame.model_dump() if last_evidence_frame else {},
             }
 
         return app

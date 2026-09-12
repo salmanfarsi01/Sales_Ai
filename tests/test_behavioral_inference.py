@@ -516,3 +516,47 @@ def test_all_dimension_scores_strictly_clamped_under_extreme_signal_stacking(tmp
     assert 0.0 <= inference.overall_confidence <= 1.0
 
     store.close()
+
+
+def test_baseline_sources_honesty_unlocked_is_empty(tmp_path: Path):
+    """Verifies that when baseline is not locked (e.g. 1 turn), baseline_sources is honestly empty []."""
+    db_path = tmp_path / "test_sources_honesty.db"
+    store = SQLiteEvidenceLogStore(db_path=db_path)
+    timing_engine = DeterministicTimingEngine()
+    inference_engine = DownstreamInferenceEngine()
+    base_store = ProspectBaselineStore(store_path=tmp_path / "honesty_baseline.json")
+
+    base_engine = BaselineAndChangePointEngine(
+        call_sid="call_unlocked",
+        prospect_id="prospect_new",
+        store=base_store,
+    )
+    aggregator = MultiWindowAggregator(
+        call_sid="call_unlocked",
+        timing_engine=timing_engine,
+        baseline_engine=base_engine,
+        store=store,
+    )
+
+    utt = normalize_generic_transcript(
+        text="Hello, thanks for calling me today.",
+        speaker_id="client",
+        start_ms=0,
+        end_ms=2000,
+        call_sid="call_unlocked",
+    )
+    t_snap = timing_engine.process_utterance(utt)
+    cps = base_engine.update_with_utterance(utt, t_snap)
+    frame = aggregator.process_turn(utt, t_snap, new_change_points=cps)
+
+    inference = inference_engine.compute_inference(
+        call_sid="call_unlocked",
+        current_frame=frame,
+    )
+
+    # Baseline gate requires >= 3 clean turns; with 1 turn, baseline is not locked
+    assert not base_engine.is_intra_call_locked
+    assert inference.baseline_sources == []
+
+    store.close()
+

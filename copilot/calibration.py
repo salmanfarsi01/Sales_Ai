@@ -570,6 +570,7 @@ class SpeechToTextEngine:
         self.deepgram_api_key = deepgram_api_key or os.getenv("DEEPGRAM_API_KEY")
         self.groq_api_key = groq_api_key or os.getenv("GROQ_API_KEY")
         self.groq_client = Groq(api_key=self.groq_api_key, timeout=15.0) if self.groq_api_key else None
+        self.latest_raw_utterances: list[dict[str, Any]] = []
 
     async def transcribe(self, audio_bytes: bytes, mime_type: str = "audio/webm") -> str:
         """Transcribe user audio to text (convenience wrapper)."""
@@ -577,14 +578,18 @@ class SpeechToTextEngine:
         return transcript
 
     async def transcribe_with_timestamps(
-        self, audio_bytes: bytes, mime_type: str = "audio/webm"
+        self, audio_bytes: bytes, mime_type: str = "audio/webm", utt_split: float = 0.5
     ) -> tuple[str, list[dict[str, Any]]]:
         """Transcribe user audio to text and extract word-level timestamps."""
+        self.latest_raw_utterances = []
         # 1. Deepgram STT (with word timestamps & utterances)
         if self.deepgram_api_key:
             try:
-                LOGGER.info("Transcribing audio via Deepgram with word timestamps...")
-                url = "https://api.deepgram.com/v1/listen?punctuate=true&model=nova-2&language=en&utterances=true"
+                LOGGER.info("Transcribing audio via Deepgram with word timestamps and utt_split=%.2f...", utt_split)
+                url = (
+                    f"https://api.deepgram.com/v1/listen?punctuate=true&model=nova-2&language=en"
+                    f"&utterances=true&utt_split={utt_split}"
+                )
                 headers = {
                     "Authorization": f"Token {self.deepgram_api_key}",
                     "Content-Type": mime_type,
@@ -600,6 +605,7 @@ class SpeechToTextEngine:
                         )
                         transcript = alt.get("transcript", "")
                         words = alt.get("words", [])
+                        self.latest_raw_utterances = data.get("results", {}).get("utterances", [])
                         if transcript.strip():
                             return transcript.strip(), words
             except Exception as exc:

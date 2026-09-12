@@ -253,24 +253,30 @@ class DownstreamInferenceEngine:
             if (w_curr and w_curr.semantic_features)
             else (w_10s.semantic_features if w_10s else None)
         )
-        if sem_curr is not None:
-            if sem_curr.boundary_score > 0.0:
+        # Emotion / Tension considers evidence in local horizons (last_5_10s, last_20_30s)
+        sem_emotion = (
+            w_30s.semantic_features
+            if (w_30s and w_30s.semantic_features)
+            else sem_curr
+        )
+        if sem_emotion is not None:
+            if sem_emotion.boundary_score > 0.0:
                 tension_level += self.config.emotion_boundary_tension_boost
                 valence -= self.config.emotion_boundary_valence_penalty
                 emotion_signals.append("Hard boundary / stop-contact marker")
-            if sem_curr.recurrence_type in ("same_objection_repeated", "concern_after_failed_reframe"):
+            if sem_emotion.recurrence_type in ("same_objection_repeated", "concern_after_failed_reframe"):
                 tension_level += self.config.emotion_recurrence_tension_boost
                 valence -= self.config.emotion_recurrence_valence_penalty
-                emotion_signals.append(f"Recurrent concern ({sem_curr.recurrence_type})")
-                if sem_curr.recurrence_type == "concern_after_failed_reframe":
+                emotion_signals.append(f"Recurrent concern ({sem_emotion.recurrence_type})")
+                if sem_emotion.recurrence_type == "concern_after_failed_reframe":
                     tension_level += self.config.emotion_failed_reframe_tension_boost
                     valence -= self.config.emotion_failed_reframe_valence_penalty
                     emotion_signals.append("Prospect repeated concern following failed rep reframe attempt")
-            if sem_curr.agreement_score >= 0.70:
+            if sem_emotion.agreement_score >= 0.70:
                 valence += self.config.emotion_substantive_agreement_valence_boost
                 tension_level = max(0.05, tension_level - self.config.emotion_substantive_agreement_tension_relief)
-                emotion_signals.append(f"Substantive agreement ({sem_curr.agreement_score:.2f})")
-            elif sem_curr.agreement_score >= 0.30:
+                emotion_signals.append(f"Substantive agreement ({sem_emotion.agreement_score:.2f})")
+            elif sem_emotion.agreement_score >= 0.30:
                 valence += self.config.emotion_polite_agreement_valence_boost
                 emotion_signals.append("Polite acknowledgment agreement")
 
@@ -310,9 +316,14 @@ class DownstreamInferenceEngine:
             eng_score += self.config.engagement_steady_inquiry_boost
             eng_drivers.append(f"Steady inquiry rate ({q_rate:.1f} questions/min)")
 
-        if sem_curr is not None and sem_curr.specificity_score >= 0.50:
+        sem_eng = (
+            w_60s.semantic_features
+            if (w_60s and w_60s.semantic_features)
+            else sem_curr
+        )
+        if sem_eng is not None and sem_eng.specificity_score >= 0.50:
             eng_score += self.config.engagement_specificity_boost
-            eng_drivers.append(f"Specific details and facts provided (score: {sem_curr.specificity_score:.2f})")
+            eng_drivers.append(f"Specific details and facts provided (score: {sem_eng.specificity_score:.2f})")
 
         eng_score = max(self.config.score_floor_active, min(self.config.score_ceiling, round(eng_score, 2)))
         engagement = DimensionScore(
@@ -329,17 +340,22 @@ class DownstreamInferenceEngine:
         trust_drivers: List[str] = []
         trust_score = self.config.trust_base_score
 
-        if sem_curr is not None:
-            if sem_curr.boundary_score > 0.0:
+        sem_trust = (
+            w_60s.semantic_features
+            if (w_60s and w_60s.semantic_features)
+            else (w_full.semantic_features if w_full else sem_curr)
+        )
+        if sem_trust is not None:
+            if sem_trust.boundary_score > 0.0:
                 trust_score -= self.config.trust_boundary_penalty
                 trust_drivers.append("Boundary statement suppresses trust")
-            if sem_curr.recurrence_type == "positive_echo":
+            if sem_trust.recurrence_type == "positive_echo":
                 trust_score += self.config.trust_positive_echo_boost
                 trust_drivers.append("Client echoes rep strategic framing")
-            elif sem_curr.recurrence_type in ("same_objection_repeated", "concern_after_failed_reframe"):
+            elif sem_trust.recurrence_type in ("same_objection_repeated", "concern_after_failed_reframe"):
                 trust_score -= self.config.trust_unresolved_objection_penalty
-                trust_drivers.append(f"Unresolved objection recurrence ({sem_curr.recurrence_type})")
-            if sem_curr.agreement_score >= 0.70:
+                trust_drivers.append(f"Unresolved objection recurrence ({sem_trust.recurrence_type})")
+            if sem_trust.agreement_score >= 0.70:
                 trust_score += self.config.trust_substantive_agreement_boost
                 trust_drivers.append("Substantive alignment on strategic points")
 
@@ -457,15 +473,16 @@ class DownstreamInferenceEngine:
             if eid not in all_evidence_ids:
                 all_evidence_ids.append(eid)
 
-        # Collect unique baseline sources from change points
+        # Collect unique baseline sources from change points and active deviations
         baseline_sources: List[str] = []
         for f in frames:
             for snap in f.windows.values():
                 for cp in snap.change_points:
-                    if cp.baseline_source not in baseline_sources:
+                    if cp.baseline_source and cp.baseline_source not in baseline_sources:
                         baseline_sources.append(cp.baseline_source)
-        if not baseline_sources:
-            baseline_sources = ["intra_call"]
+                for dev in snap.deviations:
+                    if dev.is_measured and dev.baseline_source and dev.baseline_source not in baseline_sources:
+                        baseline_sources.append(dev.baseline_source)
 
         acoustic_flag: Literal["unavailable", "available"] = (
             "available" if self.acoustic_provider.is_available() else "unavailable"

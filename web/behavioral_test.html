@@ -204,6 +204,14 @@
     border: 1px solid var(--border);
     color: var(--text-muted);
     background: #FFFFFF;
+    margin-right: 8px;
+    margin-bottom: 8px;
+  }
+  .badges-wrap {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 8px;
     margin-bottom: 24px;
   }
   .badge .light {
@@ -217,6 +225,12 @@
     color: var(--accent);
     border-color: var(--accent-border);
     background: var(--accent-dim);
+  }
+  .badge.warn .light { background: var(--warn); }
+  .badge.warn {
+    color: var(--warn);
+    border-color: var(--warn-border);
+    background: var(--warn-dim);
   }
 
   .json-box {
@@ -262,7 +276,7 @@
     <p class="section-title">Call setup</p>
     <div class="field">
       <label for="apiEndpoint">Analyze endpoint</label>
-      <input id="apiEndpoint" class="mono" value="http://localhost:5002/api/test/analyze-recording">
+      <input id="apiEndpoint" class="mono" value="/api/test/analyze-recording">
     </div>
     <div class="field">
       <label for="prospectId">Prospect ID</label>
@@ -343,7 +357,13 @@ function updateTimer() {
 
 async function handleStop() {
   const blob = new Blob(chunks, { type: 'audio/webm' });
-  const endpoint = document.getElementById('apiEndpoint').value.trim();
+  let endpoint = document.getElementById('apiEndpoint').value.trim();
+  if (!endpoint) endpoint = '/api/test/analyze-recording';
+  if (!endpoint.startsWith('http://') && !endpoint.startsWith('https://')) {
+    if (window.location.protocol === 'file:') {
+      endpoint = 'http://127.0.0.1:5002' + (endpoint.startsWith('/') ? endpoint : '/' + endpoint);
+    }
+  }
 
   const formData = new FormData();
   formData.append('audio', blob, 'recording.webm');
@@ -367,8 +387,17 @@ function showError(msg) {
 }
 
 function renderResults(data) {
-  // Adjust these key paths to match your actual DownstreamInferenceState shape.
   const inf = data.latest_inference || data.inference || data;
+  const frame = data.latest_evidence_frame || {};
+  const currentUttSnap = (frame.windows && frame.windows.current_utterance) || {};
+  const semSnap = currentUttSnap.semantic_features || {};
+  const extractionMode = semSnap.extraction_mode || 'unknown';
+  const isLlm = extractionMode === 'llm';
+  const turnsCount = data.turns_processed || (data.utterances ? data.utterances.length : 1);
+  const baselineLocked = data.is_baseline_locked ?? (inf.baseline_sources && inf.baseline_sources.length > 0);
+  const baselineSources = inf.baseline_sources || [];
+  const baselineSourceText = baselineSources.length > 0 ? baselineSources.join(', ') : 'intra-call';
+
   const dims = [
     ['Trust', inf.trust],
     ['Pacing', inf.pacing],
@@ -379,10 +408,68 @@ function renderResults(data) {
 
   const acousticUnavailable = (inf.acoustic_evidence || 'unavailable') === 'unavailable';
 
-  let html = `<p class="section-title">Behavioral inference</p>`;
-  html += `<div class="badge ${acousticUnavailable ? '' : 'on'}"><span class="light"></span>
-            acoustic evidence: ${inf.acoustic_evidence || 'unavailable'}</div>`;
+  let html = '';
+  if (data.transcript) {
+    html += `
+      <p class="section-title">Full Transcript</p>
+      <div style="background: var(--surface); border: 1px solid var(--border); border-radius: 8px; padding: 14px 16px; margin-bottom: 20px; font-size: 14px; color: var(--text); font-style: italic;">
+        “${escapeHtml(data.transcript)}”
+      </div>`;
+  }
 
+  if (data.utterances && data.utterances.length > 1) {
+    html += `
+      <p class="section-title">Segmented Turns (${data.utterances.length})</p>
+      <div style="background: var(--surface); border: 1px solid var(--border); border-radius: 8px; padding: 10px 14px; margin-bottom: 20px; font-size: 13px;">`;
+    data.utterances.forEach(u => {
+      const s = (u.start_ms / 1000).toFixed(1);
+      const e = (u.end_ms / 1000).toFixed(1);
+      html += `
+        <div style="padding: 6px 0; border-bottom: 1px solid var(--border-light); display: flex; justify-content: space-between; gap: 12px;">
+          <span><strong style="color: var(--accent);">Turn ${u.turn_index}:</strong> “${escapeHtml(u.text)}”</span>
+          <span class="mono" style="color: var(--text-muted); font-size: 11.5px; white-space: nowrap;">${s}s - ${e}s</span>
+        </div>`;
+    });
+    html += `</div>`;
+  }
+
+  let baselineText = 'calibrating';
+  if (baselineLocked) {
+    baselineText = `locked (${baselineSourceText})`;
+  } else if (data.calibration_progress) {
+    const cp = data.calibration_progress;
+    if (cp.elapsed_sec < cp.target_sec) {
+      baselineText = `calibrating (${cp.elapsed_sec}s/${cp.target_sec}s elapsed)`;
+    } else if (cp.turn_count < cp.target_turns) {
+      baselineText = `calibrating (turn ${cp.turn_count}/${cp.target_turns})`;
+    } else if (cp.total_words < cp.target_words) {
+      baselineText = `calibrating (${cp.total_words}/${cp.target_words} words)`;
+    }
+  } else {
+    baselineText = `calibrating (turn ${data.turn_index || turnsCount}/3)`;
+  }
+
+  html += `<p class="section-title">Engine Status & Evidence</p>
+    <div class="badges-wrap">
+      <div class="badge ${isLlm ? 'on' : 'warn'}">
+        <span class="light"></span>
+        extraction: ${extractionMode}
+      </div>
+      <div class="badge ${baselineLocked ? 'on' : ''}">
+        <span class="light"></span>
+        baseline: ${baselineText}
+      </div>
+      <div class="badge ${turnsCount >= 1 ? 'on' : ''}">
+        <span class="light"></span>
+        processed: ${turnsCount} turn(s)
+      </div>
+      <div class="badge ${acousticUnavailable ? '' : 'on'}">
+        <span class="light"></span>
+        acoustic evidence: ${inf.acoustic_evidence || 'unavailable'}
+      </div>
+    </div>`;
+
+  html += `<p class="section-title">Behavioral Inference</p>`;
   dims.forEach(([label, d]) => {
     if (!d) return;
     const score = Math.round((d.score ?? 0) * 100);

@@ -258,3 +258,119 @@ def detect_turn_events(
     )
 
     return events
+
+
+def segment_audio_transcript_turns(
+    words_raw: List[Dict[str, Any]],
+    transcript: str = "",
+    call_sid: str = "",
+    speaker_id: Literal["salesperson", "client"] = "client",
+    raw_utterances: Optional[List[Dict[str, Any]]] = None,
+    min_pause_split_ms: int = 500,
+) -> List[NormalizedUtterance]:
+    """Segments batch audio transcription into distinct sequential NormalizedUtterance turns.
+    Uses Deepgram's pre-segmented utterances if present (>1), or segments word timestamps
+    whenever adjacent words have a silence gap >= min_pause_split_ms (or sentence boundary + >=400ms).
+    """
+    # 1. If Deepgram returned multiple pre-segmented utterances
+    if raw_utterances and len(raw_utterances) > 1:
+        segmented: List[NormalizedUtterance] = []
+        for u in raw_utterances:
+            u_text = (u.get("transcript") or "").strip()
+            if not u_text:
+                continue
+            u_words_raw = u.get("words", [])
+            norm_words = []
+            for w in u_words_raw:
+                w_text = w.get("punctuated_word") or w.get("word", "")
+                w_start = int(round(float(w.get("start", 0.0)) * 1000))
+                w_end = int(round(float(w.get("end", 0.0)) * 1000))
+                norm_words.append(
+                    NormalizedWord(
+                        word=w.get("word") or w_text,
+                        start_ms=w_start,
+                        end_ms=max(w_start, w_end),
+                        confidence=float(w.get("confidence", 0.95)),
+                        punctuated_word=w_text,
+                    )
+                )
+            u_start = norm_words[0].start_ms if norm_words else int(round(float(u.get("start", 0.0)) * 1000))
+            u_end = norm_words[-1].end_ms if norm_words else int(round(float(u.get("end", 0.0)) * 1000))
+            segmented.append(
+                NormalizedUtterance(
+                    call_sid=call_sid,
+                    speaker_id=speaker_id,
+                    text=u_text,
+                    start_ms=u_start,
+                    end_ms=max(u_start + 100, u_end),
+                    asr_confidence=float(u.get("confidence", 0.95)),
+                    words=norm_words,
+                )
+            )
+        if segmented:
+            return segmented
+
+    # 2. Fallback / Word Timestamp Segmentation
+    norm_words_all = []
+    for w in (words_raw or []):
+        w_text = w.get("punctuated_word") or w.get("word", "")
+        w_start = int(round(float(w.get("start", 0.0)) * 1000))
+        w_end = int(round(float(w.get("end", 0.0)) * 1000))
+        norm_words_all.append(
+            NormalizedWord(
+                word=w.get("word") or w_text,
+                start_ms=w_start,
+                end_ms=max(w_start, w_end),
+                confidence=float(w.get("confidence", 0.95)),
+                punctuated_word=w_text,
+            )
+        )
+
+    if not norm_words_all:
+        clean_text = transcript.strip() if transcript else "I see, thanks."
+        return [
+            NormalizedUtterance(
+                call_sid=call_sid,
+                speaker_id=speaker_id,
+                text=clean_text,
+                start_ms=0,
+                end_ms=max(1000, len(clean_text.split()) * 300),
+                words=[],
+                is_estimated_timing=True,
+            )
+        ]
+
+    chunks: List[List[NormalizedWord]] = []
+    current_chunk: List[NormalizedWord] = [norm_words_all[0]]
+
+    for i in range(len(norm_words_all) - 1):
+        w_curr = norm_words_all[i]
+        w_next = norm_words_all[i + 1]
+        gap_ms = w_next.start_ms - w_curr.end_ms
+        punc = w_curr.punctuated_word or w_curr.word
+        ends_sentence = any(punc.rstrip().endswith(ch) for ch in [".", "?", "!"])
+
+        if gap_ms >= min_pause_split_ms or (ends_sentence and gap_ms >= 400):
+            chunks.append(current_chunk)
+            current_chunk = [w_next]
+        else:
+            current_chunk.append(w_next)
+
+    if current_chunk:
+        chunks.append(current_chunk)
+
+    segmented: List[NormalizedUtterance] = []
+    for chunk in chunks:
+        chunk_text = " ".join(w.punctuated_word or w.word for w in chunk).strip()
+        segmented.append(
+            NormalizedUtterance(
+                call_sid=call_sid,
+                speaker_id=speaker_id,
+                text=chunk_text,
+                start_ms=chunk[0].start_ms,
+                end_ms=max(chunk[0].start_ms + 100, chunk[-1].end_ms),
+                words=chunk,
+                asr_confidence=sum(w.confidence for w in chunk) / len(chunk),
+            )
+        )
+    return segmented

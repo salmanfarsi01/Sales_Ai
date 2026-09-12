@@ -29,6 +29,14 @@ CONFIDENCE_BY_FEATURE: Dict[str, Dict[str, float]] = {
         "question_type": 0.70,
         "agreement": 0.65,
     },
+    "heuristic_bypass": {
+        "boundary": 0.95,        # Evaluated via deterministic compliance regex
+        "recurrence": 0.80,      # Evaluated via deterministic recurrence engine
+        "agreement": 0.65,       # Evaluated via polite agreement regex
+        "question_type": 0.70,   # Evaluated via syntax/question mark absence
+        "specificity": 0.50,     # Bypassed/unmeasured: neutral prior, not evaluated by LLM
+        "future_language": 0.50, # Bypassed/unmeasured: neutral prior, not evaluated by LLM
+    },
 }
 
 
@@ -36,7 +44,7 @@ class SemanticFeatureSnapshot(BaseModel):
     utterance_id: str
     call_sid: str
     speaker_id: Literal["salesperson", "client"]
-    extraction_mode: Literal["llm", "heuristic_timeout", "heuristic_error", "heuristic_offline"] = "llm"
+    extraction_mode: Literal["llm", "heuristic_timeout", "heuristic_error", "heuristic_offline", "mixed"] = "llm"
     recurrence_id: Optional[str] = None
     recurrence_type: Literal[
         "same_objection_repeated",
@@ -87,9 +95,13 @@ STOP_CONTACT_PATTERNS = [
 SPECIFICITY_PATTERNS = [
     r"\$\s*\d+[\d,]*(\.\d+)?\s*(k|m|million|thousand)?\b",
     r"\b\d+[\d,]*\s*(percent|%)\b",
-    r"\b\d+\s*(bed|bedroom|bath|bathroom|sqft|square\s+feet|days|months|weeks|years)\b",
+    r"\b(one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve|\d+)\s+(day|days|week|weeks|month|months|year|years)(\s+old)?\b",
+    r"\b(last|next|past|this)\s+(month|week|year|weekend|quarter|summer|spring|winter|fall|january|february|march|april|may|june|july|august|september|october|november|december)\b",
+    r"\b(one|two|three|four|five|six|\d+)\s+(bed|bedroom|bedrooms|bath|baths|bathroom|bathrooms|sqft|square\s+feet)\b",
     r"\b(january|february|march|april|may|june|july|august|september|october|november|december)\b",
     r"\b(monday|tuesday|wednesday|thursday|friday|saturday|sunday)\b",
+    r"\b\d{1,2}(:\d{2})?\s*(am|pm)\b",
+    r"\b(yesterday|tomorrow|today)\b",
     r"\b(attorney|probate|tenant|landlord|contractor|escrow|appraiser|inspector)\b",
 ]
 
@@ -144,7 +156,7 @@ class SemanticFeatureEngine:
     def __init__(
         self,
         groq_client: Optional[Any] = None,
-        model: str = "llama-3.1-8b-instant",
+        model: str = "qwen/qwen3.6-27b",
         timeout_seconds: float = 1.0,
     ):
         self.groq_client = groq_client
@@ -237,7 +249,8 @@ class SemanticFeatureEngine:
         self,
         utterance: NormalizedUtterance,
         context_history: List[NormalizedUtterance],
-        mode: Literal["heuristic_timeout", "heuristic_error", "heuristic_offline"] = "heuristic_offline",
+        mode: Literal["heuristic_timeout", "heuristic_error", "heuristic_offline", "mixed"] = "heuristic_offline",
+        is_bypass: bool = False,
     ) -> SemanticFeatureSnapshot:
         text = utterance.text.strip()
         lower_text = text.lower()
@@ -274,7 +287,9 @@ class SemanticFeatureEngine:
         elif any(re.search(pat, lower_text) for pat in POLITE_AGREEMENT_PATTERNS):
             agreement_score = 0.30
 
-        conf = CONFIDENCE_BY_FEATURE["heuristic"]
+        conf_profile = "heuristic_bypass" if is_bypass else "heuristic"
+        conf = CONFIDENCE_BY_FEATURE[conf_profile]
+        sem_conf = round(min(conf.values()), 2) if is_bypass else 0.80
 
         return SemanticFeatureSnapshot(
             utterance_id=utterance.utterance_id,
@@ -297,7 +312,7 @@ class SemanticFeatureEngine:
             specificity_confidence=conf["specificity"],
             future_language_confidence=conf["future_language"],
             agreement_confidence=conf["agreement"],
-            semantic_confidence=0.80,
+            semantic_confidence=sem_conf,
         )
 
     async def analyze_turn_semantic(
@@ -318,6 +333,16 @@ class SemanticFeatureEngine:
             if call_metadata and call_metadata.semantic_timeout_sec is not None
             else self.timeout_seconds
         )
+
+        # Short fragment fast-path:
+        # Avoid firing an expensive/slow LLM call on 1-2 word breathing fragments or simple nods (e.g., "case.", "So", "yeah")
+        # unless they contain explicit boundary language or terminal question marks.
+        words = utterance.text.strip().split()
+        is_short_fragment = len(words) < 3 and not utterance.text.strip().endswith("?")
+        if is_short_fragment and boundary_score == 0.0 and rec_type == "none":
+            return self.analyze_deterministic_heuristic(
+                utterance, context_history, mode="heuristic_offline", is_bypass=True
+            )
 
         api_key_groq = os.getenv("GROQ_API_KEY")
         if not api_key_groq or api_key_groq.startswith("mock_"):
@@ -347,12 +372,15 @@ class SemanticFeatureEngine:
                 client = groq.Groq(api_key=api_key_groq, timeout=timeout)
 
             def _call_groq():
-                resp = client.chat.completions.create(
-                    model=self.model,
-                    messages=[{"role": "user", "content": prompt}],
-                    temperature=0.1,
-                    max_tokens=120,
-                )
+                kwargs = {
+                    "model": self.model,
+                    "messages": [{"role": "user", "content": prompt}],
+                    "temperature": 0.1,
+                    "max_tokens": 150,
+                }
+                if "qwen" in self.model.lower():
+                    kwargs["reasoning_effort"] = "none"
+                resp = client.chat.completions.create(**kwargs)
                 return resp.choices[0].message.content.strip()
 
             raw_resp = await asyncio.wait_for(
@@ -393,12 +421,12 @@ class SemanticFeatureEngine:
                 semantic_confidence=0.95,
             )
         except asyncio.TimeoutError:
-            LOGGER.debug("Semantic LLM extraction timed out after %.2fs; falling back to heuristic", timeout)
+            LOGGER.warning("Semantic LLM extraction timed out after %.2fs; falling back to heuristic", timeout)
             return self.analyze_deterministic_heuristic(
                 utterance, context_history, mode="heuristic_timeout"
             )
         except Exception as exc:
-            LOGGER.debug("Semantic LLM extraction failed (%s); falling back to heuristic", exc)
+            LOGGER.warning("Semantic LLM extraction failed (%s); falling back to heuristic", exc)
             return self.analyze_deterministic_heuristic(
                 utterance, context_history, mode="heuristic_error"
             )
