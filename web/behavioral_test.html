@@ -1257,6 +1257,9 @@ function renderResults(data) {
       const boundClass = t.boundary_score >= 0.8 ? 'color:#C93B2B; font-weight:700;' : '';
       const recText = t.recurrence_type && t.recurrence_type !== 'none' ? `${t.recurrence_type} (${t.recurrence_count})` : '—';
       const qText = t.question_type && t.question_type !== 'none' ? t.question_type : '—';
+      const pauseText = (t.avg_pause_duration_ms !== null && t.avg_pause_duration_ms !== undefined && t.avg_pause_duration_ms > 0)
+        ? `${Math.round(t.avg_pause_duration_ms)}ms`
+        : '0';
       let latText = '—';
       let latColor = 'var(--text-muted)';
       if (t.response_latency_ms !== null && t.response_latency_ms !== undefined) {
