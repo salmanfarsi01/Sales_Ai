@@ -202,7 +202,7 @@ class SQLiteEvidenceLogStore(EvidenceLogStore):
             with self._conn:
                 self._conn.execute(
                     """
-                    INSERT INTO evidence_frames (frame_id, call_sid, timestamp_ms, frame_json)
+                    INSERT OR REPLACE INTO evidence_frames (frame_id, call_sid, timestamp_ms, frame_json)
                     VALUES (?, ?, ?, ?)
                     """,
                     (frame.frame_id, frame.call_sid, frame.timestamp_ms, frame.model_dump_json()),
@@ -210,7 +210,7 @@ class SQLiteEvidenceLogStore(EvidenceLogStore):
                 for horizon, snapshot in frame.windows.items():
                     self._conn.execute(
                         """
-                        INSERT INTO evidence_snapshots (evidence_id, frame_id, call_sid, timestamp_ms, horizon, snapshot_json)
+                        INSERT OR REPLACE INTO evidence_snapshots (evidence_id, frame_id, call_sid, timestamp_ms, horizon, snapshot_json)
                         VALUES (?, ?, ?, ?, ?, ?)
                         """,
                         (

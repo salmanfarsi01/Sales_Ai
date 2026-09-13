@@ -235,84 +235,93 @@ async def analyze_two_tracks(
     transcribes them separately with diarization disabled, merges them onto a synchronized
     chronological timeline, and runs the full behavioral pipeline with isolated per-speaker baselines.
     """
-    agent_bytes = await agent_audio.read()
-    prospect_bytes = await prospect_audio.read()
+    try:
+        agent_bytes = await agent_audio.read()
+        prospect_bytes = await prospect_audio.read()
 
-    if not agent_bytes and not prospect_bytes:
-        raise HTTPException(status_code=400, detail="Both audio tracks are empty")
+        if not agent_bytes and not prospect_bytes:
+            raise HTTPException(status_code=400, detail="Both audio tracks are empty")
 
-    active_call_sid = call_sid or f"call_{uuid.uuid4().hex[:8]}"
-    session = get_or_create_session(prospect_id, active_call_sid)
-    session["baseline_engine"].agent_id = agent_id
+        active_call_sid = call_sid or f"call_{uuid.uuid4().hex[:8]}"
+        session = get_or_create_session(prospect_id, active_call_sid)
+        session["baseline_engine"].agent_id = agent_id
 
-    stt = SpeechToTextEngine(
-        deepgram_api_key=os.getenv("DEEPGRAM_API_KEY"),
-        groq_api_key=os.getenv("GROQ_API_KEY"),
-    )
-
-    agent_segmented: List[NormalizedUtterance] = []
-    if agent_bytes:
-        agent_mime = agent_audio.content_type or "audio/webm"
-        LOGGER.info("Transcribing Agent track (single-speaker): %d bytes (%s)...", len(agent_bytes), agent_mime)
-        agent_transcript, agent_words = await stt.transcribe_with_timestamps(
-            agent_bytes, mime_type=agent_mime, utt_split=0.5, diarize=False
-        )
-        agent_raw_utts = getattr(stt, "latest_raw_utterances", None) or []
-        agent_segmented = segment_audio_transcript_turns(
-            words_raw=agent_words,
-            transcript=agent_transcript or "",
-            call_sid=active_call_sid,
-            speaker_id="salesperson",
-            raw_utterances=agent_raw_utts,
-            min_pause_split_ms=500,
-            enforce_single_speaker=True,
+        stt = SpeechToTextEngine(
+            deepgram_api_key=os.getenv("DEEPGRAM_API_KEY"),
+            groq_api_key=os.getenv("GROQ_API_KEY"),
         )
 
-    prospect_segmented: List[NormalizedUtterance] = []
-    if prospect_bytes:
-        prospect_mime = prospect_audio.content_type or "audio/webm"
-        LOGGER.info("Transcribing Prospect track (single-speaker): %d bytes (%s)...", len(prospect_bytes), prospect_mime)
-        prospect_transcript, prospect_words = await stt.transcribe_with_timestamps(
-            prospect_bytes, mime_type=prospect_mime, utt_split=0.5, diarize=False
+        agent_segmented: List[NormalizedUtterance] = []
+        if agent_bytes:
+            agent_mime = agent_audio.content_type or "audio/webm"
+            LOGGER.info("Transcribing Agent track (single-speaker): %d bytes (%s)...", len(agent_bytes), agent_mime)
+            agent_transcript, agent_words = await stt.transcribe_with_timestamps(
+                agent_bytes, mime_type=agent_mime, utt_split=0.5, diarize=False
+            )
+            agent_raw_utts = getattr(stt, "latest_raw_utterances", None) or []
+            agent_segmented = segment_audio_transcript_turns(
+                words_raw=agent_words,
+                transcript=agent_transcript or "",
+                call_sid=active_call_sid,
+                speaker_id="salesperson",
+                raw_utterances=agent_raw_utts,
+                min_pause_split_ms=500,
+                enforce_single_speaker=True,
+            )
+
+        prospect_segmented: List[NormalizedUtterance] = []
+        if prospect_bytes:
+            prospect_mime = prospect_audio.content_type or "audio/webm"
+            LOGGER.info("Transcribing Prospect track (single-speaker): %d bytes (%s)...", len(prospect_bytes), prospect_mime)
+            prospect_transcript, prospect_words = await stt.transcribe_with_timestamps(
+                prospect_bytes, mime_type=prospect_mime, utt_split=0.5, diarize=False
+            )
+            prospect_raw_utts = getattr(stt, "latest_raw_utterances", None) or []
+            prospect_segmented = segment_audio_transcript_turns(
+                words_raw=prospect_words,
+                transcript=prospect_transcript or "",
+                call_sid=active_call_sid,
+                speaker_id="client",
+                raw_utterances=prospect_raw_utts,
+                min_pause_split_ms=500,
+                enforce_single_speaker=True,
+            )
+
+        merged_utts = merge_dual_speaker_tracks(
+            agent_utterances=agent_segmented,
+            prospect_utterances=prospect_segmented,
+            agent_start_epoch_ms=agent_start_epoch_ms,
+            prospect_start_epoch_ms=prospect_start_epoch_ms,
+            prospect_offset_ms=prospect_offset_ms,
         )
-        prospect_raw_utts = getattr(stt, "latest_raw_utterances", None) or []
-        prospect_segmented = segment_audio_transcript_turns(
-            words_raw=prospect_words,
-            transcript=prospect_transcript or "",
-            call_sid=active_call_sid,
-            speaker_id="client",
-            raw_utterances=prospect_raw_utts,
-            min_pause_split_ms=500,
-            enforce_single_speaker=True,
+        LOGGER.info(
+            "Merged dual tracks: %d agent turns + %d prospect turns -> %d total chronological turns (offset=%d ms)",
+            len(agent_segmented),
+            len(prospect_segmented),
+            len(merged_utts),
+            prospect_offset_ms,
         )
 
-    merged_utts = merge_dual_speaker_tracks(
-        agent_utterances=agent_segmented,
-        prospect_utterances=prospect_segmented,
-        agent_start_epoch_ms=agent_start_epoch_ms,
-        prospect_start_epoch_ms=prospect_start_epoch_ms,
-        prospect_offset_ms=prospect_offset_ms,
-    )
-    LOGGER.info(
-        "Merged dual tracks: %d agent turns + %d prospect turns -> %d total chronological turns (offset=%d ms)",
-        len(agent_segmented),
-        len(prospect_segmented),
-        len(merged_utts),
-        prospect_offset_ms,
-    )
+        combined_transcript = " ".join(
+            f"[{'Agent' if u.speaker_id == 'salesperson' else 'Prospect'}]: {u.text}"
+            for u in merged_utts
+        )
 
-    combined_transcript = " ".join(
-        f"[{'Agent' if u.speaker_id == 'salesperson' else 'Prospect'}]: {u.text}"
-        for u in merged_utts
-    )
-
-    return await execute_turn_pipeline(
-        segmented_utts=merged_utts,
-        active_call_sid=active_call_sid,
-        prospect_id=prospect_id,
-        transcript=combined_transcript,
-        session=session,
-    )
+        return await execute_turn_pipeline(
+            segmented_utts=merged_utts,
+            active_call_sid=active_call_sid,
+            prospect_id=prospect_id,
+            transcript=combined_transcript,
+            session=session,
+        )
+    except HTTPException:
+        raise
+    except Exception as exc:
+        LOGGER.exception("Dual-track analysis failed: %s", exc)
+        return JSONResponse(
+            status_code=500,
+            content={"status": "error", "detail": f"Dual-track analysis failed: {str(exc)}"},
+        )
 
 
 @app.post("/api/test/reset-session")

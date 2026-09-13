@@ -12,7 +12,7 @@ from .behavioral_normalization import (
 
 class TimingFeatureSnapshot(BaseModel):
     timestamp_ms: int = Field(..., ge=0)
-    window_ms: int = Field(default=60000, ge=1000)
+    window_ms: int = Field(default=60000, ge=0)
     speaker_id: Literal["salesperson", "client"] = Field(...)
     speech_rate_wpm: float = Field(0.0, ge=0.0)
     turn_speech_rate_wpm: float = Field(
