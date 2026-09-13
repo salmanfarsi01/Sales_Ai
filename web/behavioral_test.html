@@ -774,6 +774,7 @@ function renderResults(data) {
               <th>Pace Δ%</th>
               <th>Pause</th>
               <th>Latency</th>
+              <th>Inf Lat</th>
               <th>Question?</th>
               <th>Recurrence</th>
               <th>Boundary</th>
@@ -816,6 +817,10 @@ function renderResults(data) {
         }
       }
 
+      const infLatText = (t.inference_latency_ms !== null && t.inference_latency_ms !== undefined)
+        ? `${t.inference_latency_ms}ms`
+        : '—';
+
       const turnConf = t.turn_confidence !== undefined ? t.turn_confidence : t.semantic_confidence;
       const confPct = Math.round(turnConf * 100);
       const confDriver = t.confidence_driver || (confPct < 95 ? 'Reduced certainty' : 'High confidence');
@@ -838,6 +843,7 @@ function renderResults(data) {
         <td class="mono" style="font-weight:600; color:${paceColor};">${paceDeltaText}</td>
         <td class="mono">${pauseText}</td>
         <td class="mono" style="${latColor}">${latText}</td>
+        <td class="mono" style="font-size:11px; color:var(--text-muted);" title="Per-turn inference compute time">${infLatText}</td>
         <td><span class="mono" style="font-size:11px;">${escapeHtml(qText)}</span></td>
         <td><span class="mono" style="font-size:11px; color:${t.recurrence_type !== 'none' ? '#C93B2B' : 'inherit'}">${escapeHtml(recText)}</span></td>
         <td class="mono" style="${boundClass}">${t.boundary_score.toFixed(1)}</td>
@@ -857,6 +863,7 @@ function renderResults(data) {
         <div>&bull; <strong>Turn WPM</strong>: Instantaneous rate for this specific turn computed as <code>(turn_words / (duration_ms / 60000))</code>.</div>
         <div>&bull; <strong>Base WPM</strong>: Maintained completely independently for Agent vs. Prospect (calibrated once &ge; 60s, &ge; 3 turns, &ge; 15 words).</div>
         <div>&bull; <strong>Latency</strong>: Cross-speaker turnaround time computed from when the previous speaker ended to when current speaker began (pauses &ge; 2000ms highlighted).</div>
+        <div>&bull; <strong>Inf Lat</strong>: Real-time per-turn behavioral engine compute latency (sub-10ms Stage 2 inference), completely isolated from external batch ASR transcription time.</div>
         <div>&bull; <strong>Confidence</strong>: Strict weakest-link minimum of ASR transcription quality, baseline calibration lock, speaker separation certainty, and semantic extraction mode. Hover for driver reason.</div>
         <div>&bull; <strong>Pause</strong>: Intra-turn silence &ge; 250ms calculated strictly from word-level timestamps.</div>
       </div>`;

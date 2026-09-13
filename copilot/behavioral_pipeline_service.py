@@ -134,6 +134,7 @@ async def execute_behavioral_turn_pipeline(
             "baseline_pause_ms": base_pause_ms,
             "pause_delta_pct": pause_delta,
             "response_latency_ms": timing_snap.response_latency_ms,
+            "inference_latency_ms": inference_state.inference_latency_ms,
             "question_type": sem_snap.question_type if sem_snap else "none",
             "recurrence_type": sem_snap.recurrence_type if sem_snap else "none",
             "recurrence_count": sem_snap.recurrence_count if sem_snap else 0,
