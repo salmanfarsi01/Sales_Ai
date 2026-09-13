@@ -214,6 +214,167 @@
     color: var(--text-muted);
   }
 
+  /* Dual-Track Real-time Recording & Setup Styles */
+  .dual-hero-desc {
+    font-size: 12px;
+    color: var(--text-muted);
+    margin: -6px 0 14px;
+    line-height: 1.45;
+  }
+  .setup-box {
+    background: #FFFFFF;
+    border: 1px solid var(--border-light);
+    border-radius: 8px;
+    padding: 12px 14px 8px;
+    margin-bottom: 14px;
+  }
+  .setup-box-title {
+    font-size: 11px;
+    font-weight: 700;
+    color: var(--text-muted);
+    text-transform: uppercase;
+    letter-spacing: 0.6px;
+    margin-bottom: 10px;
+  }
+  .track-card {
+    background: #FAFCFC;
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 12px 14px;
+    margin-bottom: 12px;
+    transition: all 0.2s ease;
+  }
+  .track-card.has-audio {
+    border-color: rgba(14, 173, 171, 0.45);
+    background: #F4FBFB;
+  }
+  .track-card.recording {
+    border-color: rgba(226, 87, 76, 0.55);
+    background: #FDF8F8;
+    box-shadow: 0 0 0 2px rgba(226, 87, 76, 0.15);
+  }
+  .track-card-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: flex-start;
+    margin-bottom: 10px;
+  }
+  .track-title {
+    font-size: 13.5px;
+    font-weight: 600;
+    color: var(--text);
+  }
+  .track-subtitle {
+    font-size: 11.5px;
+    color: var(--text-muted);
+    margin-top: 1px;
+  }
+  .track-recorder-row {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 8px 10px;
+    background: #FFFFFF;
+    border: 1px solid var(--border-light);
+    border-radius: 6px;
+    margin-bottom: 10px;
+  }
+  .mini-record-btn {
+    width: 42px;
+    height: 42px;
+    border-radius: 50%;
+    border: 2px solid var(--accent);
+    background: #FFFFFF;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    flex-shrink: 0;
+    box-shadow: 0 2px 6px rgba(14, 173, 171, 0.12);
+    transition: all 0.15s ease;
+  }
+  .mini-record-btn:hover {
+    background: var(--accent-dim);
+    box-shadow: 0 3px 10px rgba(14, 173, 171, 0.22);
+  }
+  .mini-record-btn .dot {
+    width: 14px;
+    height: 14px;
+    border-radius: 50%;
+    background: var(--accent);
+    transition: all 0.2s ease;
+  }
+  .mini-record-btn.recording {
+    border-color: var(--warn);
+    animation: pulse 1.6s ease-in-out infinite;
+  }
+  .mini-record-btn.recording .dot {
+    background: var(--warn);
+    border-radius: 3px;
+    width: 12px;
+    height: 12px;
+  }
+  .track-meta {
+    flex-grow: 1;
+    min-width: 0;
+  }
+  .track-timer {
+    font-size: 16px;
+    font-weight: 600;
+    color: var(--text);
+    line-height: 1.2;
+  }
+  .track-status {
+    font-size: 11.5px;
+    color: var(--text-muted);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    margin-top: 2px;
+  }
+  .track-status.active {
+    color: var(--warn);
+    font-weight: 600;
+  }
+  .track-status.ready {
+    color: var(--accent);
+    font-weight: 600;
+  }
+  .btn-clear-track {
+    background: #FFFFFF;
+    border: 1px solid var(--border);
+    color: var(--text-muted);
+    border-radius: 4px;
+    padding: 3px 8px;
+    font-size: 11px;
+    cursor: pointer;
+    flex-shrink: 0;
+    transition: all 0.15s ease;
+  }
+  .btn-clear-track:hover {
+    color: var(--warn);
+    border-color: var(--warn);
+    background: #FFF5F5;
+  }
+  .track-upload-alt {
+    font-size: 11.5px;
+    color: var(--text-muted);
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+  }
+  .track-upload-alt input[type="file"] {
+    font-size: 11px;
+    padding: 5px 8px;
+    border: 1px dashed var(--border);
+    background: #FFFFFF;
+    border-radius: 5px;
+    cursor: pointer;
+  }
+  .track-upload-alt input[type="file"]:hover {
+    border-color: var(--accent);
+  }
+
   .section-title {
     font-size: 12px;
     font-weight: 600;
@@ -425,41 +586,103 @@
       </div>
     </div>
 
-    <!-- Mode 2: Dual-Track Audio Upload -->
+    <!-- Mode 2: Dual-Track Audio Upload & Real-Time Recording -->
     <div id="panelDualMode" style="display: none;">
-      <p class="section-title">Dual Single-Speaker Track Sync</p>
-      <div class="field">
-        <label for="agentAudioFile">Agent Audio Track (.wav, .mp3, .webm)</label>
-        <input type="file" id="agentAudioFile" accept="audio/*">
+      <p class="section-title">Dual-track behavioral signal test console</p>
+      <div class="dual-hero-desc">
+        Record Agent and Prospect separately — no file juggling required — then sync and analyze together.
       </div>
-      <div class="field">
-        <label for="prospectAudioFile">Prospect Audio Track (.wav, .mp3, .webm)</label>
-        <input type="file" id="prospectAudioFile" accept="audio/*">
-      </div>
-      <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 8px;">
+
+      <!-- Call setup -->
+      <div class="setup-box">
+        <div class="setup-box-title">Call setup</div>
         <div class="field">
-          <label for="agentId">Agent ID</label>
-          <input id="agentId" type="text" value="test_agent_001">
+          <label for="analyzeEndpoint">Analyze endpoint</label>
+          <input id="analyzeEndpoint" type="text" value="http://localhost:5002/api/test/analyze-two-tracks">
         </div>
-        <div class="field">
-          <label for="dualProspectId">Prospect ID</label>
-          <input id="dualProspectId" type="text" value="test_prospect_001">
+        <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 8px;">
+          <div class="field">
+            <label for="dualCallId">Call ID</label>
+            <input id="dualCallId" type="text" value="test_call_001">
+          </div>
+          <div class="field">
+            <label for="dualProspectId">Prospect ID</label>
+            <input id="dualProspectId" type="text" value="test_prospect_001">
+          </div>
+        </div>
+        <div class="field" style="margin-bottom: 4px;">
+          <label for="prospectOffsetMs" style="display: flex; justify-content: space-between;">
+            <span>Prospect Start Offset (ms)</span>
+          </label>
+          <input id="prospectOffsetMs" type="number" value="0" placeholder="0">
+          <div style="font-size: 11px; color: var(--text-muted); margin-top: 4px; line-height: 1.4;">
+            0 = recorded together. If the Prospect track started later, enter roughly how many milliseconds later (e.g. 2500 for 2.5s). If it started earlier, use a negative number (e.g. -1000).
+          </div>
         </div>
       </div>
-      <div class="field">
-        <label for="prospectOffsetMs" style="display: flex; justify-content: space-between;">
-          <span>Prospect Start Offset (ms)</span>
-          <span style="color: var(--text-muted); font-weight: normal;">0 = simultaneous</span>
-        </label>
-        <input id="prospectOffsetMs" type="number" value="0" placeholder="0 or 2500 or -1000">
-        <div style="font-size: 11px; color: var(--text-muted); margin-top: 4px; line-height: 1.4;">
-          Relative timing offset: how many ms after Agent's recording began did Prospect start? (e.g. <code>0</code> if started together, <code>2500</code> if Prospect started 2.5s later, <code>-1000</code> if Prospect started 1s earlier).
+
+      <!-- Agent Track Card -->
+      <div class="track-card" id="agentCard">
+        <div class="track-card-header">
+          <div>
+            <div class="track-title">Agent Track</div>
+            <div class="track-subtitle">Record the Agent's side of the conversation</div>
+          </div>
+          <span class="badge-speaker agent">Agent</span>
+        </div>
+
+        <div class="track-recorder-row">
+          <button type="button" class="mini-record-btn" id="agentRecordBtn" onclick="toggleRecordTrack('agent')" aria-label="Record Agent" title="Click to start/stop recording Agent">
+            <span class="dot"></span>
+          </button>
+          <div class="track-meta">
+            <div class="track-timer mono" id="agentTimer">00:00</div>
+            <div class="track-status" id="agentStatus">Not recorded yet</div>
+          </div>
+          <audio id="agentAudioPreview" controls style="display:none; height:30px; max-width:140px;"></audio>
+          <button type="button" class="btn-clear-track" id="agentClearBtn" onclick="clearTrack('agent')" style="display:none;" title="Clear recording">✕</button>
+        </div>
+
+        <div class="track-upload-alt">
+          <label for="agentAudioFile">or upload a file instead:</label>
+          <input type="file" id="agentAudioFile" accept="audio/*,.wav,.mp3,.webm" onchange="onFileSelected('agent')">
         </div>
       </div>
-      <button id="btnUploadDual" class="btn-submit" onclick="uploadDualAudio()">
+
+      <!-- Prospect Track Card -->
+      <div class="track-card" id="prospectCard">
+        <div class="track-card-header">
+          <div>
+            <div class="track-title">Prospect Track</div>
+            <div class="track-subtitle">Record the Prospect's side of the conversation</div>
+          </div>
+          <span class="badge-speaker prospect">Prospect</span>
+        </div>
+
+        <div class="track-recorder-row">
+          <button type="button" class="mini-record-btn" id="prospectRecordBtn" onclick="toggleRecordTrack('prospect')" aria-label="Record Prospect" title="Click to start/stop recording Prospect">
+            <span class="dot"></span>
+          </button>
+          <div class="track-meta">
+            <div class="track-timer mono" id="prospectTimer">00:00</div>
+            <div class="track-status" id="prospectStatus">Not recorded yet</div>
+          </div>
+          <audio id="prospectAudioPreview" controls style="display:none; height:30px; max-width:140px;"></audio>
+          <button type="button" class="btn-clear-track" id="prospectClearBtn" onclick="clearTrack('prospect')" style="display:none;" title="Clear recording">✕</button>
+        </div>
+
+        <div class="track-upload-alt">
+          <label for="prospectAudioFile">or upload a file instead:</label>
+          <input type="file" id="prospectAudioFile" accept="audio/*,.wav,.mp3,.webm" onchange="onFileSelected('prospect')">
+        </div>
+      </div>
+
+      <button id="btnUploadDual" class="btn-submit" onclick="uploadDualAudio()" style="margin-top: 6px;">
         Synchronize & Analyze Dual Tracks
       </button>
-      <div class="status-line" id="dualStatusLine" style="margin-top: 10px; text-align: center;">Ready for tracks</div>
+      <div class="status-line" id="dualStatusLine" style="margin-top: 10px; text-align: center;">
+        Record or upload both tracks to enable analysis
+      </div>
     </div>
 
     <div id="errorBox"></div>
@@ -477,6 +700,11 @@
 
 <script>
 let mediaRecorder, chunks = [], startTime, timerInterval, stream;
+
+// Dual-track recording state
+let activeDualRecorder = null; // { role, recorder, chunks, timerInterval, startTime, stream }
+let agentAudioBlob = null;
+let prospectAudioBlob = null;
 
 const recordBtn = document.getElementById('recordBtn');
 const timerEl = document.getElementById('timer');
@@ -601,13 +829,216 @@ async function uploadSingleAudio() {
   }
 }
 
+async function toggleRecordTrack(role) {
+  errorBox.innerHTML = '';
+
+  // If currently recording this track, stop it
+  if (activeDualRecorder && activeDualRecorder.role === role) {
+    activeDualRecorder.recorder.stop();
+    return;
+  }
+
+  // If currently recording the other track, stop that one first
+  if (activeDualRecorder) {
+    activeDualRecorder.recorder.stop();
+  }
+
+  // Also stop single-mic recorder if active
+  if (mediaRecorder && mediaRecorder.state === 'recording') {
+    stopRecording();
+  }
+
+  let micStream;
+  try {
+    micStream = await navigator.mediaDevices.getUserMedia({ audio: true });
+  } catch (err) {
+    showError(`Microphone access denied or unavailable for ${role === 'agent' ? 'Agent' : 'Prospect'}: ${err.message}`);
+    return;
+  }
+
+  const chunksArr = [];
+  const mimeType = MediaRecorder.isTypeSupported('audio/webm;codecs=opus')
+    ? 'audio/webm;codecs=opus'
+    : (MediaRecorder.isTypeSupported('audio/webm') ? 'audio/webm' : '');
+
+  const rec = mimeType ? new MediaRecorder(micStream, { mimeType }) : new MediaRecorder(micStream);
+  rec.ondataavailable = e => {
+    if (e.data && e.data.size > 0) chunksArr.push(e.data);
+  };
+
+  const recStartTime = Date.now();
+  const btn = document.getElementById(`${role}RecordBtn`);
+  const timer = document.getElementById(`${role}Timer`);
+  const status = document.getElementById(`${role}Status`);
+  const card = document.getElementById(`${role}Card`);
+
+  btn.classList.add('recording');
+  btn.setAttribute('aria-label', `Stop recording ${role}`);
+  card.classList.add('recording');
+  card.classList.remove('has-audio');
+  status.className = 'track-status active';
+  status.textContent = `Recording ${role === 'agent' ? 'Agent' : 'Prospect'}... click button to stop`;
+
+  const recInterval = setInterval(() => {
+    const elapsed = Math.floor((Date.now() - recStartTime) / 1000);
+    const m = String(Math.floor(elapsed / 60)).padStart(2, '0');
+    const s = String(elapsed % 60).padStart(2, '0');
+    timer.textContent = `${m}:${s}`;
+  }, 250);
+
+  rec.onstop = () => {
+    clearInterval(recInterval);
+    micStream.getTracks().forEach(t => t.stop());
+    btn.classList.remove('recording');
+    btn.setAttribute('aria-label', `Record ${role}`);
+    card.classList.remove('recording');
+
+    const finalBlob = new Blob(chunksArr, { type: rec.mimeType || 'audio/webm' });
+    const durSec = Math.max(0.5, ((Date.now() - recStartTime) / 1000)).toFixed(1);
+
+    if (role === 'agent') {
+      agentAudioBlob = finalBlob;
+    } else {
+      prospectAudioBlob = finalBlob;
+    }
+
+    card.classList.add('has-audio');
+    status.className = 'track-status ready';
+    status.textContent = `Recorded (${durSec}s) ✅`;
+
+    const audioEl = document.getElementById(`${role}AudioPreview`);
+    if (audioEl) {
+      audioEl.src = URL.createObjectURL(finalBlob);
+      audioEl.style.display = 'block';
+    }
+
+    const clearBtn = document.getElementById(`${role}ClearBtn`);
+    if (clearBtn) clearBtn.style.display = 'inline-block';
+
+    // Clear file input if a recording was made
+    const fileInput = document.getElementById(`${role}AudioFile`);
+    if (fileInput) fileInput.value = '';
+
+    activeDualRecorder = null;
+    updateDualSubmitState();
+  };
+
+  activeDualRecorder = {
+    role,
+    recorder: rec,
+    chunks: chunksArr,
+    timerInterval: recInterval,
+    startTime: recStartTime,
+    stream: micStream,
+  };
+  rec.start(100);
+}
+
+function clearTrack(role) {
+  if (role === 'agent') {
+    agentAudioBlob = null;
+    document.getElementById('agentAudioFile').value = '';
+  } else {
+    prospectAudioBlob = null;
+    document.getElementById('prospectAudioFile').value = '';
+  }
+  const card = document.getElementById(`${role}Card`);
+  if (card) card.classList.remove('has-audio', 'recording');
+  const timer = document.getElementById(`${role}Timer`);
+  if (timer) timer.textContent = '00:00';
+  const status = document.getElementById(`${role}Status`);
+  if (status) {
+    status.className = 'track-status';
+    status.textContent = 'Not recorded yet';
+  }
+  const audioEl = document.getElementById(`${role}AudioPreview`);
+  if (audioEl) {
+    audioEl.pause();
+    audioEl.src = '';
+    audioEl.style.display = 'none';
+  }
+  const clearBtn = document.getElementById(`${role}ClearBtn`);
+  if (clearBtn) clearBtn.style.display = 'none';
+
+  updateDualSubmitState();
+}
+
+function onFileSelected(role) {
+  const fileInput = document.getElementById(`${role}AudioFile`);
+  const file = fileInput && fileInput.files && fileInput.files[0];
+  const card = document.getElementById(`${role}Card`);
+  const status = document.getElementById(`${role}Status`);
+  const audioEl = document.getElementById(`${role}AudioPreview`);
+  const clearBtn = document.getElementById(`${role}ClearBtn`);
+
+  if (file) {
+    if (role === 'agent') agentAudioBlob = null;
+    else prospectAudioBlob = null;
+
+    if (card) card.classList.add('has-audio');
+    if (status) {
+      status.className = 'track-status ready';
+      status.textContent = `File: ${file.name} ✅`;
+    }
+    if (audioEl) {
+      audioEl.src = URL.createObjectURL(file);
+      audioEl.style.display = 'block';
+    }
+    if (clearBtn) clearBtn.style.display = 'inline-block';
+  }
+  updateDualSubmitState();
+}
+
+function updateDualSubmitState() {
+  const agentFile = document.getElementById('agentAudioFile') ? document.getElementById('agentAudioFile').files[0] : null;
+  const prospectFile = document.getElementById('prospectAudioFile') ? document.getElementById('prospectAudioFile').files[0] : null;
+
+  const hasAgent = !!agentAudioBlob || !!agentFile;
+  const hasProspect = !!prospectAudioBlob || !!prospectFile;
+
+  const btn = document.getElementById('btnUploadDual');
+  const status = document.getElementById('dualStatusLine');
+  if (!btn || !status) return;
+
+  if (hasAgent && hasProspect) {
+    btn.disabled = false;
+    btn.textContent = 'Synchronize & Analyze Dual Tracks';
+    status.textContent = 'Both tracks ready for synchronization';
+    status.style.color = 'var(--accent)';
+  } else {
+    btn.textContent = 'Synchronize & Analyze Dual Tracks';
+    const missing = [];
+    if (!hasAgent) missing.push('Agent');
+    if (!hasProspect) missing.push('Prospect');
+    status.textContent = `Record or upload both tracks to enable analysis (waiting for ${missing.join(' & ')})`;
+    status.style.color = 'var(--text-muted)';
+  }
+}
+
 async function uploadDualAudio() {
   errorBox.innerHTML = '';
-  const agentFile = document.getElementById('agentAudioFile').files[0];
-  const prospectFile = document.getElementById('prospectAudioFile').files[0];
+
+  let agentFile = null;
+  if (agentAudioBlob) {
+    agentFile = new File([agentAudioBlob], 'agent_recording.webm', { type: agentAudioBlob.type || 'audio/webm' });
+  } else {
+    const input = document.getElementById('agentAudioFile');
+    if (input && input.files && input.files[0]) agentFile = input.files[0];
+  }
+
+  let prospectFile = null;
+  if (prospectAudioBlob) {
+    prospectFile = new File([prospectAudioBlob], 'prospect_recording.webm', { type: prospectAudioBlob.type || 'audio/webm' });
+  } else {
+    const input = document.getElementById('prospectAudioFile');
+    if (input && input.files && input.files[0]) prospectFile = input.files[0];
+  }
 
   if (!agentFile || !prospectFile) {
-    showError('Please select both Agent and Prospect audio files.');
+    const missing = [];
+    if (!agentFile) missing.push('Agent');
+    if (!prospectFile) missing.push('Prospect');
+    showError(`Please record or upload both tracks before analyzing. Missing: ${missing.join(' & ')}.`);
     return;
   }
 
@@ -615,36 +1046,60 @@ async function uploadDualAudio() {
   btn.disabled = true;
   btn.textContent = 'Synchronizing Tracks...';
   dualStatusLine.textContent = 'Transcribing both tracks & merging timeline...';
+  dualStatusLine.style.color = 'var(--accent)';
   resultsPanel.innerHTML = '<div class="placeholder">Transcribing separate agent and prospect tracks...</div>';
 
-  const endpoint = getBaseApiUrl() + '/api/test/analyze-two-tracks';
+  let endpoint = document.getElementById('analyzeEndpoint') ? document.getElementById('analyzeEndpoint').value.trim() : '';
+  if (!endpoint) {
+    endpoint = getBaseApiUrl() + '/api/test/analyze-two-tracks';
+  }
+
+  const callId = document.getElementById('dualCallId') ? document.getElementById('dualCallId').value.trim() : 'test_call_001';
+  const prospectId = document.getElementById('dualProspectId') ? document.getElementById('dualProspectId').value.trim() : 'test_prospect_001';
   const offsetInput = document.getElementById('prospectOffsetMs');
   const offsetVal = offsetInput ? (offsetInput.value || '0') : '0';
 
   const formData = new FormData();
   formData.append('agent_audio', agentFile, agentFile.name);
   formData.append('prospect_audio', prospectFile, prospectFile.name);
-  formData.append('agent_id', document.getElementById('agentId').value);
-  formData.append('prospect_id', document.getElementById('dualProspectId').value);
+  formData.append('agent_id', 'test_agent_001');
+  formData.append('prospect_id', prospectId);
+  formData.append('call_sid', callId);
   formData.append('prospect_offset_ms', offsetVal);
   formData.append('agent_start_epoch_ms', '0');
   formData.append('prospect_start_epoch_ms', '0');
 
   try {
     const res = await fetch(endpoint, { method: 'POST', body: formData });
-    if (!res.ok) throw new Error(`Server responded with ${res.status}`);
+    if (!res.ok) {
+      const errBody = await res.text();
+      throw new Error(`Server responded with ${res.status}: ${errBody}`);
+    }
     const data = await res.json();
     renderResults(data);
     dualStatusLine.textContent = 'Dual-track analysis complete';
+    dualStatusLine.style.color = 'var(--accent)';
   } catch (err) {
-    showError(`Dual-track upload failed: ${err.message}`);
-    dualStatusLine.textContent = 'Failed';
+    showError(`Dual-track analysis failed: ${err.message}`);
+    dualStatusLine.textContent = 'Analysis failed — see error above';
+    dualStatusLine.style.color = '#C93B2B';
     resultsPanel.innerHTML = '<div class="placeholder">Dual-track analysis failed.</div>';
   } finally {
     btn.disabled = false;
     btn.textContent = 'Synchronize & Analyze Dual Tracks';
   }
 }
+
+// Auto-initialize endpoint URL from window location if running via HTTP
+window.addEventListener('DOMContentLoaded', () => {
+  if (window.location.protocol !== 'file:' && window.location.origin && window.location.origin !== 'null') {
+    const epInput = document.getElementById('analyzeEndpoint');
+    if (epInput) {
+      epInput.value = `${window.location.origin}/api/test/analyze-two-tracks`;
+    }
+  }
+  updateDualSubmitState();
+});
 
 function showError(msg) {
   errorBox.innerHTML = `<div class="error-box">${msg}</div>`;
