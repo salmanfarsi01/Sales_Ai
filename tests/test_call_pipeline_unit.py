@@ -472,6 +472,20 @@ def test_behavioral_test_dashboard_and_analyze_recording(monkeypatch):
     assert res_data["latest_inference"]["baseline_sources"] == []
     assert res_data["is_baseline_locked"] is False
 
+    # Stored report in reports/ with behavioral_signal_<call_sid>.json name
+    assert "report_file" in res_data
+    assert res_data["report_file"] == f"reports/behavioral_signal_{res_data['call_sid']}.json"
+    from pathlib import Path
+    saved_report = Path(res_data["report_file"])
+    assert saved_report.exists()
+    try:
+        report_content = json.loads(saved_report.read_text(encoding="utf-8"))
+        assert report_content["status"] == "success"
+        assert report_content["call_sid"] == res_data["call_sid"]
+    finally:
+        if saved_report.exists():
+            saved_report.unlink(missing_ok=True)
+
 
 def test_behavioral_batch_recording_multi_turn_segmentation(monkeypatch):
     """Verify that multi-segment batch recording splits into sequential turns,
@@ -576,5 +590,52 @@ def test_batch_recording_sufficiency_gate_rejects_insufficient_time_and_words(mo
     assert res_data["is_baseline_locked"] is False
     assert res_data["latest_inference"]["baseline_sources"] == []
     assert len(res_data["latest_evidence_frame"]["windows"]["last_5_10s"]["deviations"]) == 0
+
+
+def test_run_behavioral_signal_runner_saves_report(monkeypatch):
+    """Verify that the standalone test runner app also stores reports/behavioral_signal_<call_sid>.json."""
+    from run_behavioral_signal import app as runner_app
+    from copilot.calibration import SpeechToTextEngine
+
+    client = TestClient(runner_app)
+
+    async def mock_transcribe(*args, **kwargs):
+        return (
+            "We need a quick follow up tomorrow afternoon.",
+            [
+                {"word": "We", "start": 0.1, "end": 0.3},
+                {"word": "need", "start": 0.35, "end": 0.5},
+                {"word": "a", "start": 0.55, "end": 0.65},
+                {"word": "quick", "start": 0.7, "end": 0.95},
+                {"word": "follow", "start": 1.0, "end": 1.3},
+                {"word": "up", "start": 1.35, "end": 1.5},
+                {"word": "tomorrow", "start": 1.55, "end": 1.9},
+                {"word": "afternoon.", "start": 1.95, "end": 2.4},
+            ],
+        )
+
+    monkeypatch.setattr(SpeechToTextEngine, "transcribe_with_timestamps", mock_transcribe)
+
+    files = {"audio": ("test_runner.webm", b"RIFFTESTRUNNERBYTES", "audio/webm")}
+    data = {"prospect_id": "prospect_runner_test"}
+    post_resp = client.post("/api/test/analyze-recording", files=files, data=data)
+    assert post_resp.status_code == 200
+    res_data = post_resp.json()
+
+    assert res_data["status"] == "success"
+    assert "report_file" in res_data
+    assert res_data["report_file"] == f"reports/behavioral_signal_{res_data['call_sid']}.json"
+
+    from pathlib import Path
+    saved_report = Path(res_data["report_file"])
+    assert saved_report.exists()
+    try:
+        report_content = json.loads(saved_report.read_text(encoding="utf-8"))
+        assert report_content["status"] == "success"
+        assert report_content["call_sid"] == res_data["call_sid"]
+        assert report_content["report_file"] == res_data["report_file"]
+    finally:
+        if saved_report.exists():
+            saved_report.unlink(missing_ok=True)
 
 

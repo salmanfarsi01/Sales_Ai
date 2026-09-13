@@ -261,6 +261,35 @@
     font-size: 13px;
     margin-top: 12px;
   }
+  .table-container {
+    margin-top: 14px;
+    overflow-x: auto;
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    background: var(--surface);
+  }
+  .play-table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 12px;
+    text-align: left;
+  }
+  .play-table th {
+    background: #F4F8F7;
+    color: var(--text-muted);
+    font-weight: 600;
+    padding: 8px 10px;
+    border-bottom: 1px solid var(--border);
+    white-space: nowrap;
+  }
+  .play-table td {
+    padding: 8px 10px;
+    border-bottom: 1px solid #E8ECEB;
+    vertical-align: top;
+  }
+  .play-table tr:last-child td {
+    border-bottom: none;
+  }
 </style>
 </head>
 <body>
@@ -496,8 +525,78 @@ function renderResults(data) {
       </div>`;
   }
 
-  html += `<p class="section-title" style="margin-top:24px;">Raw JSON</p>
-           <div class="json-box mono">${escapeHtml(JSON.stringify(data, null, 2))}</div>`;
+  if (data.play_by_play_turns && data.play_by_play_turns.length > 0) {
+    html += `<p class="section-title" style="margin-top:24px;">Play-by-Play Turn Diagnostics</p>
+      <div class="table-container">
+        <table class="play-table">
+          <thead>
+            <tr>
+              <th>Turn</th>
+              <th>Time</th>
+              <th>Transcript Text</th>
+              <th>WPM</th>
+              <th>Base WPM</th>
+              <th>Pace Δ%</th>
+              <th>Pause</th>
+              <th>Latency</th>
+              <th>Question?</th>
+              <th>Recurrence</th>
+              <th>Boundary</th>
+              <th>Spec.</th>
+              <th>Future</th>
+              <th>Conf</th>
+              <th>Trust</th>
+              <th>Ready</th>
+            </tr>
+          </thead>
+          <tbody>`;
+    data.play_by_play_turns.forEach(t => {
+      const paceDeltaText = t.pace_delta_pct !== null && t.pace_delta_pct !== undefined ? `${t.pace_delta_pct > 0 ? '+' : ''}${t.pace_delta_pct}%` : 'calibrating';
+      const paceColor = t.pace_delta_pct !== null && Math.abs(t.pace_delta_pct) >= 20 ? (t.pace_delta_pct > 0 ? 'var(--accent)' : '#C93B2B') : 'var(--text)';
+      const boundClass = t.boundary_score >= 0.8 ? 'color:#C93B2B; font-weight:700;' : '';
+      const recText = t.recurrence_type && t.recurrence_type !== 'none' ? `${t.recurrence_type} (${t.recurrence_count})` : '—';
+      const qText = t.question_type && t.question_type !== 'none' ? t.question_type : '—';
+      const pauseText = t.avg_pause_duration_ms > 0 ? `${Math.round(t.avg_pause_duration_ms)}ms` : '0';
+      const latText = t.response_latency_ms !== null && t.response_latency_ms !== undefined ? `${t.response_latency_ms}ms` : '—';
+      
+      html += `<tr>
+        <td class="mono" style="font-weight:600;">#${t.turn_index}</td>
+        <td class="mono" style="white-space:nowrap; color:var(--text-muted);">${t.start_sec}s-${t.end_sec}s</td>
+        <td style="min-width:180px; max-width:300px; font-size:11.5px;">${escapeHtml(t.text)}</td>
+        <td class="mono">${t.speech_rate_wpm}</td>
+        <td class="mono">${t.baseline_wpm ?? '—'}</td>
+        <td class="mono" style="font-weight:600; color:${paceColor};">${paceDeltaText}</td>
+        <td class="mono">${pauseText}</td>
+        <td class="mono">${latText}</td>
+        <td><span class="mono" style="font-size:11px;">${escapeHtml(qText)}</span></td>
+        <td><span class="mono" style="font-size:11px; color:${t.recurrence_type !== 'none' ? '#C93B2B' : 'inherit'}">${escapeHtml(recText)}</span></td>
+        <td class="mono" style="${boundClass}">${t.boundary_score.toFixed(1)}</td>
+        <td class="mono">${t.specificity_score.toFixed(2)}</td>
+        <td class="mono">${t.future_language_score.toFixed(2)}</td>
+        <td class="mono">${Math.round(t.semantic_confidence * 100)}%</td>
+        <td class="mono" style="font-weight:600;">${Math.round(t.trust_score * 100)}%</td>
+        <td class="mono" style="font-weight:600;">${Math.round(t.readiness_score * 100)}%</td>
+      </tr>`;
+    });
+    html += `</tbody></table></div>`;
+  }
+
+  const reportFilename = data.report_file || (data.call_sid ? `reports/behavioral_signal_${data.call_sid}.json` : '');
+  if (reportFilename) {
+    html += `
+      <div style="margin-top: 24px; padding: 14px 16px; background: rgba(14, 173, 171, 0.07); border: 1px solid rgba(14, 173, 171, 0.28); border-radius: 8px; display: flex; align-items: center; justify-content: space-between; gap: 12px;">
+        <div style="display: flex; align-items: center; gap: 10px;">
+          <span style="font-size: 16px;">📄</span>
+          <div>
+            <div style="font-size: 11.5px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.04em; color: var(--accent);">Evaluation Report Saved</div>
+            <div class="mono" style="font-size: 12.5px; color: var(--text); font-weight: 500; margin-top: 2px;">${escapeHtml(reportFilename)}</div>
+          </div>
+        </div>
+        <div class="badge on" style="margin: 0; font-size: 11px;">
+          <span class="light"></span> saved in reports/
+        </div>
+      </div>`;
+  }
 
   resultsPanel.innerHTML = html;
 }

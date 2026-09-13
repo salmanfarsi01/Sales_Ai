@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import os
 import uuid
+import json
 import logging
 from pathlib import Path
 from typing import Optional, Dict, Any
@@ -190,6 +191,7 @@ async def analyze_recording(
     last_sem_snap = None
     last_evidence_frame = None
     last_inference_state = None
+    play_by_play_turns = []
 
     # 3. Process each turn sequentially through the behavioral pipeline
     for norm_utt in segmented_utts:
@@ -227,6 +229,63 @@ async def analyze_recording(
         )
         last_inference_state = inference_state
 
+        active_prof = baseline_engine.get_active_profile()
+        base_wpm = (
+            round(active_prof.speech_rate_wpm.mean, 1)
+            if (active_prof and active_prof.speech_rate_wpm.sample_count > 0)
+            else None
+        )
+        curr_wpm = round(timing_snap.speech_rate_wpm, 1)
+        pace_delta = (
+            round(((curr_wpm - base_wpm) / base_wpm) * 100.0, 1)
+            if (base_wpm and base_wpm > 0)
+            else None
+        )
+        base_pause_ms = (
+            round(active_prof.avg_pause_duration_ms.mean, 1)
+            if (active_prof and active_prof.avg_pause_duration_ms.sample_count > 0)
+            else None
+        )
+        pause_delta = (
+            round(((timing_snap.avg_pause_duration_ms - base_pause_ms) / base_pause_ms) * 100.0, 1)
+            if (base_pause_ms and base_pause_ms > 0 and timing_snap.pause_measured)
+            else None
+        )
+
+        play_by_play_turns.append({
+            "turn_index": session["turn_index"],
+            "start_ms": norm_utt.start_ms,
+            "end_ms": norm_utt.end_ms,
+            "start_sec": round(norm_utt.start_ms / 1000.0, 1),
+            "end_sec": round(norm_utt.end_ms / 1000.0, 1),
+            "text": norm_utt.text,
+            "words_count": len(norm_utt.words) if norm_utt.words else len(norm_utt.text.split()),
+            "turn_duration_ms": timing_snap.turn_duration_ms,
+            "speech_rate_wpm": curr_wpm,
+            "baseline_wpm": base_wpm,
+            "pace_delta_pct": pace_delta,
+            "avg_pause_duration_ms": round(timing_snap.avg_pause_duration_ms, 1),
+            "baseline_pause_ms": base_pause_ms,
+            "pause_delta_pct": pause_delta,
+            "response_latency_ms": timing_snap.response_latency_ms,
+            "question_type": sem_snap.question_type if sem_snap else "none",
+            "recurrence_type": sem_snap.recurrence_type if sem_snap else "none",
+            "recurrence_count": sem_snap.recurrence_count if sem_snap else 0,
+            "boundary_score": sem_snap.boundary_score if sem_snap else 0.0,
+            "specificity_score": sem_snap.specificity_score if sem_snap else 0.0,
+            "future_language_score": sem_snap.future_language_score if sem_snap else 0.0,
+            "agreement_score": sem_snap.agreement_score if sem_snap else 0.0,
+            "semantic_confidence": sem_snap.semantic_confidence if sem_snap else 0.50,
+            "pacing_score": inference_state.pacing.score,
+            "trust_score": inference_state.trust.score,
+            "engagement_score": inference_state.engagement.score,
+            "momentum_score": inference_state.momentum.score,
+            "readiness_score": inference_state.readiness.score,
+            "expressed_valence": inference_state.emotion.expressed_valence if inference_state.emotion else 0.0,
+            "tension_level": inference_state.emotion.tension_level if inference_state.emotion else 0.20,
+            "is_baseline_locked": baseline_engine.is_intra_call_locked,
+        })
+
         LOGGER.info(
             "Turn %d analyzed: transcript='%s' | WPM=%.1f | Pacing=%.2f | Trust=%.2f | Readiness=%.2f",
             session["turn_index"],
@@ -247,7 +306,7 @@ async def analyze_recording(
     elapsed_sec = round(elapsed_ms / 1000.0, 1)
     target_sec = round(baseline_engine.intra_call_window_ms / 1000.0, 1)
 
-    return {
+    result_payload = {
         "status": "success",
         "call_sid": active_call_sid,
         "prospect_id": prospect_id,
@@ -274,11 +333,25 @@ async def analyze_recording(
             }
             for idx, u in enumerate(segmented_utts)
         ],
+        "play_by_play_turns": play_by_play_turns,
         "words_count": sum(len(u.words) for u in segmented_utts),
         "latest_timing": last_timing_snap.model_dump() if last_timing_snap else {},
         "latest_inference": last_inference_state.model_dump() if last_inference_state else {},
         "latest_evidence_frame": last_evidence_frame.model_dump() if last_evidence_frame else {},
     }
+
+    try:
+        reports_dir = Path(__file__).resolve().parent / "reports"
+        reports_dir.mkdir(parents=True, exist_ok=True)
+        report_filename = f"behavioral_signal_{active_call_sid}.json"
+        report_path = reports_dir / report_filename
+        result_payload["report_file"] = f"reports/{report_filename}"
+        report_path.write_text(json.dumps(result_payload, indent=2), encoding="utf-8")
+        LOGGER.info("Successfully stored behavioral signal report to local disk: %s", report_path)
+    except Exception as exc:
+        LOGGER.warning("Could not save behavioral signal report to disk: %s", exc)
+
+    return result_payload
 
 
 @app.post("/api/test/reset-session")

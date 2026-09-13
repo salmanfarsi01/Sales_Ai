@@ -38,6 +38,10 @@ class FeatureDeviation(BaseModel):
     baseline_mean: float
     baseline_stddev: float
     z_score: float
+    delta_percent: Optional[float] = Field(
+        default=None,
+        description="Percentage change from baseline mean: ((observed - mean) / mean) * 100",
+    )
     is_significant: bool
     is_measured: bool = Field(
         default=True,
@@ -474,6 +478,12 @@ class BaselineAndChangePointEngine:
                 is_sig = abs(z) >= self.z_threshold
                 is_meas = True
 
+            delta_pct = (
+                round(((val - stat.mean) / stat.mean) * 100.0, 1)
+                if (is_meas and stat.mean > 0.001)
+                else None
+            )
+
             deviations.append(
                 FeatureDeviation(
                     feature_name=feat,
@@ -481,6 +491,7 @@ class BaselineAndChangePointEngine:
                     baseline_mean=stat.mean,
                     baseline_stddev=stat.stddev,
                     z_score=round(z, 2),
+                    delta_percent=delta_pct,
                     is_significant=is_sig,
                     is_measured=is_meas,
                     baseline_source=baseline_source,

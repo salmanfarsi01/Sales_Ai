@@ -154,6 +154,35 @@ EVALUATION_QUESTION_PATTERNS = [
     r"\bwhat\s+is\s+your\s+(strategy|track\s+record|experience)\b",
 ]
 
+OBJECTION_RESISTANCE_PATTERNS = [
+    r"\b(too\s+(much|high|expensive|steep|costly|pricey|far))\b",
+    r"\b(feels?|seems?|think|thought)\s+(pretty\s+|really\s+|just\s+)?(like\s+a\s+lot|steep|high)\b",
+    r"\b(a\s+lot\s+(for|of\s+money))\b",
+    r"\b(paying|pay|charged?)\s+too\s+much\b",
+    r"\bdon['’]?t\s+want\s+to\s+pay\b",
+    r"\b(can['’]?t|cannot)\s+afford\b",
+    r"\b(out\s+of|over)\s+(our|my)\s+budget\b",
+    r"\bnot\s+worth\s+(it|the\s+money|the\s+cost|the\s+fee)\b",
+    r"\b(hesitant|concerned|worried|skeptical|doubtful)\b",
+    r"\b(worries|concerns|bothers)\s+me\b",
+    r"\b(not|doesn['’]?t|does\s+not)\s+(?:[a-z]+\s+){0,3}(?:right\s+(?:with\s+me|for\s+us)|sit\s+right)\b",
+    r"\b(unclear|confusing|hard\s+to\s+understand)\b",
+    r"\b(not\s+sure|not\s+ready|rethink|second\s+thought)\b",
+    r"\b(lower|cut|reduce|discount)\s+(your\s+)?(commission|fee|rate|price)\b",
+]
+
+OBJECTION_TOPIC_PATTERNS = {
+    "commission_pricing": [
+        r"\b(commission|fee|fees|cost|costs|price|pricing|paying|charge|rate)\b",
+    ],
+    "timing_delay": [
+        r"\b(rush|hurry|wait|later|not\s+ready|bad\s+time|delay)\b",
+    ],
+    "spousal_third_party": [
+        r"\b(husband|wife|spouse|partner|board|attorney|lawyer)\b",
+    ],
+}
+
 STOPWORDS = {
     "a", "an", "the", "that", "this", "these", "those", "our", "your", "my", "we", "you",
     "i", "us", "it", "to", "for", "in", "on", "at", "with", "still", "way", "too", "is",
@@ -184,6 +213,23 @@ class SemanticFeatureEngine:
             if re.search(pat, cleaned, re.IGNORECASE):
                 return 1.0
         return 0.0
+
+    def _is_objection_utterance(self, text: str, playbook_objections: Optional[List[Any]] = None) -> Tuple[bool, Optional[str]]:
+        cleaned = text.strip().lower()
+        has_resistance = any(re.search(pat, cleaned) for pat in OBJECTION_RESISTANCE_PATTERNS)
+        matched_cat = None
+        for cat, pats in OBJECTION_TOPIC_PATTERNS.items():
+            if any(re.search(pat, cleaned) for pat in pats):
+                matched_cat = cat
+                break
+        if has_resistance:
+            return True, (matched_cat or "general_objection")
+        if playbook_objections:
+            for obj in playbook_objections:
+                obj_text = getattr(obj, "objection", "") if hasattr(obj, "objection") else str(obj)
+                if obj_text and obj_text.lower() in cleaned:
+                    return True, "playbook_objection"
+        return False, None
 
     def detect_semantic_recurrence(
         self,
@@ -237,19 +283,39 @@ class SemanticFeatureEngine:
                 return "ECHO_ALIGN_01", "positive_echo", 1
 
         # Check objection recurrence against previous client utterances
+        curr_is_obj, curr_cat = self._is_objection_utterance(cleaned, playbook_objections)
+
         raw_tokens = set(re.findall(r"\b[a-z]{3,}\b", cleaned))
         tokens = {t for t in raw_tokens if t not in STOPWORDS}
+
         for prev in reversed([u for u in history if u.speaker_id == "client"]):
             prev_raw = set(re.findall(r"\b[a-z]{3,}\b", prev.text.lower()))
             prev_tokens = {t for t in prev_raw if t not in STOPWORDS}
             if not tokens or not prev_tokens:
                 continue
+
+            prev_is_obj, prev_cat = self._is_objection_utterance(prev.text, playbook_objections)
+
             common = tokens.intersection(prev_tokens)
-            if not common:
-                continue
-            overlap_min = len(common) / min(len(tokens), len(prev_tokens))
-            overlap_max = len(common) / max(len(tokens), len(prev_tokens))
-            if overlap_min >= 0.5 or overlap_max >= 0.35:
+            overlap_min = len(common) / min(len(tokens), len(prev_tokens)) if common else 0.0
+            overlap_max = len(common) / max(len(tokens), len(prev_tokens)) if common else 0.0
+
+            # Condition 1: Both utterances are actual objections within the same specific objection category
+            same_category_objection = bool(
+                curr_is_obj
+                and prev_is_obj
+                and curr_cat
+                and curr_cat != "general_objection"
+                and curr_cat == prev_cat
+            )
+
+            # Condition 2: Both utterances are objections and share at least 2 distinct content words with high overlap
+            lexical_objection_repeat = bool(curr_is_obj and prev_is_obj and len(common) >= 2 and (overlap_min >= 0.5 or overlap_max >= 0.35))
+
+            # Condition 3: Substantial content recurrence (at least 3 content words overlap, and both are objections)
+            substantial_overlap = bool(curr_is_obj and prev_is_obj and len(common) >= 3 and (overlap_min >= 0.5 or overlap_max >= 0.35))
+
+            if same_category_objection or lexical_objection_repeat or substantial_overlap:
                 intervening_rep = [
                     u for u in history
                     if u.speaker_id == "salesperson" and prev.end_ms <= u.start_ms
@@ -275,7 +341,11 @@ class SemanticFeatureEngine:
 
         # Question Type
         question_type: Literal["evaluation", "transactional", "clarifying", "hostile", "rhetorical", "none"] = "none"
-        if text.endswith("?") or any(lower_text.startswith(w) for w in ["what", "how", "why", "who", "when", "can", "is", "are", "do"]):
+        is_interrogative = (
+            text.endswith("?")
+            or any(lower_text.startswith(w) for w in ["what", "how", "why", "who", "when", "where", "which", "can", "could", "would", "should", "is", "are", "do", "does", "did", "haven't", "hasn't", "isn't", "aren't"])
+        )
+        if is_interrogative and boundary_score < 0.8:
             if any(re.search(pat, lower_text) for pat in HOSTILE_QUESTION_PATTERNS):
                 question_type = "hostile"
             elif any(re.search(pat, lower_text) for pat in TRANSACTIONAL_QUESTION_PATTERNS):
@@ -371,7 +441,7 @@ class SemanticFeatureEngine:
             + "\n".join(f"- {u.speaker_id}: {u.text}" for u in context_history[-2:])
             + f"\n\nCurrent turn ({utterance.speaker_id}): \"{utterance.text}\"\n\n"
             f"Classify into valid JSON with these exact fields:\n"
-            f"- question_type: 'evaluation' | 'transactional' | 'clarifying' | 'hostile' | 'rhetorical' | 'none'\n"
+            f"- question_type: 'evaluation' | 'transactional' | 'clarifying' | 'hostile' | 'rhetorical' | 'none' (STRICT: MUST be 'none' unless this turn explicitly asks a question. Declarative statements, demands, objections, and stop-contact requests like 'please don't contact me' are NOT questions and MUST be 'none')\n"
             f"- specificity_score: float 0.0 to 1.0 (dates, dollar amounts, named entities, hard numbers)\n"
             f"- future_language_score: float 0.0 to 1.0 (operational future commitment vs vague hypotheticals)\n"
             f"- agreement_score: float 0.0 to 1.0 (substantive meeting/pricing commitment ~0.8-1.0; polite nod like 'yeah' ~0.2-0.3)\n"
@@ -416,6 +486,13 @@ class SemanticFeatureEngine:
             effective_boundary = 1.0 if (boundary_score >= 0.8 or llm_boundary >= 0.8) else 0.0
             conf = CONFIDENCE_BY_FEATURE["llm"]
 
+            raw_q = parsed.get("question_type", "none")
+            is_q = (
+                utterance.text.strip().endswith("?")
+                or any(utterance.text.strip().lower().startswith(w) for w in ["what", "how", "why", "who", "when", "where", "which", "can", "could", "would", "should", "is", "are", "do", "does", "did", "haven't", "hasn't", "isn't", "aren't"])
+            )
+            validated_q_type = raw_q if (is_q and effective_boundary < 0.8) else "none"
+
             return SemanticFeatureSnapshot(
                 utterance_id=utterance.utterance_id,
                 call_sid=utterance.call_sid,
@@ -424,7 +501,7 @@ class SemanticFeatureEngine:
                 recurrence_id=rec_id,
                 recurrence_type=rec_type,
                 recurrence_count=rec_count,
-                question_type=parsed.get("question_type", "none"),
+                question_type=validated_q_type,
                 specificity_score=min(1.0, max(0.0, float(parsed.get("specificity_score", 0.0)))),
                 future_language_score=min(1.0, max(0.0, float(parsed.get("future_language_score", 0.0)))),
                 boundary_score=min(1.0, max(0.0, effective_boundary)),
