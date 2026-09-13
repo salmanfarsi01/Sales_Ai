@@ -15,6 +15,11 @@ class TimingFeatureSnapshot(BaseModel):
     window_ms: int = Field(default=60000, ge=1000)
     speaker_id: Literal["salesperson", "client"] = Field(...)
     speech_rate_wpm: float = Field(0.0, ge=0.0)
+    turn_speech_rate_wpm: float = Field(
+        default=0.0,
+        ge=0.0,
+        description="Instantaneous speech rate of this specific turn in WPM",
+    )
     avg_pause_duration_ms: float = Field(0.0, ge=0.0)
     intra_turn_pause_count: int = Field(0, ge=0)
     pause_measured: bool = Field(
@@ -144,6 +149,8 @@ class DeterministicTimingEngine:
 
         turn_duration_ms = max(1, current_utt.end_ms - current_utt.start_ms)
         turn_words = len(current_utt.words) if current_utt.words else len(current_utt.text.split())
+        turn_minutes = turn_duration_ms / 60000.0
+        turn_speech_rate_wpm = round(turn_words / turn_minutes, 1) if turn_minutes > 0 else 0.0
 
         response_latency_ms: Optional[int] = None
         for prev in reversed(self.utterances[:-1]):
@@ -216,6 +223,7 @@ class DeterministicTimingEngine:
             window_ms=window_ms,
             speaker_id=speaker_id,
             speech_rate_wpm=speech_rate_wpm,
+            turn_speech_rate_wpm=turn_speech_rate_wpm,
             avg_pause_duration_ms=round(avg_pause_duration_ms, 1),
             intra_turn_pause_count=intra_turn_pause_count,
             pause_measured=intra_turn_pause_count > 0,

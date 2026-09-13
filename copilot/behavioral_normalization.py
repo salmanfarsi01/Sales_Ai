@@ -269,8 +269,9 @@ def segment_audio_transcript_turns(
     min_pause_split_ms: int = 500,
 ) -> List[NormalizedUtterance]:
     """Segments batch audio transcription into distinct sequential NormalizedUtterance turns.
-    Uses Deepgram's pre-segmented utterances if present (>1), or segments word timestamps
-    whenever adjacent words have a silence gap >= min_pause_split_ms (or sentence boundary + >=400ms).
+    Uses Deepgram's pre-segmented utterances (with diarization speaker tagging) if present (>1),
+    or segments word timestamps on silence gaps >= min_pause_split_ms, sentence boundaries,
+    or speaker transitions.
     """
     # 1. If Deepgram returned multiple pre-segmented utterances
     if raw_utterances and len(raw_utterances) > 1:
@@ -279,6 +280,14 @@ def segment_audio_transcript_turns(
             u_text = (u.get("transcript") or "").strip()
             if not u_text:
                 continue
+
+            # Check for Deepgram diarization speaker index (0 = salesperson / Agent, 1 = client / Prospect)
+            u_speaker_tag = u.get("speaker")
+            if u_speaker_tag is not None:
+                assigned_speaker: Literal["salesperson", "client"] = "salesperson" if u_speaker_tag == 0 else "client"
+            else:
+                assigned_speaker = speaker_id
+
             u_words_raw = u.get("words", [])
             norm_words = []
             for w in u_words_raw:
@@ -299,7 +308,7 @@ def segment_audio_transcript_turns(
             segmented.append(
                 NormalizedUtterance(
                     call_sid=call_sid,
-                    speaker_id=speaker_id,
+                    speaker_id=assigned_speaker,
                     text=u_text,
                     start_ms=u_start,
                     end_ms=max(u_start + 100, u_end),
@@ -310,19 +319,23 @@ def segment_audio_transcript_turns(
         if segmented:
             return segmented
 
-    # 2. Fallback / Word Timestamp Segmentation
+    # 2. Fallback / Word Timestamp Segmentation with Speaker Diarization
     norm_words_all = []
     for w in (words_raw or []):
         w_text = w.get("punctuated_word") or w.get("word", "")
         w_start = int(round(float(w.get("start", 0.0)) * 1000))
         w_end = int(round(float(w.get("end", 0.0)) * 1000))
+        w_spk_tag = w.get("speaker")
         norm_words_all.append(
-            NormalizedWord(
-                word=w.get("word") or w_text,
-                start_ms=w_start,
-                end_ms=max(w_start, w_end),
-                confidence=float(w.get("confidence", 0.95)),
-                punctuated_word=w_text,
+            (
+                NormalizedWord(
+                    word=w.get("word") or w_text,
+                    start_ms=w_start,
+                    end_ms=max(w_start, w_end),
+                    confidence=float(w.get("confidence", 0.95)),
+                    punctuated_word=w_text,
+                ),
+                w_spk_tag,
             )
         )
 
@@ -340,32 +353,40 @@ def segment_audio_transcript_turns(
             )
         ]
 
-    chunks: List[List[NormalizedWord]] = []
-    current_chunk: List[NormalizedWord] = [norm_words_all[0]]
+    chunks: List[Tuple[List[NormalizedWord], Optional[int]]] = []
+    current_words: List[NormalizedWord] = [norm_words_all[0][0]]
+    current_spk: Optional[int] = norm_words_all[0][1]
 
     for i in range(len(norm_words_all) - 1):
-        w_curr = norm_words_all[i]
-        w_next = norm_words_all[i + 1]
+        (w_curr, spk_curr) = norm_words_all[i]
+        (w_next, spk_next) = norm_words_all[i + 1]
         gap_ms = w_next.start_ms - w_curr.end_ms
         punc = w_curr.punctuated_word or w_curr.word
         ends_sentence = any(punc.rstrip().endswith(ch) for ch in [".", "?", "!"])
+        speaker_switched = (spk_curr is not None and spk_next is not None and spk_curr != spk_next)
 
-        if gap_ms >= min_pause_split_ms or (ends_sentence and gap_ms >= 400):
-            chunks.append(current_chunk)
-            current_chunk = [w_next]
+        if speaker_switched or gap_ms >= min_pause_split_ms or (ends_sentence and gap_ms >= 400):
+            chunks.append((current_words, current_spk))
+            current_words = [w_next]
+            current_spk = spk_next
         else:
-            current_chunk.append(w_next)
+            current_words.append(w_next)
 
-    if current_chunk:
-        chunks.append(current_chunk)
+    if current_words:
+        chunks.append((current_words, current_spk))
 
     segmented: List[NormalizedUtterance] = []
-    for chunk in chunks:
+    for chunk, chunk_spk in chunks:
         chunk_text = " ".join(w.punctuated_word or w.word for w in chunk).strip()
+        if chunk_spk is not None:
+            spk_role: Literal["salesperson", "client"] = "salesperson" if chunk_spk == 0 else "client"
+        else:
+            spk_role = speaker_id
+
         segmented.append(
             NormalizedUtterance(
                 call_sid=call_sid,
-                speaker_id=speaker_id,
+                speaker_id=spk_role,
                 text=chunk_text,
                 start_ms=chunk[0].start_ms,
                 end_ms=max(chunk[0].start_ms + 100, chunk[-1].end_ms),
@@ -374,3 +395,87 @@ def segment_audio_transcript_turns(
             )
         )
     return segmented
+
+
+def merge_dual_speaker_tracks(
+    agent_utterances: List[NormalizedUtterance],
+    prospect_utterances: List[NormalizedUtterance],
+    agent_start_epoch_ms: int = 0,
+    prospect_start_epoch_ms: int = 0,
+) -> List[NormalizedUtterance]:
+    """
+    Merges two independently recorded single-speaker tracks onto a synchronized timeline.
+    Aligns relative to call_start_epoch = min(agent_start_epoch_ms, prospect_start_epoch_ms).
+    Shifts word-level and utterance-level timestamps by track offset, guaranteeing that neither
+    track is distorted or mixed. Returns chronologically sorted turn stream.
+    """
+    if agent_start_epoch_ms > 0 and prospect_start_epoch_ms > 0:
+        call_start_epoch = min(agent_start_epoch_ms, prospect_start_epoch_ms)
+        agent_offset = agent_start_epoch_ms - call_start_epoch
+        prospect_offset = prospect_start_epoch_ms - call_start_epoch
+    else:
+        agent_offset = 0
+        prospect_offset = 0
+
+    merged: List[NormalizedUtterance] = []
+
+    for u in agent_utterances:
+        shifted_words = [
+            NormalizedWord(
+                word=w.word,
+                start_ms=w.start_ms + agent_offset,
+                end_ms=w.end_ms + agent_offset,
+                confidence=w.confidence,
+                is_estimated=w.is_estimated,
+                punctuated_word=w.punctuated_word,
+            )
+            for w in u.words
+        ]
+        merged.append(
+            NormalizedUtterance(
+                utterance_id=u.utterance_id,
+                call_sid=u.call_sid,
+                speaker_id="salesperson",
+                text=u.text,
+                start_ms=u.start_ms + agent_offset,
+                end_ms=u.end_ms + agent_offset,
+                asr_confidence=u.asr_confidence,
+                is_final=u.is_final,
+                speech_final=u.speech_final,
+                is_estimated_timing=u.is_estimated_timing,
+                words=shifted_words,
+                metadata=u.metadata,
+            )
+        )
+
+    for u in prospect_utterances:
+        shifted_words = [
+            NormalizedWord(
+                word=w.word,
+                start_ms=w.start_ms + prospect_offset,
+                end_ms=w.end_ms + prospect_offset,
+                confidence=w.confidence,
+                is_estimated=w.is_estimated,
+                punctuated_word=w.punctuated_word,
+            )
+            for w in u.words
+        ]
+        merged.append(
+            NormalizedUtterance(
+                utterance_id=u.utterance_id,
+                call_sid=u.call_sid,
+                speaker_id="client",
+                text=u.text,
+                start_ms=u.start_ms + prospect_offset,
+                end_ms=u.end_ms + prospect_offset,
+                asr_confidence=u.asr_confidence,
+                is_final=u.is_final,
+                speech_final=u.speech_final,
+                is_estimated_timing=u.is_estimated_timing,
+                words=shifted_words,
+                metadata=u.metadata,
+            )
+        )
+
+    merged.sort(key=lambda x: (x.start_ms, x.end_ms))
+    return merged

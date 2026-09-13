@@ -24,6 +24,8 @@ class SpeakerBaselineStats(BaseModel):
 
 class BaselineProfile(BaseModel):
     prospect_id: Optional[str] = None
+    speaker_id: Optional[str] = None
+    speaker_role: Optional[Literal["salesperson", "client"]] = "client"
     speech_rate_wpm: SpeakerBaselineStats
     avg_pause_duration_ms: SpeakerBaselineStats
     response_latency_ms: SpeakerBaselineStats
@@ -170,7 +172,9 @@ class BaselineAndChangePointEngine:
         self,
         call_sid: str,
         prospect_id: Optional[str] = None,
+        agent_id: Optional[str] = None,
         store: Optional[ProspectBaselineStore] = None,
+        agent_store: Optional[ProspectBaselineStore] = None,
         intra_call_window_ms: int = DEFAULT_INTRA_CALL_WINDOW_MS,
         max_calibration_window_ms: int = DEFAULT_MAX_CALIBRATION_WINDOW_MS,
         min_calibration_turns: int = DEFAULT_MIN_CALIBRATION_TURNS,
@@ -179,7 +183,9 @@ class BaselineAndChangePointEngine:
     ):
         self.call_sid = call_sid
         self.prospect_id = prospect_id
+        self.agent_id = agent_id
         self.store = store or ProspectBaselineStore()
+        self.agent_store = agent_store or self.store
         self.intra_call_window_ms = intra_call_window_ms
         self.max_calibration_window_ms = max_calibration_window_ms
         self.min_calibration_turns = min_calibration_turns
@@ -189,17 +195,79 @@ class BaselineAndChangePointEngine:
         self.historical_profile: Optional[BaselineProfile] = (
             self.store.get_baseline(prospect_id) if prospect_id else None
         )
-        self.prospect_samples: Dict[str, List[float]] = {
-            "speech_rate_wpm": [],
-            "avg_pause_duration_ms": [],
-            "response_latency_ms": [],
-            "turn_length_words": [],
+        self.agent_historical_profile: Optional[BaselineProfile] = (
+            self.agent_store.get_baseline(agent_id) if agent_id else None
+        )
+
+        # Strictly segregated samples per individual speaker
+        self.speaker_samples: Dict[str, Dict[str, List[float]]] = {
+            "client": {
+                "speech_rate_wpm": [],
+                "avg_pause_duration_ms": [],
+                "response_latency_ms": [],
+                "turn_length_words": [],
+            },
+            "salesperson": {
+                "speech_rate_wpm": [],
+                "avg_pause_duration_ms": [],
+                "response_latency_ms": [],
+                "turn_length_words": [],
+            },
         }
-        self.intra_call_profile: Optional[BaselineProfile] = None
-        self.blended_profile: Optional[BaselineProfile] = None
-        self.is_intra_call_locked: bool = False
+        # Direct aliases for clean access
+        self.prospect_samples = self.speaker_samples["client"]
+        self.agent_samples = self.speaker_samples["salesperson"]
+
+        self.intra_call_profiles: Dict[str, Optional[BaselineProfile]] = {
+            "client": None,
+            "salesperson": None,
+        }
+        self.blended_profiles: Dict[str, Optional[BaselineProfile]] = {
+            "client": None,
+            "salesperson": None,
+        }
+        self.is_locked_by_speaker: Dict[str, bool] = {
+            "client": False,
+            "salesperson": False,
+        }
+        self.earliest_sample_ms_by_speaker: Dict[str, Optional[int]] = {
+            "client": None,
+            "salesperson": None,
+        }
         self.change_points: List[ChangePointEvent] = []
-        self.earliest_sample_ms: Optional[int] = None
+
+    # Backwards-compatibility properties pointing to prospect ("client")
+    @property
+    def is_intra_call_locked(self) -> bool:
+        return self.is_locked_by_speaker["client"]
+
+    @is_intra_call_locked.setter
+    def is_intra_call_locked(self, val: bool) -> None:
+        self.is_locked_by_speaker["client"] = val
+
+    @property
+    def intra_call_profile(self) -> Optional[BaselineProfile]:
+        return self.intra_call_profiles["client"]
+
+    @intra_call_profile.setter
+    def intra_call_profile(self, val: Optional[BaselineProfile]) -> None:
+        self.intra_call_profiles["client"] = val
+
+    @property
+    def blended_profile(self) -> Optional[BaselineProfile]:
+        return self.blended_profiles["client"]
+
+    @blended_profile.setter
+    def blended_profile(self, val: Optional[BaselineProfile]) -> None:
+        self.blended_profiles["client"] = val
+
+    @property
+    def earliest_sample_ms(self) -> Optional[int]:
+        return self.earliest_sample_ms_by_speaker["client"]
+
+    @earliest_sample_ms.setter
+    def earliest_sample_ms(self, val: Optional[int]) -> None:
+        self.earliest_sample_ms_by_speaker["client"] = val
 
     def _blend_stats(
         self,
@@ -224,30 +292,34 @@ class BaselineAndChangePointEngine:
             sample_count=sample_total,
         )
 
-    def _recalculate_profiles(self, timestamp_ms: int) -> None:
+    def _recalculate_profiles(self, timestamp_ms: int, speaker_id: Literal["client", "salesperson"] = "client") -> None:
+        samples = self.speaker_samples[speaker_id]
         speech_stats = compute_sample_stats(
-            self.prospect_samples["speech_rate_wpm"],
+            samples["speech_rate_wpm"],
             min_stddev_ratio=DEFAULT_FEATURE_STDDEV_FLOORS["speech_rate_wpm"][0],
             min_stddev_abs=DEFAULT_FEATURE_STDDEV_FLOORS["speech_rate_wpm"][1],
         )
         pause_stats = compute_sample_stats(
-            self.prospect_samples["avg_pause_duration_ms"],
+            samples["avg_pause_duration_ms"],
             min_stddev_ratio=DEFAULT_FEATURE_STDDEV_FLOORS["avg_pause_duration_ms"][0],
             min_stddev_abs=DEFAULT_FEATURE_STDDEV_FLOORS["avg_pause_duration_ms"][1],
         )
         latency_stats = compute_sample_stats(
-            self.prospect_samples["response_latency_ms"],
+            samples["response_latency_ms"],
             min_stddev_ratio=DEFAULT_FEATURE_STDDEV_FLOORS["response_latency_ms"][0],
             min_stddev_abs=DEFAULT_FEATURE_STDDEV_FLOORS["response_latency_ms"][1],
         )
         turn_stats = compute_sample_stats(
-            self.prospect_samples["turn_length_words"],
+            samples["turn_length_words"],
             min_stddev_ratio=DEFAULT_FEATURE_STDDEV_FLOORS["turn_length_words"][0],
             min_stddev_abs=DEFAULT_FEATURE_STDDEV_FLOORS["turn_length_words"][1],
         )
 
-        self.intra_call_profile = BaselineProfile(
-            prospect_id=self.prospect_id,
+        role_id = self.prospect_id if speaker_id == "client" else self.agent_id
+        profile = BaselineProfile(
+            prospect_id=self.prospect_id if speaker_id == "client" else None,
+            speaker_id=role_id,
+            speaker_role=speaker_id,
             speech_rate_wpm=speech_stats,
             avg_pause_duration_ms=pause_stats,
             response_latency_ms=latency_stats,
@@ -255,46 +327,58 @@ class BaselineAndChangePointEngine:
             call_count=1,
             updated_at_ms=timestamp_ms,
         )
+        self.intra_call_profiles[speaker_id] = profile
 
-        if self.historical_profile is not None:
-            calls = self.historical_profile.call_count
-            self.blended_profile = BaselineProfile(
-                prospect_id=self.prospect_id,
+        hist = self.historical_profile if speaker_id == "client" else self.agent_historical_profile
+        if hist is not None:
+            calls = hist.call_count
+            self.blended_profiles[speaker_id] = BaselineProfile(
+                prospect_id=self.prospect_id if speaker_id == "client" else None,
+                speaker_id=role_id,
+                speaker_role=speaker_id,
                 speech_rate_wpm=self._blend_stats(
-                    speech_stats, self.historical_profile.speech_rate_wpm, calls
+                    speech_stats, hist.speech_rate_wpm, calls
                 ),
                 avg_pause_duration_ms=self._blend_stats(
-                    pause_stats, self.historical_profile.avg_pause_duration_ms, calls
+                    pause_stats, hist.avg_pause_duration_ms, calls
                 ),
                 response_latency_ms=self._blend_stats(
-                    latency_stats, self.historical_profile.response_latency_ms, calls
+                    latency_stats, hist.response_latency_ms, calls
                 ),
                 turn_length_words=self._blend_stats(
-                    turn_stats, self.historical_profile.turn_length_words, calls
+                    turn_stats, hist.turn_length_words, calls
                 ),
                 call_count=calls + 1,
                 updated_at_ms=timestamp_ms,
             )
         else:
-            self.blended_profile = self.intra_call_profile
+            self.blended_profiles[speaker_id] = profile
 
-    def _lock_intra_call_baseline(self, timestamp_ms: int) -> None:
-        self._recalculate_profiles(timestamp_ms)
-        self.is_intra_call_locked = True
+    def _lock_intra_call_baseline(self, timestamp_ms: int, speaker_id: Literal["client", "salesperson"] = "client") -> None:
+        self._recalculate_profiles(timestamp_ms, speaker_id=speaker_id)
+        self.is_locked_by_speaker[speaker_id] = True
+
+    def is_locked(self, speaker_id: Literal["client", "salesperson"] = "client") -> bool:
+        return self.is_locked_by_speaker.get(speaker_id, False)
 
     def get_active_profile_and_source(
         self,
+        speaker_id: Literal["client", "salesperson"] = "client",
     ) -> Tuple[Optional[BaselineProfile], Optional[Literal["intra_call", "historical_only", "blended"]]]:
-        if self.is_intra_call_locked:
-            if self.historical_profile is not None:
-                return self.blended_profile, "blended"
-            return self.intra_call_profile or self.blended_profile, "intra_call"
-        if self.historical_profile is not None:
-            return self.historical_profile, "historical_only"
+        hist = self.historical_profile if speaker_id == "client" else self.agent_historical_profile
+        if self.is_locked_by_speaker.get(speaker_id, False):
+            if hist is not None:
+                return self.blended_profiles[speaker_id], "blended"
+            return self.intra_call_profiles[speaker_id] or self.blended_profiles[speaker_id], "intra_call"
+        if hist is not None:
+            return hist, "historical_only"
         return None, None
 
-    def get_active_profile(self) -> Optional[BaselineProfile]:
-        profile, _ = self.get_active_profile_and_source()
+    def get_active_profile(
+        self,
+        speaker_id: Literal["client", "salesperson"] = "client",
+    ) -> Optional[BaselineProfile]:
+        profile, _ = self.get_active_profile_and_source(speaker_id)
         return profile
 
     def update_with_utterance(
@@ -303,12 +387,13 @@ class BaselineAndChangePointEngine:
         timing_snapshot: TimingFeatureSnapshot,
         semantic_snapshot: Optional[SemanticFeatureSnapshot] = None,
     ) -> List[ChangePointEvent]:
-        if utterance.speaker_id != "client":
+        speaker_id = utterance.speaker_id
+        if speaker_id not in ("client", "salesperson"):
             return []
 
         timestamp_ms = utterance.end_ms
-        if self.earliest_sample_ms is None:
-            self.earliest_sample_ms = utterance.start_ms
+        if self.earliest_sample_ms_by_speaker[speaker_id] is None:
+            self.earliest_sample_ms_by_speaker[speaker_id] = utterance.start_ms
 
         observed_features: Dict[str, float] = {
             "speech_rate_wpm": float(timing_snapshot.speech_rate_wpm),
@@ -321,7 +406,8 @@ class BaselineAndChangePointEngine:
         is_clean_speech = utterance.asr_confidence >= 0.70
 
         just_locked = False
-        if not self.is_intra_call_locked:
+        samples = self.speaker_samples[speaker_id]
+        if not self.is_locked_by_speaker[speaker_id]:
             if is_clean_speech:
                 turn_words = observed_features.get("turn_length_words", 0.0)
                 for feat, val in observed_features.items():
@@ -334,31 +420,26 @@ class BaselineAndChangePointEngine:
                     # Skip turn length on sub-2-word fragments to prevent 1-word breath tokens from deflating baseline mean
                     if feat == "turn_length_words" and val < 2.0:
                         continue
-                    self.prospect_samples[feat].append(val)
+                    # Skip negative response latencies (speech overlaps) from silence latency baseline
+                    if feat == "response_latency_ms" and val < 0.0:
+                        continue
+                    samples[feat].append(val)
 
-            elapsed_ms = timestamp_ms - self.earliest_sample_ms
-            turn_count = len(self.prospect_samples["turn_length_words"])
-            total_words = sum(self.prospect_samples["turn_length_words"])
+            elapsed_ms = timestamp_ms - (self.earliest_sample_ms_by_speaker[speaker_id] or 0)
+            turn_count = len(samples["turn_length_words"])
+            total_words = sum(samples["turn_length_words"])
 
             sufficient_speech = (
                 turn_count >= self.min_calibration_turns
                 and total_words >= self.min_cumulative_words
             )
             # Baseline sufficiency gate:
-            # We strictly enforce all conditions together:
-            # 1. elapsed_ms >= intra_call_window_ms (>= 60s)
-            # 2. turn_count >= min_calibration_turns (>= 3 clean turns)
-            # 3. total_words >= min_cumulative_words (>= 15 words)
-            #
-            # We NEVER allow elapsed time (even reaching max_calibration_window_ms)
-            # to bypass the word-count requirement. If a sparse speaker speaks only
-            # sub-4-word utterances across 90s, rate calculation filters them out, leaving
-            # 0 samples and producing a corrupted 0.0 WPM baseline that explodes on subsequent turns.
+            # Enforce elapsed time, turn count, and cumulative words per individual speaker
             if elapsed_ms >= self.intra_call_window_ms and sufficient_speech:
-                self._lock_intra_call_baseline(timestamp_ms)
+                self._lock_intra_call_baseline(timestamp_ms, speaker_id=speaker_id)
                 just_locked = True
 
-        active_profile, baseline_source = self.get_active_profile_and_source()
+        active_profile, baseline_source = self.get_active_profile_and_source(speaker_id)
         if active_profile is None or baseline_source is None:
             return []
 
@@ -368,15 +449,11 @@ class BaselineAndChangePointEngine:
             if feat == "speech_rate_wpm":
                 if val <= 0.0:
                     continue
-                # Turns with fewer than 4 words have excessive timestamp quantization variance
-                # and should not trigger speech rate change-points on short confirmations
                 turn_words = observed_features.get("turn_length_words", 0.0)
                 if turn_words < 4.0:
                     continue
 
             if feat == "avg_pause_duration_ms":
-                # Turns without intra-turn pauses (val <= 0.0) represent absence of pause data,
-                # NOT an anomalous drop in pause duration.
                 if val <= 0.0:
                     continue
                 turn_words = observed_features.get("turn_length_words", 0.0)
@@ -384,8 +461,6 @@ class BaselineAndChangePointEngine:
                     continue
 
             if feat == "turn_length_words":
-                # Short conversational confirmations/backchannels (< 4 words like "Yes, exactly")
-                # are standard conversational mechanics and must not trip a turn length collapse anomaly.
                 if val < 4.0:
                     stat: SpeakerBaselineStats = getattr(active_profile, feat)
                     if val < stat.mean:
@@ -411,7 +486,7 @@ class BaselineAndChangePointEngine:
                     }
 
                 event = ChangePointEvent(
-                    event_id=f"cp_{self.call_sid}_{timestamp_ms}_{feat}",
+                    event_id=f"cp_{self.call_sid}_{speaker_id}_{timestamp_ms}_{feat}",
                     call_sid=self.call_sid,
                     timestamp_ms=timestamp_ms,
                     feature_name=feat,
@@ -427,7 +502,7 @@ class BaselineAndChangePointEngine:
                 new_change_points.append(event)
                 self.change_points.append(event)
 
-        if self.is_intra_call_locked and not just_locked and not is_anomalous_turn and is_clean_speech:
+        if self.is_locked_by_speaker[speaker_id] and not just_locked and not is_anomalous_turn and is_clean_speech:
             turn_words = observed_features.get("turn_length_words", 0.0)
             for feat, val in observed_features.items():
                 if feat == "speech_rate_wpm" and (val <= 0.0 or turn_words < 4.0):
@@ -436,15 +511,22 @@ class BaselineAndChangePointEngine:
                     continue
                 if feat == "turn_length_words" and val < 2.0:
                     continue
-                self.prospect_samples[feat].append(val)
-            self._recalculate_profiles(timestamp_ms)
+                if feat == "response_latency_ms" and val < 0.0:
+                    continue
+                samples[feat].append(val)
+            self._recalculate_profiles(timestamp_ms, speaker_id=speaker_id)
 
         return new_change_points
 
     def compute_deviations(
-        self, timing_snapshot: TimingFeatureSnapshot
+        self,
+        timing_snapshot: TimingFeatureSnapshot,
+        speaker_id: Optional[Literal["client", "salesperson"]] = None,
     ) -> List[FeatureDeviation]:
-        active_profile, baseline_source = self.get_active_profile_and_source()
+        target_speaker: Literal["client", "salesperson"] = (
+            speaker_id or getattr(timing_snapshot, "speaker_id", None) or "client"
+        )
+        active_profile, baseline_source = self.get_active_profile_and_source(target_speaker)
         if active_profile is None or baseline_source is None:
             return []
 
@@ -500,20 +582,28 @@ class BaselineAndChangePointEngine:
 
         return deviations
 
-    def finalize_and_persist(self) -> Optional[BaselineProfile]:
-        turn_count = len(self.prospect_samples["turn_length_words"])
-        total_words = sum(self.prospect_samples["turn_length_words"])
+    def finalize_and_persist(
+        self,
+        speaker_id: Literal["client", "salesperson"] = "client",
+    ) -> Optional[BaselineProfile]:
+        samples = self.speaker_samples[speaker_id]
+        turn_count = len(samples["turn_length_words"])
+        total_words = sum(samples["turn_length_words"])
         sufficient_speech = (
             turn_count >= self.min_calibration_turns
             and total_words >= self.min_cumulative_words
         )
-        if not self.is_intra_call_locked:
+        if not self.is_locked_by_speaker[speaker_id]:
             if sufficient_speech:
-                self._lock_intra_call_baseline(timestamp_ms=0)
+                self._lock_intra_call_baseline(timestamp_ms=0, speaker_id=speaker_id)
             else:
                 return None
 
-        final_profile = self.get_active_profile()
-        if final_profile and self.prospect_id:
-            self.store.save_baseline(self.prospect_id, final_profile)
+        final_profile = self.get_active_profile(speaker_id)
+        if final_profile:
+            if speaker_id == "client" and self.prospect_id:
+                self.store.save_baseline(self.prospect_id, final_profile)
+            elif speaker_id == "salesperson" and self.agent_id:
+                self.agent_store.save_baseline(self.agent_id, final_profile)
         return final_profile
+

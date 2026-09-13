@@ -588,7 +588,7 @@ class SpeechToTextEngine:
                 LOGGER.info("Transcribing audio via Deepgram with word timestamps and utt_split=%.2f...", utt_split)
                 url = (
                     f"https://api.deepgram.com/v1/listen?punctuate=true&model=nova-2&language=en"
-                    f"&utterances=true&utt_split={utt_split}"
+                    f"&utterances=true&utt_split={utt_split}&diarize=true"
                 )
                 headers = {
                     "Authorization": f"Token {self.deepgram_api_key}",

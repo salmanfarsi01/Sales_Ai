@@ -30,6 +30,7 @@ from copilot.behavioral_normalization import (
     NormalizedUtterance,
     NormalizedWord,
     segment_audio_transcript_turns,
+    merge_dual_speaker_tracks,
 )
 from copilot.behavioral_timing import DeterministicTimingEngine, TimingFeatureSnapshot
 from copilot.behavioral_semantic import SemanticFeatureEngine, SemanticFeatureSnapshot
@@ -132,60 +133,17 @@ async def health():
     }
 
 
-@app.post("/api/test/analyze-recording")
-async def analyze_recording(
-    audio: UploadFile = File(...),
-    prospect_id: str = Form("test_prospect_001"),
-    call_sid: Optional[str] = Form(None),
-):
-    """Processes uploaded prospect audio through the full behavioral pipeline:
-    1. STT (Deepgram or Groq Whisper) with word-level timestamps.
-    2. Deterministic timing analysis (WPM, pause duration, response latency).
-    3. Semantic feature extraction (intent, recurrence, boundary).
-    4. Baseline & change-point detection (z-score departures).
-    5. Multi-window evidence frame construction.
-    6. Downstream inference scoring (Trust, Pacing, Engagement, Momentum, Readiness, Emotion).
-    """
-    audio_bytes = await audio.read()
-    if not audio_bytes:
-        raise HTTPException(status_code=400, detail="Audio file is empty")
-
-    active_call_sid = call_sid or f"call_{uuid.uuid4().hex[:8]}"
-    session = get_or_create_session(prospect_id, active_call_sid)
-    session["turn_index"] += 1
-
+async def execute_turn_pipeline(
+    segmented_utts: List[NormalizedUtterance],
+    active_call_sid: str,
+    prospect_id: str,
+    transcript: str,
+    session: Dict[str, Any],
+) -> Dict[str, Any]:
     timing_engine: DeterministicTimingEngine = session["timing_engine"]
     semantic_engine: SemanticFeatureEngine = session["semantic_engine"]
     baseline_engine: BaselineAndChangePointEngine = session["baseline_engine"]
     aggregator: MultiWindowAggregator = session["aggregator"]
-
-    # 1. Transcribe audio with word-level timestamps and pre-recorded utterances
-    content_type = audio.content_type or "audio/webm"
-    stt = SpeechToTextEngine(
-        deepgram_api_key=os.getenv("DEEPGRAM_API_KEY"),
-        groq_api_key=os.getenv("GROQ_API_KEY"),
-    )
-
-    LOGGER.info("Transcribing %d bytes (%s) for prospect '%s'...", len(audio_bytes), content_type, prospect_id)
-    transcript, words_raw = await stt.transcribe_with_timestamps(
-        audio_bytes, mime_type=content_type, utt_split=0.5
-    )
-    raw_utterances = getattr(stt, "latest_raw_utterances", None) or []
-    transcript = transcript.strip() if transcript else ""
-    if not transcript:
-        transcript = "I see, thanks for letting me know."
-        LOGGER.info("No audible speech detected; using fallback placeholder transcript.")
-
-    # 2. Segment audio into distinct utterance turns (Deepgram utterances or pause gaps >= 500ms)
-    segmented_utts = segment_audio_transcript_turns(
-        words_raw=words_raw,
-        transcript=transcript,
-        call_sid=active_call_sid,
-        speaker_id="client",
-        raw_utterances=raw_utterances,
-        min_pause_split_ms=500,
-    )
-    LOGGER.info("Segmented audio into %d sequential turn(s)", len(segmented_utts))
 
     last_timing_snap = None
     last_sem_snap = None
@@ -193,9 +151,10 @@ async def analyze_recording(
     last_inference_state = None
     play_by_play_turns = []
 
-    # 3. Process each turn sequentially through the behavioral pipeline
     for norm_utt in segmented_utts:
         session["turn_index"] += 1
+        speaker_role = norm_utt.speaker_id  # "salesperson" or "client"
+        speaker_label = "Agent" if speaker_role == "salesperson" else "Prospect"
 
         # Timing
         timing_snap = timing_engine.process_utterance(norm_utt)
@@ -213,7 +172,7 @@ async def analyze_recording(
         last_sem_snap = sem_snap
         session["context_history"].append(norm_utt)
 
-        # Baseline profile comparison & change points
+        # Baseline profile comparison & change points (isolated per speaker)
         new_cps = baseline_engine.update_with_utterance(norm_utt, timing_snap, sem_snap)
 
         # Multi-window evidence frame
@@ -229,13 +188,13 @@ async def analyze_recording(
         )
         last_inference_state = inference_state
 
-        active_prof = baseline_engine.get_active_profile()
+        active_prof = baseline_engine.get_active_profile(speaker_role)
         base_wpm = (
             round(active_prof.speech_rate_wpm.mean, 1)
             if (active_prof and active_prof.speech_rate_wpm.sample_count > 0)
             else None
         )
-        curr_wpm = round(timing_snap.speech_rate_wpm, 1)
+        curr_wpm = timing_snap.turn_speech_rate_wpm or round(timing_snap.speech_rate_wpm, 1)
         pace_delta = (
             round(((curr_wpm - base_wpm) / base_wpm) * 100.0, 1)
             if (base_wpm and base_wpm > 0)
@@ -254,6 +213,8 @@ async def analyze_recording(
 
         play_by_play_turns.append({
             "turn_index": session["turn_index"],
+            "speaker_id": speaker_role,
+            "speaker_label": speaker_label,
             "start_ms": norm_utt.start_ms,
             "end_ms": norm_utt.end_ms,
             "start_sec": round(norm_utt.start_ms / 1000.0, 1),
@@ -262,6 +223,8 @@ async def analyze_recording(
             "words_count": len(norm_utt.words) if norm_utt.words else len(norm_utt.text.split()),
             "turn_duration_ms": timing_snap.turn_duration_ms,
             "speech_rate_wpm": curr_wpm,
+            "turn_wpm": curr_wpm,
+            "rolling_wpm_60s": round(timing_snap.speech_rate_wpm, 1),
             "baseline_wpm": base_wpm,
             "pace_delta_pct": pace_delta,
             "avg_pause_duration_ms": round(timing_snap.avg_pause_duration_ms, 1),
@@ -283,17 +246,19 @@ async def analyze_recording(
             "readiness_score": inference_state.readiness.score,
             "expressed_valence": inference_state.emotion.expressed_valence if inference_state.emotion else 0.0,
             "tension_level": inference_state.emotion.tension_level if inference_state.emotion else 0.20,
-            "is_baseline_locked": baseline_engine.is_intra_call_locked,
+            "is_baseline_locked": baseline_engine.is_locked(speaker_role),
         })
 
         LOGGER.info(
-            "Turn %d analyzed: transcript='%s' | WPM=%.1f | Pacing=%.2f | Trust=%.2f | Readiness=%.2f",
+            "Turn %d [%s] analyzed: transcript='%s' | TurnWPM=%.1f (Base=%s) | Latency=%s | Pacing=%.2f | Trust=%.2f",
             session["turn_index"],
+            speaker_label,
             norm_utt.text[:40],
-            timing_snap.speech_rate_wpm,
+            curr_wpm,
+            str(base_wpm),
+            str(timing_snap.response_latency_ms),
             inference_state.pacing.score,
             inference_state.trust.score,
-            inference_state.readiness.score,
         )
 
     elapsed_ms = (
@@ -301,8 +266,10 @@ async def analyze_recording(
         if (last_timing_snap and baseline_engine.earliest_sample_ms is not None)
         else 0
     )
-    calib_turns = len(baseline_engine.prospect_samples["turn_length_words"])
-    calib_words = int(sum(baseline_engine.prospect_samples["turn_length_words"]))
+    prospect_turns = len(baseline_engine.speaker_samples["client"]["turn_length_words"])
+    prospect_words = int(sum(baseline_engine.speaker_samples["client"]["turn_length_words"]))
+    agent_turns = len(baseline_engine.speaker_samples["salesperson"]["turn_length_words"])
+    agent_words = int(sum(baseline_engine.speaker_samples["salesperson"]["turn_length_words"]))
     elapsed_sec = round(elapsed_ms / 1000.0, 1)
     target_sec = round(baseline_engine.intra_call_window_ms / 1000.0, 1)
 
@@ -312,20 +279,28 @@ async def analyze_recording(
         "prospect_id": prospect_id,
         "turns_processed": len(segmented_utts),
         "turn_index": session["turn_index"],
-        "is_baseline_locked": baseline_engine.is_intra_call_locked,
+        "is_baseline_locked": baseline_engine.is_locked("client"),
+        "agent_baseline_locked": baseline_engine.is_locked("salesperson"),
+        "prospect_baseline_locked": baseline_engine.is_locked("client"),
         "calibration_progress": {
-            "is_locked": baseline_engine.is_intra_call_locked,
+            "is_locked": baseline_engine.is_locked("client"),
+            "agent_is_locked": baseline_engine.is_locked("salesperson"),
+            "prospect_is_locked": baseline_engine.is_locked("client"),
             "elapsed_sec": elapsed_sec,
             "target_sec": target_sec,
-            "turn_count": calib_turns,
+            "turn_count": prospect_turns,
             "target_turns": baseline_engine.min_calibration_turns,
-            "total_words": calib_words,
+            "total_words": prospect_words,
             "target_words": baseline_engine.min_cumulative_words,
+            "agent_turn_count": agent_turns,
+            "agent_total_words": agent_words,
         },
         "transcript": transcript,
         "utterances": [
             {
                 "turn_index": session["turn_index"] - len(segmented_utts) + idx + 1,
+                "speaker_id": u.speaker_id,
+                "speaker_label": "Agent" if u.speaker_id == "salesperson" else "Prospect",
                 "text": u.text,
                 "start_ms": u.start_ms,
                 "end_ms": u.end_ms,
@@ -354,6 +329,158 @@ async def analyze_recording(
     return result_payload
 
 
+@app.post("/api/test/analyze-recording")
+async def analyze_recording(
+    audio: UploadFile = File(...),
+    prospect_id: str = Form("test_prospect_001"),
+    call_sid: Optional[str] = Form(None),
+):
+    """Processes uploaded prospect audio through the full behavioral pipeline:
+    1. STT (Deepgram with diarization) with word-level timestamps.
+    2. Deterministic timing analysis (turn WPM, pause duration, response latency).
+    3. Semantic feature extraction (intent, recurrence, boundary).
+    4. Baseline & change-point detection (z-score departures per speaker).
+    5. Multi-window evidence frame construction.
+    6. Downstream inference scoring (Trust, Pacing, Engagement, Momentum, Readiness, Emotion).
+    """
+    audio_bytes = await audio.read()
+    if not audio_bytes:
+        raise HTTPException(status_code=400, detail="Audio file is empty")
+
+    active_call_sid = call_sid or f"call_{uuid.uuid4().hex[:8]}"
+    session = get_or_create_session(prospect_id, active_call_sid)
+
+    # 1. Transcribe audio with word-level timestamps and diarization
+    content_type = audio.content_type or "audio/webm"
+    stt = SpeechToTextEngine(
+        deepgram_api_key=os.getenv("DEEPGRAM_API_KEY"),
+        groq_api_key=os.getenv("GROQ_API_KEY"),
+    )
+
+    LOGGER.info("Transcribing %d bytes (%s) for prospect '%s'...", len(audio_bytes), content_type, prospect_id)
+    transcript, words_raw = await stt.transcribe_with_timestamps(
+        audio_bytes, mime_type=content_type, utt_split=0.5
+    )
+    raw_utterances = getattr(stt, "latest_raw_utterances", None) or []
+    transcript = transcript.strip() if transcript else ""
+    if not transcript:
+        transcript = "I see, thanks for letting me know."
+        LOGGER.info("No audible speech detected; using fallback placeholder transcript.")
+
+    # 2. Segment audio into distinct utterance turns with diarization
+    segmented_utts = segment_audio_transcript_turns(
+        words_raw=words_raw,
+        transcript=transcript,
+        call_sid=active_call_sid,
+        speaker_id="client",
+        raw_utterances=raw_utterances,
+        min_pause_split_ms=500,
+    )
+    LOGGER.info("Segmented audio into %d sequential turn(s)", len(segmented_utts))
+
+    return await execute_turn_pipeline(
+        segmented_utts=segmented_utts,
+        active_call_sid=active_call_sid,
+        prospect_id=prospect_id,
+        transcript=transcript,
+        session=session,
+    )
+
+
+@app.post("/api/test/analyze-two-tracks")
+async def analyze_two_tracks(
+    agent_audio: UploadFile = File(...),
+    prospect_audio: UploadFile = File(...),
+    agent_start_epoch_ms: int = Form(0),
+    prospect_start_epoch_ms: int = Form(0),
+    prospect_id: str = Form("test_prospect_001"),
+    agent_id: str = Form("test_agent_001"),
+    call_sid: Optional[str] = Form(None),
+):
+    """Processes two independently recorded single-speaker tracks (Agent & Prospect),
+    transcribes them separately, merges them onto a synchronized chronological timeline,
+    and runs the full behavioral pipeline with isolated per-speaker baselines.
+    """
+    agent_bytes = await agent_audio.read()
+    prospect_bytes = await prospect_audio.read()
+
+    if not agent_bytes and not prospect_bytes:
+        raise HTTPException(status_code=400, detail="Both audio tracks are empty")
+
+    active_call_sid = call_sid or f"call_{uuid.uuid4().hex[:8]}"
+    session = get_or_create_session(prospect_id, active_call_sid)
+    session["baseline_engine"].agent_id = agent_id
+
+    stt = SpeechToTextEngine(
+        deepgram_api_key=os.getenv("DEEPGRAM_API_KEY"),
+        groq_api_key=os.getenv("GROQ_API_KEY"),
+    )
+
+    agent_segmented: List[NormalizedUtterance] = []
+    if agent_bytes:
+        agent_mime = agent_audio.content_type or "audio/webm"
+        LOGGER.info("Transcribing Agent track: %d bytes (%s)...", len(agent_bytes), agent_mime)
+        agent_transcript, agent_words = await stt.transcribe_with_timestamps(
+            agent_bytes, mime_type=agent_mime, utt_split=0.5
+        )
+        agent_raw_utts = getattr(stt, "latest_raw_utterances", None) or []
+        agent_segmented = segment_audio_transcript_turns(
+            words_raw=agent_words,
+            transcript=agent_transcript or "",
+            call_sid=active_call_sid,
+            speaker_id="salesperson",
+            raw_utterances=agent_raw_utts,
+            min_pause_split_ms=500,
+        )
+        for u in agent_segmented:
+            u.speaker_id = "salesperson"
+
+    prospect_segmented: List[NormalizedUtterance] = []
+    if prospect_bytes:
+        prospect_mime = prospect_audio.content_type or "audio/webm"
+        LOGGER.info("Transcribing Prospect track: %d bytes (%s)...", len(prospect_bytes), prospect_mime)
+        prospect_transcript, prospect_words = await stt.transcribe_with_timestamps(
+            prospect_bytes, mime_type=prospect_mime, utt_split=0.5
+        )
+        prospect_raw_utts = getattr(stt, "latest_raw_utterances", None) or []
+        prospect_segmented = segment_audio_transcript_turns(
+            words_raw=prospect_words,
+            transcript=prospect_transcript or "",
+            call_sid=active_call_sid,
+            speaker_id="client",
+            raw_utterances=prospect_raw_utts,
+            min_pause_split_ms=500,
+        )
+        for u in prospect_segmented:
+            u.speaker_id = "client"
+
+    merged_utts = merge_dual_speaker_tracks(
+        agent_utterances=agent_segmented,
+        prospect_utterances=prospect_segmented,
+        agent_start_epoch_ms=agent_start_epoch_ms,
+        prospect_start_epoch_ms=prospect_start_epoch_ms,
+    )
+    LOGGER.info(
+        "Merged dual tracks: %d agent turns + %d prospect turns -> %d total chronological turns",
+        len(agent_segmented),
+        len(prospect_segmented),
+        len(merged_utts),
+    )
+
+    combined_transcript = " ".join(
+        f"[{'Agent' if u.speaker_id == 'salesperson' else 'Prospect'}]: {u.text}"
+        for u in merged_utts
+    )
+
+    return await execute_turn_pipeline(
+        segmented_utts=merged_utts,
+        active_call_sid=active_call_sid,
+        prospect_id=prospect_id,
+        transcript=combined_transcript,
+        session=session,
+    )
+
+
 @app.post("/api/test/reset-session")
 async def reset_session(prospect_id: str = Form("test_prospect_001")):
     """Resets the in-memory engine state for a prospect."""
@@ -371,6 +498,7 @@ if __name__ == "__main__":
     print("  [*] PITCHPROX BEHAVIORAL SIGNAL ENGINE TEST SERVER")
     print(f"  --> Web UI Console:   http://{host}:{port}/behavioral-test")
     print(f"  --> Live Endpoint:    http://{host}:{port}/api/test/analyze-recording")
+    print(f"  --> Dual Track:       http://{host}:{port}/api/test/analyze-two-tracks")
     print("=" * 65 + "\n")
 
-    uvicorn.run("run_behavioral_signal:app", host=host, port=port, reload=False, log_level="info")
+    uvicorn.run("run_behavioral_signal:app", host=host, port=port, reload=True, log_level="info")

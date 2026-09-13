@@ -418,8 +418,10 @@ class MultiWindowAggregator:
         # 1. Current Utterance Horizon
         curr_turn_duration = max(1, utterance.end_ms - utterance.start_ms)
         curr_deviations: List[FeatureDeviation] = []
-        if self.baseline_engine is not None and utterance.speaker_id == "client":
-            curr_deviations = self.baseline_engine.compute_deviations(timing_snapshot)
+        if self.baseline_engine is not None:
+            curr_deviations = self.baseline_engine.compute_deviations(
+                timing_snapshot, speaker_id=utterance.speaker_id
+            )
 
         # Strict weakest-link minimum rule across timing, synthetic penalty, semantics, and change points
         curr_conf_candidates = [float(timing_snapshot.timing_confidence)]
@@ -489,8 +491,10 @@ class MultiWindowAggregator:
             )
 
             h_deviations: List[FeatureDeviation] = []
-            if self.baseline_engine is not None and utterance.speaker_id == "client":
-                h_deviations = self.baseline_engine.compute_deviations(h_timing)
+            if self.baseline_engine is not None:
+                h_deviations = self.baseline_engine.compute_deviations(
+                    h_timing, speaker_id=utterance.speaker_id
+                )
 
             # Strict weakest-link minimum confidence calculation
             h_conf_candidates = [float(h_timing.timing_confidence)]

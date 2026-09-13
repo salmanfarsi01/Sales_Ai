@@ -946,4 +946,128 @@ def test_baseline_collection_skips_sub_2_word_fragments_from_turn_length_mean():
     assert active_profile.turn_length_words.sample_count == 3
 
 
+def test_agent_and_prospect_baselines_maintained_independently():
+    """
+    Validates that baselines are maintained independently for Agent and Prospect:
+    1. Agent and Prospect utterances update separate, non-overlapping sample pools.
+    2. Agent speaks fast (180 WPM), locking an Agent baseline of ~180 WPM.
+    3. Prospect speaks slowly (80 WPM), locking a Prospect baseline of ~80 WPM.
+    4. Measuring deviations for each speaker is strictly relative to their own baseline:
+       - Agent speaking at 180 WPM is normal (|z| < 1.0), but Agent speaking at 80 WPM is an anomalous drop (|z| >= 2.0).
+       - Prospect speaking at 80 WPM is normal (|z| < 1.0), but Prospect speaking at 180 WPM is an anomalous surge (|z| >= 2.0).
+    5. Confirms zero cross-speaker pollution or pooled call baseline.
+    """
+    engine = BaselineAndChangePointEngine(
+        call_sid="call_dual_speaker_test",
+        prospect_id="prospect_slow_01",
+        agent_id="agent_fast_01",
+        intra_call_window_ms=60000,
+        min_calibration_turns=3,
+        min_cumulative_words=15,
+        z_threshold=2.0,
+    )
+
+    # 1. Agent calibration sequence: 3 fast turns (180 WPM) covering > 60s
+    agent_turns = [
+        ("Good morning this is Alex with Premier Realty following up on your inquiry about listing.", 1000, 5000, 15, 180.0),
+        ("We provide full staging photography and comprehensive marketing across all premier digital channels.", 10000, 15000, 14, 180.0),
+        ("Our average closing time is under thirty days and we consistently maximize net client proceeds.", 55000, 62000, 15, 180.0),
+    ]
+    for text, s, e, words, wpm in agent_turns:
+        u = normalize_generic_transcript(text, "salesperson", s, e, "call_dual_speaker_test")
+        t = TimingFeatureSnapshot(
+            timestamp_ms=e,
+            window_ms=60000,
+            speaker_id="salesperson",
+            speech_rate_wpm=wpm,
+            avg_pause_duration_ms=0.0,
+            turn_length_words=words,
+        )
+        engine.update_with_utterance(u, t)
+
+    # 2. Prospect calibration sequence: 3 slow turns (80 WPM) covering > 60s
+    prospect_turns = [
+        ("Hello, yes we have been thinking about selling sometime next year.", 2000, 9500, 12, 80.0),
+        ("We are really not in any rush and we want to take our time.", 20000, 31000, 14, 80.0),
+        ("Our lease does not expire for another six months anyway so we have time.", 52000, 65000, 15, 80.0),
+    ]
+    for text, s, e, words, wpm in prospect_turns:
+        u = normalize_generic_transcript(text, "client", s, e, "call_dual_speaker_test")
+        t = TimingFeatureSnapshot(
+            timestamp_ms=e,
+            window_ms=60000,
+            speaker_id="client",
+            speech_rate_wpm=wpm,
+            avg_pause_duration_ms=0.0,
+            turn_length_words=words,
+        )
+        engine.update_with_utterance(u, t)
+
+    # Both must be locked independently
+    assert engine.is_locked("salesperson") is True
+    assert engine.is_locked("client") is True
+    assert engine.is_intra_call_locked is True  # client property
+
+    agent_prof = engine.get_active_profile("salesperson")
+    prospect_prof = engine.get_active_profile("client")
+    assert agent_prof is not None
+    assert prospect_prof is not None
+
+    # Verify separate baseline means
+    assert agent_prof.speech_rate_wpm.mean == 180.0
+    assert prospect_prof.speech_rate_wpm.mean == 80.0
+
+    # Verify sample segregation (no cross-contamination)
+    assert len(engine.speaker_samples["salesperson"]["speech_rate_wpm"]) == 3
+    assert len(engine.speaker_samples["client"]["speech_rate_wpm"]) == 3
+    assert all(x == 180.0 for x in engine.speaker_samples["salesperson"]["speech_rate_wpm"])
+    assert all(x == 80.0 for x in engine.speaker_samples["client"]["speech_rate_wpm"])
+
+    # 3. Test relative deviations
+    # Case A: Agent speaking at 80 WPM -> anomalous slowdown for Agent!
+    t_agent_slow = TimingFeatureSnapshot(
+        timestamp_ms=70000,
+        window_ms=10000,
+        speaker_id="salesperson",
+        speech_rate_wpm=80.0,
+        avg_pause_duration_ms=0.0,
+        turn_length_words=10,
+    )
+    agent_devs = engine.compute_deviations(t_agent_slow, speaker_id="salesperson")
+    agent_rate_dev = next(d for d in agent_devs if d.feature_name == "speech_rate_wpm")
+    assert agent_rate_dev.z_score <= -2.0
+    assert agent_rate_dev.is_significant is True
+    assert agent_rate_dev.delta_percent < -50.0
+
+    # Case B: Prospect speaking at 80 WPM -> perfectly normal for Prospect!
+    t_prospect_normal = TimingFeatureSnapshot(
+        timestamp_ms=75000,
+        window_ms=10000,
+        speaker_id="client",
+        speech_rate_wpm=80.0,
+        avg_pause_duration_ms=0.0,
+        turn_length_words=10,
+    )
+    prospect_devs = engine.compute_deviations(t_prospect_normal, speaker_id="client")
+    prospect_rate_dev = next(d for d in prospect_devs if d.feature_name == "speech_rate_wpm")
+    assert abs(prospect_rate_dev.z_score) < 1.0
+    assert prospect_rate_dev.is_significant is False
+
+    # Case C: Prospect speaking at 180 WPM -> anomalous surge for Prospect!
+    t_prospect_fast = TimingFeatureSnapshot(
+        timestamp_ms=80000,
+        window_ms=10000,
+        speaker_id="client",
+        speech_rate_wpm=180.0,
+        avg_pause_duration_ms=0.0,
+        turn_length_words=10,
+    )
+    prospect_fast_devs = engine.compute_deviations(t_prospect_fast, speaker_id="client")
+    prospect_fast_rate_dev = next(d for d in prospect_fast_devs if d.feature_name == "speech_rate_wpm")
+    assert prospect_fast_rate_dev.z_score >= 2.0
+    assert prospect_fast_rate_dev.is_significant is True
+    assert prospect_fast_rate_dev.delta_percent > +100.0
+
+
+
 
