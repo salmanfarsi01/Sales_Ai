@@ -36,6 +36,61 @@ HORIZON_DURATIONS_MS: Dict[WindowHorizon, int] = {
 }
 
 
+class ConfidencePillarConfig(BaseModel):
+    """Named, versioned, and documented calibration thresholds for the 5-pillar confidence model.
+
+    All thresholds are v1 provisional estimates established for honest uncertainty representation,
+    pending empirical calibration against labeled telephony conversion datasets.
+    """
+    version: str = "1.0.0"
+
+    baseline_unlocked_prior: float = Field(
+        0.70,
+        description=(
+            "Confidence cap when a speaker's baseline profile is actively calibrating (<3 turns / <15 words / <60s). "
+            "Timing metrics (WPM, pause durations, turn lengths) are true acoustic facts measured directly from "
+            "word timestamps (not fabricated), and population norms (~150 WPM) provide a reasonable baseline prior. "
+            "However, individual baseline divergence claims (z-scores) remain provisional until intra-call calibration "
+            "locks against the speaker's own cadence, capping initial confidence at 0.70."
+        ),
+    )
+    single_channel_diarization_certainty: float = Field(
+        0.80,
+        description=(
+            "Certainty cap when relying on single-channel diarization rather than isolated dual-track audio. "
+            "Single-channel acoustic speaker clustering exhibits an estimated 15-20% error rate on conversational "
+            "telephony (especially during rapid turn-taking, backchannels, and simultaneous talk). While dual-track "
+            "RTP audio achieves 1.0 (zero speaker ambiguity), single-channel diarization is capped at 0.80 pending "
+            "empirical diarization error-rate (DER) benchmarks."
+        ),
+    )
+    synthetic_timing_certainty: float = Field(
+        0.50,
+        description=(
+            "Certainty cap when word-level timestamps are unavailable and timestamps are linearly interpolated from "
+            "utterance boundaries. Ensures synthetic timing estimates cannot produce high-confidence downstream judgments."
+        ),
+    )
+    heuristic_semantic_certainty: float = Field(
+        0.65,
+        description=(
+            "Certainty cap for deterministic heuristic/regex semantic extraction fallback. Rule-based regex reliably "
+            "detects explicit phrasing but lacks contextual nuance and pragmatic inference compared to LLM reasoning."
+        ),
+    )
+    heuristic_bypass_certainty: float = Field(
+        0.50,
+        description=(
+            "Certainty cap for short conversational fragments (1-2 words) that bypass deep semantic evaluation, "
+            "leaving unmeasured dimensions at neutral priors."
+        ),
+    )
+    high_confidence_ceiling: float = Field(
+        0.95,
+        description="Ceiling for pipeline confidence when all 5 pillars (dual-track, locked baseline, LLM, clean ASR) are satisfied.",
+    )
+
+
 class BehavioralEvidenceSnapshot(BaseModel):
     evidence_id: str = Field(default_factory=lambda: f"ev_{uuid.uuid4().hex[:12]}")
     call_sid: str
@@ -50,6 +105,8 @@ class BehavioralEvidenceSnapshot(BaseModel):
     contributing_utterance_ids: List[str] = Field(default_factory=list)
     contributing_event_ids: List[str] = Field(default_factory=list)
     evidence_confidence: float = Field(1.0, ge=0.0, le=1.0)
+    confidence_driver: Optional[str] = None
+    confidence_breakdown: Optional[Dict[str, float]] = None
 
 
 class MultiWindowEvidenceFrame(BaseModel):
@@ -265,11 +322,13 @@ class MultiWindowAggregator:
         timing_engine: DeterministicTimingEngine,
         baseline_engine: Optional[BaselineAndChangePointEngine] = None,
         store: Optional[EvidenceLogStore] = None,
+        confidence_config: Optional[ConfidencePillarConfig] = None,
     ):
         self.call_sid = call_sid
         self.timing_engine = timing_engine
         self.baseline_engine = baseline_engine
         self.store = store or SQLiteEvidenceLogStore()
+        self.confidence_config = confidence_config or ConfidencePillarConfig()
 
         self.utterances: List[NormalizedUtterance] = []
         self.turn_events: List[NormalizedTurnEvent] = []
@@ -423,15 +482,49 @@ class MultiWindowAggregator:
                 timing_snapshot, speaker_id=utterance.speaker_id
             )
 
-        # Strict weakest-link minimum rule across timing, synthetic penalty, semantics, and change points
-        curr_conf_candidates = [float(timing_snapshot.timing_confidence)]
-        if utterance.is_estimated_timing:
-            curr_conf_candidates.append(0.5)
+        cfg = self.confidence_config
+
+        # Comprehensive weakest-link confidence aggregation across 5 key factors:
+        # 1. Timing measurement quality (word-level timestamps vs synthetic estimation)
+        t_conf = cfg.synthetic_timing_certainty if utterance.is_estimated_timing else float(timing_snapshot.timing_confidence)
+
+        # 2. ASR audio transcription quality (per-word Deepgram confidence average)
+        asr_conf = max(0.0, min(1.0, float(utterance.asr_confidence)))
+
+        # 3. Baseline readiness (calibrating prior vs locked normative 1.0)
+        is_locked = self.baseline_engine.is_locked(utterance.speaker_id) if self.baseline_engine else True
+        base_conf = 1.0 if is_locked else cfg.baseline_unlocked_prior
+
+        # 4. Speaker separation certainty (dual-track isolated 1.0 vs single-channel diarized)
+        meta = utterance.metadata or {}
+        if "speaker_separation_confidence" in meta:
+            sep_conf = float(meta["speaker_separation_confidence"])
+        elif meta.get("is_dual_track", False):
+            sep_conf = 1.0
+        elif not meta.get("enforce_single_speaker", True):
+            sep_conf = cfg.single_channel_diarization_certainty
+        else:
+            sep_conf = 1.0
+
+        # 5. Semantic extraction certainty
+        sem_conf = float(semantic_snapshot.semantic_confidence) if semantic_snapshot else cfg.high_confidence_ceiling
+
+        curr_factors: List[tuple[str, float, str]] = [
+            ("timing", t_conf, "Estimated word timing without word-level timestamps"),
+            ("asr", asr_conf, f"ASR audio transcription quality ({int(round(asr_conf * 100))}%)"),
+            ("baseline", base_conf, f"Uncalibrated speaker baseline ({utterance.speaker_id} calibrating)"),
+            ("speaker_sep", sep_conf, f"Single-channel speaker diarization uncertainty ({int(round(sep_conf * 100))}%)"),
+        ]
         if semantic_snapshot is not None:
-            curr_conf_candidates.append(float(semantic_snapshot.semantic_confidence))
+            curr_factors.append(("semantic", sem_conf, f"Heuristic semantic extraction ({semantic_snapshot.extraction_mode})"))
         if new_change_points:
-            curr_conf_candidates.extend(float(cp.confidence) for cp in new_change_points)
-        curr_confidence = min(curr_conf_candidates)
+            cp_min = min(float(cp.confidence) for cp in new_change_points)
+            curr_factors.append(("change_point", cp_min, f"Change point detection uncertainty ({int(round(cp_min * 100))}%)"))
+
+        weakest_name, weakest_val, weakest_reason = min(curr_factors, key=lambda f: f[1])
+        curr_confidence = max(0.0, min(1.0, weakest_val))
+        curr_driver = "High confidence (dual-track, verified ASR, locked baseline, LLM)" if curr_confidence >= cfg.high_confidence_ceiling else weakest_reason
+        curr_breakdown = {name: round(val, 2) for name, val, _ in curr_factors}
 
         curr_events = [
             e.event_id
@@ -453,6 +546,8 @@ class MultiWindowAggregator:
             contributing_utterance_ids=[utterance.utterance_id],
             contributing_event_ids=curr_events,
             evidence_confidence=round(curr_confidence, 2),
+            confidence_driver=curr_driver,
+            confidence_breakdown=curr_breakdown,
         )
 
         # Multi-window horizons (last_5_10s, last_20_30s, last_60_90s, full_call)
@@ -496,20 +591,50 @@ class MultiWindowAggregator:
                     h_timing, speaker_id=utterance.speaker_id
                 )
 
-            # Strict weakest-link minimum confidence calculation
-            h_conf_candidates = [float(h_timing.timing_confidence)]
-            if any(u.is_estimated_timing for u in window_utts):
-                h_conf_candidates.append(0.5)
-            if semantic_snapshot is not None:
-                h_conf_candidates.append(float(semantic_snapshot.semantic_confidence))
-            if window_cps:
-                h_conf_candidates.extend(float(cp.confidence) for cp in window_cps)
-            h_confidence = min(h_conf_candidates)
+            # Strict weakest-link minimum confidence calculation in window
+            h_t_conf = cfg.synthetic_timing_certainty if any(u.is_estimated_timing for u in window_utts) else float(h_timing.timing_confidence)
+            h_asr_conf = min((float(u.asr_confidence) for u in window_utts), default=asr_conf)
+            if self.baseline_engine is not None:
+                speakers_in_win = set(u.speaker_id for u in window_utts)
+                h_locked = all(self.baseline_engine.is_locked(s) for s in speakers_in_win) if speakers_in_win else is_locked
+                h_base_conf = 1.0 if h_locked else cfg.baseline_unlocked_prior
+            else:
+                h_base_conf = 1.0
+
+            h_sep_confs = []
+            for u in window_utts:
+                m = u.metadata or {}
+                if "speaker_separation_confidence" in m:
+                    h_sep_confs.append(float(m["speaker_separation_confidence"]))
+                elif m.get("is_dual_track", False):
+                    h_sep_confs.append(1.0)
+                elif not m.get("enforce_single_speaker", True):
+                    h_sep_confs.append(cfg.single_channel_diarization_certainty)
+                else:
+                    h_sep_confs.append(1.0)
+            h_sep_conf = min(h_sep_confs) if h_sep_confs else sep_conf
 
             talk_ratio = self._compute_talk_ratio(window_utts)
             h_semantic = self._aggregate_semantic_for_window(
                 window_utts, fallback_snap=semantic_snapshot
             )
+
+            h_factors: List[tuple[str, float, str]] = [
+                ("timing", h_t_conf, "Estimated word timing without word-level timestamps"),
+                ("asr", h_asr_conf, f"ASR audio transcription quality ({int(round(h_asr_conf * 100))}%)"),
+                ("baseline", h_base_conf, "Uncalibrated speaker baseline in window"),
+                ("speaker_sep", h_sep_conf, f"Single-channel speaker diarization uncertainty ({int(round(h_sep_conf * 100))}%)"),
+            ]
+            if h_semantic is not None:
+                h_factors.append(("semantic", float(h_semantic.semantic_confidence), f"Heuristic semantic extraction ({h_semantic.extraction_mode})"))
+            if window_cps:
+                h_cp_min = min(float(cp.confidence) for cp in window_cps)
+                h_factors.append(("change_point", h_cp_min, f"Change point detection uncertainty ({int(round(h_cp_min * 100))}%)"))
+
+            h_w_name, h_w_val, h_w_reason = min(h_factors, key=lambda f: f[1])
+            h_confidence = max(0.0, min(1.0, h_w_val))
+            h_driver = "High confidence (dual-track, verified ASR, locked baseline, LLM)" if h_confidence >= cfg.high_confidence_ceiling else h_w_reason
+            h_breakdown = {name: round(val, 2) for name, val, _ in h_factors}
 
             windows[horizon] = BehavioralEvidenceSnapshot(
                 evidence_id=f"ev_{self.call_sid}_{timestamp_ms}_{horizon}",
@@ -525,6 +650,8 @@ class MultiWindowAggregator:
                 contributing_utterance_ids=window_utt_ids,
                 contributing_event_ids=window_events,
                 evidence_confidence=round(h_confidence, 2),
+                confidence_driver=h_driver,
+                confidence_breakdown=h_breakdown,
             )
 
         frame = MultiWindowEvidenceFrame(

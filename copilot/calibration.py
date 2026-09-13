@@ -578,17 +578,26 @@ class SpeechToTextEngine:
         return transcript
 
     async def transcribe_with_timestamps(
-        self, audio_bytes: bytes, mime_type: str = "audio/webm", utt_split: float = 0.5
+        self,
+        audio_bytes: bytes,
+        mime_type: str = "audio/webm",
+        utt_split: float = 0.5,
+        diarize: bool = True,
     ) -> tuple[str, list[dict[str, Any]]]:
         """Transcribe user audio to text and extract word-level timestamps."""
         self.latest_raw_utterances = []
         # 1. Deepgram STT (with word timestamps & utterances)
         if self.deepgram_api_key:
             try:
-                LOGGER.info("Transcribing audio via Deepgram with word timestamps and utt_split=%.2f...", utt_split)
+                LOGGER.info(
+                    "Transcribing audio via Deepgram with word timestamps, utt_split=%.2f, diarize=%s...",
+                    utt_split,
+                    diarize,
+                )
+                diarize_param = "true" if diarize else "false"
                 url = (
                     f"https://api.deepgram.com/v1/listen?punctuate=true&model=nova-2&language=en"
-                    f"&utterances=true&utt_split={utt_split}&diarize=true"
+                    f"&utterances=true&utt_split={utt_split}&diarize={diarize_param}"
                 )
                 headers = {
                     "Authorization": f"Token {self.deepgram_api_key}",

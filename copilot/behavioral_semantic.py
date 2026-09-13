@@ -374,7 +374,7 @@ class SemanticFeatureEngine:
 
         conf_profile = "heuristic_bypass" if is_bypass else "heuristic"
         conf = CONFIDENCE_BY_FEATURE[conf_profile]
-        sem_conf = round(min(conf.values()), 2)
+        sem_conf = round(min(min(conf.values()), float(utterance.asr_confidence)), 2)
 
         return SemanticFeatureSnapshot(
             utterance_id=utterance.utterance_id,
@@ -514,7 +514,7 @@ class SemanticFeatureEngine:
                 specificity_confidence=conf["specificity"],
                 future_language_confidence=conf["future_language"],
                 agreement_confidence=conf["agreement"],
-                semantic_confidence=0.95,
+                semantic_confidence=round(min(0.95, float(utterance.asr_confidence)), 2),
             )
         except asyncio.TimeoutError:
             LOGGER.warning("Semantic LLM extraction timed out after %.2fs; falling back to heuristic", timeout)

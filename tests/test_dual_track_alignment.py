@@ -247,3 +247,297 @@ def test_isolated_per_speaker_baselines():
 
     # They must remain strictly different and isolated
     assert agent_prof.turn_length_words.mean > prospect_prof.turn_length_words.mean * 1.5
+
+
+def test_merge_dual_speaker_tracks_relative_offset_positive_and_negative():
+    """Validates that relative offsets (+2500ms and -1500ms) correctly shift the timeline."""
+    agent_utts = [
+        NormalizedUtterance(
+            call_sid="call_rel_01",
+            speaker_id="salesperson",
+            text="Agent speaking first",
+            start_ms=0,
+            end_ms=2000,
+            words=_make_words("Agent speaking first", 0, 2000),
+        )
+    ]
+    prospect_utts = [
+        NormalizedUtterance(
+            call_sid="call_rel_01",
+            speaker_id="client",
+            text="Prospect speaking next",
+            start_ms=500,
+            end_ms=2500,
+            words=_make_words("Prospect speaking next", 500, 2500),
+        )
+    ]
+
+    # 1. Positive relative offset: Prospect started 2500ms after Agent
+    merged_pos = merge_dual_speaker_tracks(
+        agent_utterances=agent_utts,
+        prospect_utterances=prospect_utts,
+        prospect_offset_ms=2500,
+    )
+    assert merged_pos[0].speaker_id == "salesperson"
+    assert merged_pos[0].start_ms == 0
+    assert merged_pos[0].end_ms == 2000
+
+    assert merged_pos[1].speaker_id == "client"
+    assert merged_pos[1].start_ms == 3000  # 500 + 2500
+    assert merged_pos[1].end_ms == 5000    # 2500 + 2500
+
+    # 2. Negative relative offset: Prospect started 1500ms before Agent
+    merged_neg = merge_dual_speaker_tracks(
+        agent_utterances=agent_utts,
+        prospect_utterances=prospect_utts,
+        prospect_offset_ms=-1500,
+    )
+    # Prospect offset is 0, Agent offset is 1500
+    # Prospect turn: 500 to 2500ms
+    # Agent turn: 0 + 1500 = 1500 to 3500ms
+    assert merged_neg[0].speaker_id == "client"
+    assert merged_neg[0].start_ms == 500
+    assert merged_neg[0].end_ms == 2500
+
+    assert merged_neg[1].speaker_id == "salesperson"
+    assert merged_neg[1].start_ms == 1500
+    assert merged_neg[1].end_ms == 3500
+
+
+def test_merge_dual_speaker_tracks_mismatched_file_lengths():
+    """Validates that different track durations (e.g. Agent 3m vs Prospect 2m45s) merge cleanly."""
+    # Agent track runs to 180,000ms (3 min)
+    agent_utts = [
+        NormalizedUtterance(
+            call_sid="call_len_01",
+            speaker_id="salesperson",
+            text="Agent early turn",
+            start_ms=10000,
+            end_ms=20000,
+            words=_make_words("Agent early turn", 10000, 20000),
+        ),
+        NormalizedUtterance(
+            call_sid="call_len_01",
+            speaker_id="salesperson",
+            text="Agent late closing turn at minute three",
+            start_ms=168000,
+            end_ms=178000,
+            words=_make_words("Agent late closing turn at minute three", 168000, 178000),
+        ),
+    ]
+
+    # Prospect track stops at 165,000ms (2 min 45s)
+    prospect_utts = [
+        NormalizedUtterance(
+            call_sid="call_len_01",
+            speaker_id="client",
+            text="Prospect final goodbye at 2 minutes 45 seconds",
+            start_ms=155000,
+            end_ms=165000,
+            words=_make_words("Prospect final goodbye at 2 minutes 45 seconds", 155000, 165000),
+        )
+    ]
+
+    merged = merge_dual_speaker_tracks(
+        agent_utterances=agent_utts,
+        prospect_utterances=prospect_utts,
+        prospect_offset_ms=0,
+    )
+
+    assert len(merged) == 3
+    assert merged[0].speaker_id == "salesperson"
+    assert merged[0].start_ms == 10000
+
+    assert merged[1].speaker_id == "client"
+    assert merged[1].start_ms == 155000
+
+    assert merged[2].speaker_id == "salesperson"
+    assert merged[2].start_ms == 168000
+    assert merged[2].end_ms == 178000
+
+    # Ensure timing engine handles the sequence without error
+    timing = DeterministicTimingEngine()
+    snaps = [timing.process_utterance(u) for u in merged]
+    assert len(snaps) == 3
+    # Turn 3 latency is measured from Prospect's end at 165,000ms: 168,000 - 165,000 = 3000ms
+    assert snaps[2].response_latency_ms == 3000
+
+
+def test_segment_audio_transcript_turns_enforce_single_speaker():
+    """Validates that enforce_single_speaker=True prevents Deepgram diarization tags from hijacking speaker identity."""
+    raw_deepgram_utterances = [
+        {
+            "transcript": "I need to check our budget with procurement.",
+            "speaker": 0,  # Diarizer guessed 0 (which normally maps to salesperson)
+            "words": [
+                {"word": "I", "start": 0.0, "end": 0.2},
+                {"word": "need", "start": 0.3, "end": 0.5},
+                {"word": "to", "start": 0.6, "end": 0.7},
+                {"word": "check", "start": 0.8, "end": 1.1},
+                {"word": "our", "start": 1.2, "end": 1.3},
+                {"word": "budget", "start": 1.4, "end": 1.8},
+                {"word": "with", "start": 1.9, "end": 2.1},
+                {"word": "procurement.", "start": 2.2, "end": 2.8},
+            ],
+            "confidence": 0.95,
+        }
+    ]
+
+    # With enforce_single_speaker=True, speaker_id="client" must remain "client"
+    utts = segment_audio_transcript_turns(
+        words_raw=raw_deepgram_utterances[0]["words"],
+        transcript="I need to check our budget with procurement.",
+        call_sid="call_spk_01",
+        speaker_id="client",
+        raw_utterances=raw_deepgram_utterances,
+        enforce_single_speaker=True,
+    )
+
+    assert len(utts) == 1
+    assert utts[0].speaker_id == "client"
+
+
+def test_fastapi_app_analyze_two_tracks_and_upload_track(monkeypatch):
+    """Validates /api/test/analyze-two-tracks and /api/test/upload-track endpoints on FastAPI app."""
+    from fastapi.testclient import TestClient
+    from copilot.fastapi_app import app
+    from copilot.calibration import SpeechToTextEngine
+
+    async def mock_transcribe(self, audio_bytes, mime_type="audio/webm", utt_split=0.5, diarize=True):
+        if b"AGENT" in audio_bytes:
+            return (
+                "Hello thanks for taking my call today regarding enterprise pricing.",
+                [
+                    {"word": "Hello", "start": 0.0, "end": 0.4},
+                    {"word": "thanks", "start": 0.5, "end": 0.9},
+                    {"word": "for", "start": 1.0, "end": 1.2},
+                    {"word": "taking", "start": 1.3, "end": 1.6},
+                    {"word": "my", "start": 1.7, "end": 1.8},
+                    {"word": "call", "start": 1.9, "end": 2.2},
+                    {"word": "today", "start": 2.3, "end": 2.6},
+                    {"word": "regarding", "start": 2.7, "end": 3.1},
+                    {"word": "enterprise", "start": 3.2, "end": 3.7},
+                    {"word": "pricing.", "start": 3.8, "end": 4.3},
+                ],
+            )
+        else:
+            return (
+                "Hi sure I have about five minutes to discuss the contract terms.",
+                [
+                    {"word": "Hi", "start": 0.0, "end": 0.3},
+                    {"word": "sure", "start": 0.4, "end": 0.7},
+                    {"word": "I", "start": 0.8, "end": 0.9},
+                    {"word": "have", "start": 1.0, "end": 1.2},
+                    {"word": "about", "start": 1.3, "end": 1.6},
+                    {"word": "five", "start": 1.7, "end": 2.0},
+                    {"word": "minutes", "start": 2.1, "end": 2.5},
+                    {"word": "to", "start": 2.6, "end": 2.8},
+                    {"word": "discuss", "start": 2.9, "end": 3.3},
+                    {"word": "the", "start": 3.4, "end": 3.6},
+                    {"word": "contract", "start": 3.7, "end": 4.1},
+                    {"word": "terms.", "start": 4.2, "end": 4.7},
+                ],
+            )
+
+    monkeypatch.setattr(SpeechToTextEngine, "transcribe_with_timestamps", mock_transcribe)
+
+    client = TestClient(app)
+
+    # 1. Test POST /api/test/analyze-two-tracks
+    files = {
+        "agent_audio": ("agent.wav", b"RIFF_AGENT_AUDIO_TRACK", "audio/wav"),
+        "prospect_audio": ("prospect.wav", b"RIFF_PROSPECT_AUDIO_TRACK", "audio/wav"),
+    }
+    data = {
+        "agent_id": "test_agent_100",
+        "prospect_id": "test_prospect_200",
+        "prospect_offset_ms": 2000,
+    }
+    res = client.post("/api/test/analyze-two-tracks", files=files, data=data)
+    assert res.status_code == 200
+    res_json = res.json()
+
+    assert res_json["status"] == "success"
+    assert res_json["turns_processed"] == 2
+    assert res_json["agent_id"] == "test_agent_100"
+    assert res_json["prospect_id"] == "test_prospect_200"
+
+    turns = res_json["play_by_play_turns"]
+    assert turns[0]["speaker_label"] == "Agent"
+    assert turns[0]["start_ms"] == 0
+    assert turns[1]["speaker_label"] == "Prospect"
+    assert turns[1]["start_ms"] == 2000  # Offset by 2000ms!
+
+    # 2. Test POST /api/test/upload-track (individual track ingestion)
+    track_call_sid = "test_upload_split_call"
+    # Upload agent track first
+    agent_file = {"audio": ("agent.wav", b"RIFF_AGENT_AUDIO_TRACK", "audio/wav")}
+    agent_data = {"call_sid": track_call_sid, "speaker_role": "salesperson", "start_epoch_ms": 0}
+    res_track1 = client.post("/api/test/upload-track", files=agent_file, data=agent_data)
+    assert res_track1.status_code == 200
+    assert res_track1.json()["status"] == "waiting_for_partner_track"
+
+    # Upload prospect track second
+    prospect_file = {"audio": ("prospect.wav", b"RIFF_PROSPECT_AUDIO_TRACK", "audio/wav")}
+    prospect_data = {"call_sid": track_call_sid, "speaker_role": "client", "start_epoch_ms": 2500}
+    res_track2 = client.post("/api/test/upload-track", files=prospect_file, data=prospect_data)
+    assert res_track2.status_code == 200
+    assert res_track2.json()["status"] == "merged_success"
+    assert res_track2.json()["turns_processed"] == 2
+
+
+def test_run_behavioral_signal_analyze_two_tracks(monkeypatch):
+    """Validates /api/test/analyze-two-tracks on run_behavioral_signal.app using shared pipeline."""
+    from fastapi.testclient import TestClient
+    from run_behavioral_signal import app as runner_app
+    from copilot.calibration import SpeechToTextEngine
+
+    async def mock_transcribe(self, audio_bytes, mime_type="audio/webm", utt_split=0.5, diarize=True):
+        if b"AGENT" in audio_bytes:
+            return (
+                "Agent track statement regarding enterprise roadmap.",
+                [
+                    {"word": "Agent", "start": 0.0, "end": 0.5},
+                    {"word": "track", "start": 0.6, "end": 1.0},
+                    {"word": "statement", "start": 1.1, "end": 1.7},
+                    {"word": "regarding", "start": 1.8, "end": 2.2},
+                    {"word": "enterprise", "start": 2.3, "end": 2.8},
+                    {"word": "roadmap.", "start": 2.9, "end": 3.4},
+                ],
+            )
+        else:
+            return (
+                "Prospect track confirmation.",
+                [
+                    {"word": "Prospect", "start": 0.0, "end": 0.4},
+                    {"word": "track", "start": 0.5, "end": 0.9},
+                    {"word": "confirmation.", "start": 1.0, "end": 1.6},
+                ],
+            )
+
+    monkeypatch.setattr(SpeechToTextEngine, "transcribe_with_timestamps", mock_transcribe)
+
+    client = TestClient(runner_app)
+    files = {
+        "agent_audio": ("agent.wav", b"RIFF_AGENT_AUDIO_TRACK", "audio/wav"),
+        "prospect_audio": ("prospect.wav", b"RIFF_PROSPECT_AUDIO_TRACK", "audio/wav"),
+    }
+    data = {
+        "agent_id": "test_agent_runner",
+        "prospect_id": "test_prospect_runner",
+        "prospect_offset_ms": 1500,
+    }
+    res = client.post("/api/test/analyze-two-tracks", files=files, data=data)
+    assert res.status_code == 200
+    res_json = res.json()
+
+    assert res_json["status"] == "success"
+    assert res_json["turns_processed"] == 2
+    assert "agent_baseline_wpm" in res_json
+    assert "prospect_baseline_wpm" in res_json
+    turns = res_json["play_by_play_turns"]
+    assert turns[0]["speaker_label"] == "Agent"
+    assert turns[1]["speaker_label"] == "Prospect"
+    assert turns[1]["start_ms"] == 1500
+
+

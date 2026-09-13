@@ -45,6 +45,7 @@ class DownstreamInferenceState(BaseModel):
     readiness: DimensionScore
     acoustic_evidence: Literal["unavailable", "available"] = "unavailable"
     overall_confidence: float = Field(..., ge=0.0, le=1.0)
+    overall_confidence_reason: Optional[str] = None
     contributing_evidence_ids: List[str] = Field(default_factory=list)
     baseline_sources: List[str] = Field(default_factory=list)
 
@@ -219,6 +220,11 @@ class DownstreamInferenceEngine:
             pacing_score -= self.config.pacing_interruption_penalty * min(3, interruptions)
             pacing_drivers.append(f"Cross-speaker interruptions detected ({interruptions})")
 
+        if pacing_conf < 0.95:
+            lim_p = min(pacing_evidence, key=lambda w: w.evidence_confidence)
+            if lim_p.confidence_driver and "High confidence" not in lim_p.confidence_driver:
+                pacing_drivers.append(f"[Confidence {int(round(pacing_conf * 100))}%]: {lim_p.confidence_driver}")
+
         pacing_score = max(self.config.score_floor_active, min(self.config.score_ceiling, round(pacing_score, 2)))
         pacing = DimensionScore(
             score=pacing_score,
@@ -232,6 +238,10 @@ class DownstreamInferenceEngine:
         emotion_evidence = [w_10s, w_30s, w_curr]
         emotion_conf = min(w.evidence_confidence for w in emotion_evidence)
         emotion_signals: List[str] = []
+        if emotion_conf < 0.95:
+            lim_e = min(emotion_evidence, key=lambda w: w.evidence_confidence)
+            if lim_e.confidence_driver and "High confidence" not in lim_e.confidence_driver:
+                emotion_signals.append(f"[Confidence {int(round(emotion_conf * 100))}%]: {lim_e.confidence_driver}")
         tension_level = self.config.emotion_base_tension
         valence = self.config.emotion_base_valence
 
@@ -325,6 +335,11 @@ class DownstreamInferenceEngine:
             eng_score += self.config.engagement_specificity_boost
             eng_drivers.append(f"Specific details and facts provided (score: {sem_eng.specificity_score:.2f})")
 
+        if eng_conf < 0.95:
+            lim_eng = min(eng_evidence, key=lambda w: w.evidence_confidence)
+            if lim_eng.confidence_driver and "High confidence" not in lim_eng.confidence_driver:
+                eng_drivers.append(f"[Confidence {int(round(eng_conf * 100))}%]: {lim_eng.confidence_driver}")
+
         eng_score = max(self.config.score_floor_active, min(self.config.score_ceiling, round(eng_score, 2)))
         engagement = DimensionScore(
             score=eng_score,
@@ -367,6 +382,11 @@ class DownstreamInferenceEngine:
             trust_score -= self.config.trust_constrained_response_penalty
             trust_drivers.append(f"Constrained monosyllabic responses ({t_len} words/turn)")
 
+        if trust_conf < 0.95:
+            lim_t = min(trust_evidence, key=lambda w: w.evidence_confidence)
+            if lim_t.confidence_driver and "High confidence" not in lim_t.confidence_driver:
+                trust_drivers.append(f"[Confidence {int(round(trust_conf * 100))}%]: {lim_t.confidence_driver}")
+
         trust_score = max(self.config.score_floor_active, min(self.config.score_ceiling, round(trust_score, 2)))
         trust = DimensionScore(
             score=trust_score,
@@ -396,6 +416,11 @@ class DownstreamInferenceEngine:
             elif sem_curr.question_type == "hostile":
                 mom_score -= self.config.momentum_hostile_question_penalty
                 mom_drivers.append("Hostile challenge stalls progress")
+
+        if mom_conf < 0.95:
+            lim_m = min(mom_evidence, key=lambda w: w.evidence_confidence)
+            if lim_m.confidence_driver and "High confidence" not in lim_m.confidence_driver:
+                mom_drivers.append(f"[Confidence {int(round(mom_conf * 100))}%]: {lim_m.confidence_driver}")
 
         mom_score = max(self.config.score_floor_active, min(self.config.score_ceiling, round(mom_score, 2)))
         momentum = DimensionScore(
@@ -444,6 +469,11 @@ class DownstreamInferenceEngine:
                 read_score += self.config.readiness_trust_foundation_boost
                 read_drivers.append(f"Supported by strong trust foundation ({trust_score:.2f})")
 
+        if read_conf < 0.95:
+            lim_r = min(read_evidence, key=lambda w: w.evidence_confidence)
+            if lim_r.confidence_driver and "High confidence" not in lim_r.confidence_driver:
+                read_drivers.append(f"[Confidence {int(round(read_conf * 100))}%]: {lim_r.confidence_driver}")
+
         read_score = max(self.config.readiness_floor, min(self.config.score_ceiling, round(read_score, 2)))
         readiness = DimensionScore(
             score=read_score,
@@ -453,15 +483,22 @@ class DownstreamInferenceEngine:
             drivers=read_drivers,
         )
 
-        # Overall confidence is strict minimum across all 6 dimensions
-        overall_conf = min(
-            pacing.confidence,
-            emotion.confidence,
-            engagement.confidence,
-            trust.confidence,
-            momentum.confidence,
-            readiness.confidence,
-        )
+        # Overall confidence is strict weakest link across all 6 dimensions
+        dim_conf_map = [
+            ("pacing", pacing.confidence, pacing_evidence),
+            ("emotion", emotion.confidence, emotion_evidence),
+            ("engagement", engagement.confidence, eng_evidence),
+            ("trust", trust.confidence, trust_evidence),
+            ("momentum", momentum.confidence, mom_evidence),
+            ("readiness", readiness.confidence, read_evidence),
+        ]
+        min_dim_name, min_conf_val, min_evidence = min(dim_conf_map, key=lambda x: x[1])
+        overall_conf = min_conf_val
+        if overall_conf >= 0.95:
+            overall_conf_reason = "High confidence (dual-track, verified ASR, locked baseline, LLM)"
+        else:
+            lim_w = min(min_evidence, key=lambda w: w.evidence_confidence)
+            overall_conf_reason = (lim_w.confidence_driver if lim_w and lim_w.confidence_driver else None) or f"Limited by {min_dim_name} uncertainty ({int(round(overall_conf * 100))}%)"
 
         # Collect unique contributing evidence IDs
         all_evidence_ids: List[str] = []
@@ -503,6 +540,7 @@ class DownstreamInferenceEngine:
             readiness=readiness,
             acoustic_evidence=acoustic_flag,
             overall_confidence=round(overall_conf, 2),
+            overall_confidence_reason=overall_conf_reason,
             contributing_evidence_ids=all_evidence_ids,
             baseline_sources=baseline_sources,
         )

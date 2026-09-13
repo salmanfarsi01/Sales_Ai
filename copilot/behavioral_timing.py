@@ -153,10 +153,27 @@ class DeterministicTimingEngine:
         turn_speech_rate_wpm = round(turn_words / turn_minutes, 1) if turn_minutes > 0 else 0.0
 
         response_latency_ms: Optional[int] = None
-        for prev in reversed(self.utterances[:-1]):
-            if prev.speaker_id != current_utt.speaker_id:
-                response_latency_ms = current_utt.start_ms - prev.end_ms
-                break
+        # 1. Check for active cross-speaker overlap / interruption:
+        # Did the other speaker have an utterance still speaking when current turn began?
+        overlapping_other = [
+            u for u in self.utterances[:-1]
+            if u.speaker_id != current_utt.speaker_id and u.end_ms > current_utt.start_ms
+        ]
+        if overlapping_other:
+            # Active interruption: measure negative latency (-overlap_duration_ms)
+            # using the other speaker's overlapping utterance that extends latest.
+            active_other = max(overlapping_other, key=lambda u: u.end_ms)
+            response_latency_ms = current_utt.start_ms - active_other.end_ms
+        else:
+            # 2. Sequential transition after silence gap:
+            # Find the most recently completed utterance from the other speaker.
+            prior_other = [
+                u for u in self.utterances[:-1]
+                if u.speaker_id != current_utt.speaker_id and u.end_ms <= current_utt.start_ms
+            ]
+            if prior_other:
+                latest_prior = max(prior_other, key=lambda u: u.end_ms)
+                response_latency_ms = current_utt.start_ms - latest_prior.end_ms
 
         intra_turn_pause_count = 0
         total_pause_duration_ms = 0

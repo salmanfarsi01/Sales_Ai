@@ -104,10 +104,12 @@ def normalize_deepgram_result(
                 )
             )
 
-    is_estimated_timing = not bool(normalized_words)
     if normalized_words:
         utt_start_ms = normalized_words[0].start_ms
         utt_end_ms = normalized_words[-1].end_ms
+        word_confs = [w.confidence for w in normalized_words if not w.is_estimated]
+        if word_confs:
+            asr_confidence = sum(word_confs) / len(word_confs)
     else:
         start_sec = float(raw_start) if raw_start is not None else 0.0
         dur_sec = float(raw_duration) if raw_duration is not None else 0.0
@@ -267,11 +269,12 @@ def segment_audio_transcript_turns(
     speaker_id: Literal["salesperson", "client"] = "client",
     raw_utterances: Optional[List[Dict[str, Any]]] = None,
     min_pause_split_ms: int = 500,
+    enforce_single_speaker: bool = False,
 ) -> List[NormalizedUtterance]:
     """Segments batch audio transcription into distinct sequential NormalizedUtterance turns.
-    Uses Deepgram's pre-segmented utterances (with diarization speaker tagging) if present (>1),
-    or segments word timestamps on silence gaps >= min_pause_split_ms, sentence boundaries,
-    or speaker transitions.
+    Uses Deepgram's pre-segmented utterances if present (>1), or segments word timestamps
+    on silence gaps >= min_pause_split_ms, sentence boundaries, or speaker transitions.
+    If enforce_single_speaker is True, speaker tags are never inferred from diarization.
     """
     # 1. If Deepgram returned multiple pre-segmented utterances
     if raw_utterances and len(raw_utterances) > 1:
@@ -281,9 +284,9 @@ def segment_audio_transcript_turns(
             if not u_text:
                 continue
 
-            # Check for Deepgram diarization speaker index (0 = salesperson / Agent, 1 = client / Prospect)
+            # Check for Deepgram diarization speaker index unless single-speaker mode is enforced
             u_speaker_tag = u.get("speaker")
-            if u_speaker_tag is not None:
+            if not enforce_single_speaker and u_speaker_tag is not None:
                 assigned_speaker: Literal["salesperson", "client"] = "salesperson" if u_speaker_tag == 0 else "client"
             else:
                 assigned_speaker = speaker_id
@@ -325,7 +328,7 @@ def segment_audio_transcript_turns(
         w_text = w.get("punctuated_word") or w.get("word", "")
         w_start = int(round(float(w.get("start", 0.0)) * 1000))
         w_end = int(round(float(w.get("end", 0.0)) * 1000))
-        w_spk_tag = w.get("speaker")
+        w_spk_tag = None if enforce_single_speaker else w.get("speaker")
         norm_words_all.append(
             (
                 NormalizedWord(
@@ -363,7 +366,7 @@ def segment_audio_transcript_turns(
         gap_ms = w_next.start_ms - w_curr.end_ms
         punc = w_curr.punctuated_word or w_curr.word
         ends_sentence = any(punc.rstrip().endswith(ch) for ch in [".", "?", "!"])
-        speaker_switched = (spk_curr is not None and spk_next is not None and spk_curr != spk_next)
+        speaker_switched = (not enforce_single_speaker and spk_curr is not None and spk_next is not None and spk_curr != spk_next)
 
         if speaker_switched or gap_ms >= min_pause_split_ms or (ends_sentence and gap_ms >= 400):
             chunks.append((current_words, current_spk))
@@ -378,7 +381,7 @@ def segment_audio_transcript_turns(
     segmented: List[NormalizedUtterance] = []
     for chunk, chunk_spk in chunks:
         chunk_text = " ".join(w.punctuated_word or w.word for w in chunk).strip()
-        if chunk_spk is not None:
+        if not enforce_single_speaker and chunk_spk is not None:
             spk_role: Literal["salesperson", "client"] = "salesperson" if chunk_spk == 0 else "client"
         else:
             spk_role = speaker_id
@@ -402,17 +405,37 @@ def merge_dual_speaker_tracks(
     prospect_utterances: List[NormalizedUtterance],
     agent_start_epoch_ms: int = 0,
     prospect_start_epoch_ms: int = 0,
+    prospect_offset_ms: int = 0,
 ) -> List[NormalizedUtterance]:
     """
     Merges two independently recorded single-speaker tracks onto a synchronized timeline.
-    Aligns relative to call_start_epoch = min(agent_start_epoch_ms, prospect_start_epoch_ms).
+    Aligns relative to whichever track started first.
+    Accepts either:
+      - prospect_offset_ms: relative offset in ms (positive = Prospect started after Agent; negative = Prospect started before Agent)
+      - agent_start_epoch_ms / prospect_start_epoch_ms: absolute or relative epoch start timestamps.
     Shifts word-level and utterance-level timestamps by track offset, guaranteeing that neither
     track is distorted or mixed. Returns chronologically sorted turn stream.
     """
-    if agent_start_epoch_ms > 0 and prospect_start_epoch_ms > 0:
-        call_start_epoch = min(agent_start_epoch_ms, prospect_start_epoch_ms)
-        agent_offset = agent_start_epoch_ms - call_start_epoch
-        prospect_offset = prospect_start_epoch_ms - call_start_epoch
+    if prospect_offset_ms != 0:
+        if prospect_offset_ms > 0:
+            agent_offset = 0
+            prospect_offset = prospect_offset_ms
+        else:
+            agent_offset = abs(prospect_offset_ms)
+            prospect_offset = 0
+    elif agent_start_epoch_ms > 0 or prospect_start_epoch_ms > 0:
+        if agent_start_epoch_ms > 0 and prospect_start_epoch_ms > 0:
+            call_start_epoch = min(agent_start_epoch_ms, prospect_start_epoch_ms)
+            agent_offset = agent_start_epoch_ms - call_start_epoch
+            prospect_offset = prospect_start_epoch_ms - call_start_epoch
+        elif agent_start_epoch_ms > 0 and prospect_start_epoch_ms == 0:
+            # Agent started after prospect (prospect = 0)
+            agent_offset = agent_start_epoch_ms
+            prospect_offset = 0
+        else:
+            # Prospect started after agent (agent = 0, prospect > 0)
+            agent_offset = 0
+            prospect_offset = prospect_start_epoch_ms
     else:
         agent_offset = 0
         prospect_offset = 0
@@ -431,6 +454,9 @@ def merge_dual_speaker_tracks(
             )
             for w in u.words
         ]
+        agent_meta = dict(u.metadata or {})
+        agent_meta["is_dual_track"] = True
+        agent_meta["speaker_separation_confidence"] = 1.0
         merged.append(
             NormalizedUtterance(
                 utterance_id=u.utterance_id,
@@ -444,7 +470,7 @@ def merge_dual_speaker_tracks(
                 speech_final=u.speech_final,
                 is_estimated_timing=u.is_estimated_timing,
                 words=shifted_words,
-                metadata=u.metadata,
+                metadata=agent_meta,
             )
         )
 
@@ -460,6 +486,9 @@ def merge_dual_speaker_tracks(
             )
             for w in u.words
         ]
+        prospect_meta = dict(u.metadata or {})
+        prospect_meta["is_dual_track"] = True
+        prospect_meta["speaker_separation_confidence"] = 1.0
         merged.append(
             NormalizedUtterance(
                 utterance_id=u.utterance_id,
@@ -473,7 +502,7 @@ def merge_dual_speaker_tracks(
                 speech_final=u.speech_final,
                 is_estimated_timing=u.is_estimated_timing,
                 words=shifted_words,
-                metadata=u.metadata,
+                metadata=prospect_meta,
             )
         )
 

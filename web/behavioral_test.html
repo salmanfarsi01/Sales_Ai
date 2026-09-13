@@ -446,14 +446,14 @@
           <input id="dualProspectId" type="text" value="test_prospect_001">
         </div>
       </div>
-      <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 8px;">
-        <div class="field">
-          <label for="agentStartEpoch">Agent Start Epoch (ms)</label>
-          <input id="agentStartEpoch" type="number" value="0">
-        </div>
-        <div class="field">
-          <label for="prospectStartEpoch">Prospect Start Epoch (ms)</label>
-          <input id="prospectStartEpoch" type="number" value="0">
+      <div class="field">
+        <label for="prospectOffsetMs" style="display: flex; justify-content: space-between;">
+          <span>Prospect Start Offset (ms)</span>
+          <span style="color: var(--text-muted); font-weight: normal;">0 = simultaneous</span>
+        </label>
+        <input id="prospectOffsetMs" type="number" value="0" placeholder="0 or 2500 or -1000">
+        <div style="font-size: 11px; color: var(--text-muted); margin-top: 4px; line-height: 1.4;">
+          Relative timing offset: how many ms after Agent's recording began did Prospect start? (e.g. <code>0</code> if started together, <code>2500</code> if Prospect started 2.5s later, <code>-1000</code> if Prospect started 1s earlier).
         </div>
       </div>
       <button id="btnUploadDual" class="btn-submit" onclick="uploadDualAudio()">
@@ -618,13 +618,17 @@ async function uploadDualAudio() {
   resultsPanel.innerHTML = '<div class="placeholder">Transcribing separate agent and prospect tracks...</div>';
 
   const endpoint = getBaseApiUrl() + '/api/test/analyze-two-tracks';
+  const offsetInput = document.getElementById('prospectOffsetMs');
+  const offsetVal = offsetInput ? (offsetInput.value || '0') : '0';
+
   const formData = new FormData();
   formData.append('agent_audio', agentFile, agentFile.name);
   formData.append('prospect_audio', prospectFile, prospectFile.name);
   formData.append('agent_id', document.getElementById('agentId').value);
   formData.append('prospect_id', document.getElementById('dualProspectId').value);
-  formData.append('agent_start_epoch_ms', document.getElementById('agentStartEpoch').value || '0');
-  formData.append('prospect_start_epoch_ms', document.getElementById('prospectStartEpoch').value || '0');
+  formData.append('prospect_offset_ms', offsetVal);
+  formData.append('agent_start_epoch_ms', '0');
+  formData.append('prospect_start_epoch_ms', '0');
 
   try {
     const res = await fetch(endpoint, { method: 'POST', body: formData });
@@ -684,12 +688,18 @@ function renderResults(data) {
   } else if (cp.agent_turn_count !== undefined) {
     agentBaseText = `calibrating (${cp.agent_turn_count}/3 turns, ${cp.agent_total_words || 0}/15 words)`;
   }
+  if (data.agent_baseline_wpm) {
+    agentBaseText += ` [${data.agent_baseline_wpm} WPM]`;
+  }
 
   let prospectBaseText = 'calibrating';
   if (data.prospect_baseline_locked || data.is_baseline_locked) {
     prospectBaseText = 'locked (intra-call)';
   } else if (cp.turn_count !== undefined) {
     prospectBaseText = `calibrating (${cp.turn_count}/3 turns, ${cp.total_words || 0}/15 words)`;
+  }
+  if (data.prospect_baseline_wpm) {
+    prospectBaseText += ` [${data.prospect_baseline_wpm} WPM]`;
   }
 
   html += `<p class="section-title">Engine Status & Isolated Baselines</p>
@@ -709,6 +719,10 @@ function renderResults(data) {
       <div class="badge ${turnsCount >= 1 ? 'on' : ''}">
         <span class="light"></span>
         processed: ${turnsCount} turn(s)
+      </div>
+      <div class="badge ${(inf.overall_confidence ?? 1.0) >= 0.90 ? 'on' : 'warn'}" title="${escapeHtml(inf.overall_confidence_reason || 'Overall pipeline confidence')}">
+        <span class="light"></span>
+        overall conf: ${Math.round((inf.overall_confidence ?? 0.95) * 100)}% ${(inf.overall_confidence ?? 1.0) < 0.95 && inf.overall_confidence_reason ? `— ${escapeHtml(inf.overall_confidence_reason)}` : ''}
       </div>
       <div class="badge ${acousticUnavailable ? '' : 'on'}">
         <span class="light"></span>
@@ -787,8 +801,31 @@ function renderResults(data) {
       const boundClass = t.boundary_score >= 0.8 ? 'color:#C93B2B; font-weight:700;' : '';
       const recText = t.recurrence_type && t.recurrence_type !== 'none' ? `${t.recurrence_type} (${t.recurrence_count})` : '—';
       const qText = t.question_type && t.question_type !== 'none' ? t.question_type : '—';
-      const pauseText = t.avg_pause_duration_ms > 0 ? `${Math.round(t.avg_pause_duration_ms)}ms` : '0';
-      const latText = t.response_latency_ms !== null && t.response_latency_ms !== undefined ? `${t.response_latency_ms}ms` : '—';
+      let latText = '—';
+      let latColor = 'var(--text-muted)';
+      if (t.response_latency_ms !== null && t.response_latency_ms !== undefined) {
+        if (t.response_latency_ms >= 2000) {
+          latText = `${t.response_latency_ms}ms ⏸️`;
+          latColor = '#C93B2B; font-weight:700;'; // Natural pause highlighted
+        } else if (t.response_latency_ms < 0) {
+          latText = `${t.response_latency_ms}ms (overlap)`;
+          latColor = '#D97706; font-weight:600;'; // Overlap
+        } else {
+          latText = `${t.response_latency_ms}ms`;
+          latColor = 'var(--text); font-weight:600;';
+        }
+      }
+
+      const turnConf = t.turn_confidence !== undefined ? t.turn_confidence : t.semantic_confidence;
+      const confPct = Math.round(turnConf * 100);
+      const confDriver = t.confidence_driver || (confPct < 95 ? 'Reduced certainty' : 'High confidence');
+      let confColor = 'var(--accent)';
+      if (confPct < 75) {
+        confColor = '#C93B2B';
+      } else if (confPct < 90) {
+        confColor = '#D97706';
+      }
+
       const turnWpm = t.turn_wpm || t.speech_rate_wpm;
 
       html += `<tr>
@@ -797,16 +834,19 @@ function renderResults(data) {
         <td class="mono" style="white-space:nowrap; color:var(--text-muted);">${t.start_sec}s-${t.end_sec}s</td>
         <td style="min-width:180px; max-width:280px; font-size:11.5px;">${escapeHtml(t.text)}</td>
         <td class="mono" style="font-weight:600;">${turnWpm}</td>
-        <td class="mono">${t.baseline_wpm ?? '—'}</td>
+        <td class="mono" title="${isAgent ? 'Agent' : 'Prospect'} Baseline">${t.baseline_wpm ? `${t.baseline_wpm} <span style="font-size:10px; color:var(--text-muted);">(${isAgent ? 'Agent' : 'Prospect'})</span>` : '—'}</td>
         <td class="mono" style="font-weight:600; color:${paceColor};">${paceDeltaText}</td>
         <td class="mono">${pauseText}</td>
-        <td class="mono" style="font-weight:600; color: ${t.response_latency_ms ? 'var(--text)' : 'var(--text-muted)'};">${latText}</td>
+        <td class="mono" style="${latColor}">${latText}</td>
         <td><span class="mono" style="font-size:11px;">${escapeHtml(qText)}</span></td>
         <td><span class="mono" style="font-size:11px; color:${t.recurrence_type !== 'none' ? '#C93B2B' : 'inherit'}">${escapeHtml(recText)}</span></td>
         <td class="mono" style="${boundClass}">${t.boundary_score.toFixed(1)}</td>
         <td class="mono">${t.specificity_score.toFixed(2)}</td>
         <td class="mono">${t.future_language_score.toFixed(2)}</td>
-        <td class="mono">${Math.round(t.semantic_confidence * 100)}%</td>
+        <td class="mono" style="font-weight:600; color:${confColor}; cursor:help;" title="${escapeHtml(confDriver)}">
+          ${confPct}%
+          ${confPct < 95 ? `<div style="font-size:9.5px; color:var(--text-muted); font-weight:normal; max-width:85px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">${escapeHtml(confDriver)}</div>` : ''}
+        </td>
         <td class="mono" style="font-weight:600;">${Math.round(t.trust_score * 100)}%</td>
         <td class="mono" style="font-weight:600;">${Math.round(t.readiness_score * 100)}%</td>
       </tr>`;
@@ -816,7 +856,8 @@ function renderResults(data) {
         <div><strong>Measurement Audit Notes:</strong></div>
         <div>&bull; <strong>Turn WPM</strong>: Instantaneous rate for this specific turn computed as <code>(turn_words / (duration_ms / 60000))</code>.</div>
         <div>&bull; <strong>Base WPM</strong>: Maintained completely independently for Agent vs. Prospect (calibrated once &ge; 60s, &ge; 3 turns, &ge; 15 words).</div>
-        <div>&bull; <strong>Latency</strong>: Cross-speaker turnaround time computed from when the previous speaker ended to when the current speaker began.</div>
+        <div>&bull; <strong>Latency</strong>: Cross-speaker turnaround time computed from when the previous speaker ended to when current speaker began (pauses &ge; 2000ms highlighted).</div>
+        <div>&bull; <strong>Confidence</strong>: Strict weakest-link minimum of ASR transcription quality, baseline calibration lock, speaker separation certainty, and semantic extraction mode. Hover for driver reason.</div>
         <div>&bull; <strong>Pause</strong>: Intra-turn silence &ge; 250ms calculated strictly from word-level timestamps.</div>
       </div>`;
   }

@@ -43,6 +43,7 @@ from .behavioral_normalization import (
     NormalizedWord,
     NormalizedUtterance,
     segment_audio_transcript_turns,
+    merge_dual_speaker_tracks,
 )
 from .calibration import SpeechToTextEngine
 from .behavioral_timing import DeterministicTimingEngine, TimingFeatureSnapshot
@@ -63,6 +64,7 @@ from .behavioral_inference import (
     DownstreamInferenceEngine,
     DownstreamInferenceState,
 )
+from .behavioral_pipeline_service import execute_behavioral_turn_pipeline
 
 LOGGER = logging.getLogger("copilot.fastapi")
 STATIC = Path(__file__).resolve().parent.parent / "web"
@@ -94,6 +96,7 @@ class FastAPICopilot:
         self._inference_engine = DownstreamInferenceEngine()
         self._latest_inference_states: dict[str, DownstreamInferenceState] = {}
         self.ingestion_jobs: dict[str, dict[str, Any]] = {}
+        self._track_uploads: dict[str, dict[str, Any]] = {}
 
         if settings.rag and settings.rag.rag_enabled:
             LOGGER.info("Initializing Pinecone RAG system (shared index: %s)", settings.rag.pinecone_index_name)
@@ -1274,133 +1277,208 @@ class FastAPICopilot:
                 baseline_engine=base_engine,
                 store=self._evidence_log_store,
             )
+            reports_dir = Path(__file__).resolve().parent.parent / "reports"
+            return await execute_behavioral_turn_pipeline(
+                segmented_utts=segmented_utts,
+                call_sid=call_sid,
+                prospect_id=prospect_id,
+                agent_id="test_agent_001",
+                transcript=transcript,
+                timing_engine=timing_engine,
+                semantic_engine=self._semantic_engine,
+                baseline_engine=base_engine,
+                aggregator=aggregator,
+                inference_engine=self._inference_engine,
+                context_history=[],
+                turn_index_start=1,
+                reports_dir=reports_dir,
+            )
 
-            context_history = []
-            last_timing_snap = None
-            last_sem_snap = None
-            last_evidence_frame = None
-            last_inference_state = None
+        @app.post("/api/test/analyze-two-tracks")
+        async def analyze_two_tracks(
+            agent_audio: UploadFile = File(...),
+            prospect_audio: UploadFile = File(...),
+            agent_start_epoch_ms: int = Form(0),
+            prospect_start_epoch_ms: int = Form(0),
+            prospect_offset_ms: int = Form(0),
+            prospect_id: str = Form("test_prospect_001"),
+            agent_id: str = Form("test_agent_001"),
+            call_sid: Optional[str] = Form(None),
+        ):
+            agent_bytes = await agent_audio.read()
+            prospect_bytes = await prospect_audio.read()
 
-            play_by_play_turns = []
-            for idx, norm_utt in enumerate(segmented_utts):
-                timing_snap = timing_engine.process_utterance(norm_utt)
-                last_timing_snap = timing_snap
+            if not agent_bytes and not prospect_bytes:
+                raise HTTPException(status_code=400, detail="Both audio tracks are empty")
 
-                sem_snap = None
-                try:
-                    sem_snap = await self._semantic_engine.analyze_turn_semantic(
-                        utterance=norm_utt,
-                        context_history=context_history,
-                    )
-                except Exception as exc:
-                    LOGGER.warning("Semantic feature extraction failed in test recording: %s", exc)
-                last_sem_snap = sem_snap
-                context_history.append(norm_utt)
+            active_call_sid = call_sid or f"call_{uuid.uuid4().hex[:8]}"
+            deepgram_key = getattr(self.settings, "deepgram_api_key", None) or os.getenv("DEEPGRAM_API_KEY")
+            stt = SpeechToTextEngine(
+                deepgram_api_key=deepgram_key,
+                groq_api_key=self.settings.groq_api_key,
+            )
 
-                new_cps = base_engine.update_with_utterance(norm_utt, timing_snap, sem_snap)
-                evidence_frame = aggregator.process_turn(
-                    norm_utt, timing_snap, sem_snap, new_change_points=new_cps
+            agent_segmented: list[NormalizedUtterance] = []
+            if agent_bytes:
+                agent_mime = agent_audio.content_type or "audio/webm"
+                agent_transcript, agent_words = await stt.transcribe_with_timestamps(
+                    agent_bytes, mime_type=agent_mime, utt_split=0.5, diarize=False
                 )
-                last_evidence_frame = evidence_frame
-
-                inference_state = self._inference_engine.compute_inference(
-                    call_sid=call_sid,
-                    current_frame=evidence_frame,
-                )
-                last_inference_state = inference_state
-
-                active_prof = base_engine.get_active_profile()
-                base_wpm = (
-                    round(active_prof.speech_rate_wpm.mean, 1)
-                    if (active_prof and active_prof.speech_rate_wpm.sample_count > 0)
-                    else None
-                )
-                curr_wpm = round(timing_snap.speech_rate_wpm, 1)
-                pace_delta = (
-                    round(((curr_wpm - base_wpm) / base_wpm) * 100.0, 1)
-                    if (base_wpm and base_wpm > 0)
-                    else None
-                )
-                base_pause_ms = (
-                    round(active_prof.avg_pause_duration_ms.mean, 1)
-                    if (active_prof and active_prof.avg_pause_duration_ms.sample_count > 0)
-                    else None
-                )
-                pause_delta = (
-                    round(((timing_snap.avg_pause_duration_ms - base_pause_ms) / base_pause_ms) * 100.0, 1)
-                    if (base_pause_ms and base_pause_ms > 0 and timing_snap.pause_measured)
-                    else None
+                agent_raw_utts = getattr(stt, "latest_raw_utterances", None) or []
+                agent_segmented = segment_audio_transcript_turns(
+                    words_raw=agent_words,
+                    transcript=agent_transcript or "",
+                    call_sid=active_call_sid,
+                    speaker_id="salesperson",
+                    raw_utterances=agent_raw_utts,
+                    min_pause_split_ms=500,
+                    enforce_single_speaker=True,
                 )
 
-                play_by_play_turns.append({
-                    "turn_index": idx + 1,
-                    "start_ms": norm_utt.start_ms,
-                    "end_ms": norm_utt.end_ms,
-                    "start_sec": round(norm_utt.start_ms / 1000.0, 1),
-                    "end_sec": round(norm_utt.end_ms / 1000.0, 1),
-                    "text": norm_utt.text,
-                    "words_count": len(norm_utt.words) if norm_utt.words else len(norm_utt.text.split()),
-                    "turn_duration_ms": timing_snap.turn_duration_ms,
-                    "speech_rate_wpm": curr_wpm,
-                    "baseline_wpm": base_wpm,
-                    "pace_delta_pct": pace_delta,
-                    "avg_pause_duration_ms": round(timing_snap.avg_pause_duration_ms, 1),
-                    "baseline_pause_ms": base_pause_ms,
-                    "pause_delta_pct": pause_delta,
-                    "response_latency_ms": timing_snap.response_latency_ms,
-                    "question_type": sem_snap.question_type if sem_snap else "none",
-                    "recurrence_type": sem_snap.recurrence_type if sem_snap else "none",
-                    "recurrence_count": sem_snap.recurrence_count if sem_snap else 0,
-                    "boundary_score": sem_snap.boundary_score if sem_snap else 0.0,
-                    "specificity_score": sem_snap.specificity_score if sem_snap else 0.0,
-                    "future_language_score": sem_snap.future_language_score if sem_snap else 0.0,
-                    "agreement_score": sem_snap.agreement_score if sem_snap else 0.0,
-                    "semantic_confidence": sem_snap.semantic_confidence if sem_snap else 0.50,
-                    "pacing_score": inference_state.pacing.score,
-                    "trust_score": inference_state.trust.score,
-                    "engagement_score": inference_state.engagement.score,
-                    "momentum_score": inference_state.momentum.score,
-                    "readiness_score": inference_state.readiness.score,
-                    "expressed_valence": inference_state.emotion.expressed_valence if inference_state.emotion else 0.0,
-                    "tension_level": inference_state.emotion.tension_level if inference_state.emotion else 0.20,
-                    "is_baseline_locked": base_engine.is_intra_call_locked,
-                })
+            prospect_segmented: list[NormalizedUtterance] = []
+            if prospect_bytes:
+                prospect_mime = prospect_audio.content_type or "audio/webm"
+                prospect_transcript, prospect_words = await stt.transcribe_with_timestamps(
+                    prospect_bytes, mime_type=prospect_mime, utt_split=0.5, diarize=False
+                )
+                prospect_raw_utts = getattr(stt, "latest_raw_utterances", None) or []
+                prospect_segmented = segment_audio_transcript_turns(
+                    words_raw=prospect_words,
+                    transcript=prospect_transcript or "",
+                    call_sid=active_call_sid,
+                    speaker_id="client",
+                    raw_utterances=prospect_raw_utts,
+                    min_pause_split_ms=500,
+                    enforce_single_speaker=True,
+                )
 
-            result_payload = {
-                "status": "success",
-                "call_sid": call_sid,
+            merged_utts = merge_dual_speaker_tracks(
+                agent_utterances=agent_segmented,
+                prospect_utterances=prospect_segmented,
+                agent_start_epoch_ms=agent_start_epoch_ms,
+                prospect_start_epoch_ms=prospect_start_epoch_ms,
+                prospect_offset_ms=prospect_offset_ms,
+            )
+
+            timing_engine = DeterministicTimingEngine()
+            cal_window_ms = int(os.getenv("BEHAVIORAL_CALIBRATION_WINDOW_MS", str(DEFAULT_INTRA_CALL_WINDOW_MS)))
+            base_engine = BaselineAndChangePointEngine(
+                call_sid=active_call_sid,
+                prospect_id=prospect_id,
+                agent_id=agent_id,
+                store=self._prospect_baseline_store,
+                intra_call_window_ms=cal_window_ms,
+            )
+            aggregator = MultiWindowAggregator(
+                call_sid=active_call_sid,
+                timing_engine=timing_engine,
+                baseline_engine=base_engine,
+                store=self._evidence_log_store,
+            )
+
+            combined_transcript = " ".join(
+                f"[{'Agent' if u.speaker_id == 'salesperson' else 'Prospect'}]: {u.text}"
+                for u in merged_utts
+            )
+            reports_dir = Path(__file__).resolve().parent.parent / "reports"
+
+            return await execute_behavioral_turn_pipeline(
+                segmented_utts=merged_utts,
+                call_sid=active_call_sid,
+                prospect_id=prospect_id,
+                agent_id=agent_id,
+                transcript=combined_transcript,
+                timing_engine=timing_engine,
+                semantic_engine=self._semantic_engine,
+                baseline_engine=base_engine,
+                aggregator=aggregator,
+                inference_engine=self._inference_engine,
+                context_history=[],
+                turn_index_start=1,
+                reports_dir=reports_dir,
+            )
+
+        @app.post("/api/test/upload-track")
+        async def upload_track(
+            audio: UploadFile = File(...),
+            call_sid: str = Form(...),
+            speaker_role: str = Form("client"),
+            start_epoch_ms: int = Form(0),
+            prospect_id: str = Form("test_prospect_001"),
+            agent_id: str = Form("test_agent_001"),
+        ):
+            audio_bytes = await audio.read()
+            if not audio_bytes:
+                raise HTTPException(status_code=400, detail="Audio file is empty")
+
+            deepgram_key = getattr(self.settings, "deepgram_api_key", None) or os.getenv("DEEPGRAM_API_KEY")
+            stt = SpeechToTextEngine(
+                deepgram_api_key=deepgram_key,
+                groq_api_key=self.settings.groq_api_key,
+            )
+            content_type = audio.content_type or "audio/webm"
+            norm_role = "salesperson" if speaker_role in ("salesperson", "agent") else "client"
+            transcript, words_raw = await stt.transcribe_with_timestamps(
+                audio_bytes, mime_type=content_type, utt_split=0.5, diarize=False
+            )
+            raw_utts = getattr(stt, "latest_raw_utterances", None) or []
+            segmented = segment_audio_transcript_turns(
+                words_raw=words_raw,
+                transcript=transcript or "",
+                call_sid=call_sid,
+                speaker_id=norm_role,
+                raw_utterances=raw_utts,
+                min_pause_split_ms=500,
+                enforce_single_speaker=True,
+            )
+
+            call_buffer = self._track_uploads.setdefault(call_sid, {
                 "prospect_id": prospect_id,
-                "turns_processed": len(segmented_utts),
-                "is_baseline_locked": base_engine.is_intra_call_locked,
-                "transcript": transcript,
+                "agent_id": agent_id,
+                "tracks": {},
+            })
+            call_buffer["tracks"][norm_role] = {
+                "utterances": segmented,
+                "start_epoch_ms": start_epoch_ms,
+            }
+
+            partner_role = "client" if norm_role == "salesperson" else "salesperson"
+            if partner_role not in call_buffer["tracks"]:
+                return {
+                    "status": "waiting_for_partner_track",
+                    "call_sid": call_sid,
+                    "uploaded_role": norm_role,
+                    "turns_processed": len(segmented),
+                    "message": f"Uploaded {norm_role} track. Waiting for {partner_role} track to merge.",
+                }
+
+            agent_data = call_buffer["tracks"].get("salesperson", {"utterances": [], "start_epoch_ms": 0})
+            prospect_data = call_buffer["tracks"].get("client", {"utterances": [], "start_epoch_ms": 0})
+
+            merged_utts = merge_dual_speaker_tracks(
+                agent_utterances=agent_data["utterances"],
+                prospect_utterances=prospect_data["utterances"],
+                agent_start_epoch_ms=agent_data["start_epoch_ms"],
+                prospect_start_epoch_ms=prospect_data["start_epoch_ms"],
+            )
+
+            self._track_uploads.pop(call_sid, None)
+
+            return {
+                "status": "merged_success",
+                "call_sid": call_sid,
+                "turns_processed": len(merged_utts),
                 "utterances": [
                     {
                         "turn_index": idx + 1,
+                        "speaker_id": u.speaker_id,
                         "text": u.text,
                         "start_ms": u.start_ms,
                         "end_ms": u.end_ms,
-                        "words_count": len(u.words),
                     }
-                    for idx, u in enumerate(segmented_utts)
+                    for idx, u in enumerate(merged_utts)
                 ],
-                "play_by_play_turns": play_by_play_turns,
-                "latest_timing": last_timing_snap.model_dump() if last_timing_snap else {},
-                "latest_inference": last_inference_state.model_dump() if last_inference_state else {},
-                "latest_evidence_frame": last_evidence_frame.model_dump() if last_evidence_frame else {},
             }
-
-            try:
-                reports_dir = Path(__file__).resolve().parent.parent / "reports"
-                reports_dir.mkdir(parents=True, exist_ok=True)
-                report_filename = f"behavioral_signal_{call_sid}.json"
-                report_path = reports_dir / report_filename
-                result_payload["report_file"] = f"reports/{report_filename}"
-                report_path.write_text(json.dumps(result_payload, indent=2), encoding="utf-8")
-                LOGGER.info("Successfully stored behavioral signal report to local disk: %s", report_path)
-            except Exception as exc:
-                LOGGER.warning("Could not save behavioral signal report to disk: %s", exc)
-
-            return result_payload
 
         return app
 
