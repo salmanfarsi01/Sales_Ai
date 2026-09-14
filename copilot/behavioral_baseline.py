@@ -118,6 +118,63 @@ class ProspectBaselineStore:
         self._write_data(data)
 
 
+class ContactPreferenceRecord(BaseModel):
+    preference: Literal["none", "reduced_frequency", "channel_restriction", "timing_restriction"]
+    confidence: float = Field(..., ge=0.0, le=1.0)
+    details: Optional[str] = None
+    first_observed_turn: Optional[int] = None
+    call_sid: Optional[str] = None
+    timestamp_ms: Optional[int] = None
+
+
+class ContactPreferenceStore:
+    def __init__(self, store_path: Optional[Path] = None):
+        if store_path is None:
+            base_dir = Path(__file__).resolve().parent.parent / "knowledge"
+            base_dir.mkdir(parents=True, exist_ok=True)
+            self.store_path = base_dir / "prospect_preferences.json"
+        else:
+            self.store_path = store_path
+
+    def _read_data(self) -> Dict[str, Any]:
+        if not self.store_path.exists():
+            return {}
+        try:
+            with open(self.store_path, "r", encoding="utf-8") as f:
+                return json.load(f)
+        except Exception as exc:
+            LOGGER.warning("Could not read contact preference store: %s", exc)
+            return {}
+
+    def _write_data(self, data: Dict[str, Any]) -> None:
+        try:
+            self.store_path.parent.mkdir(parents=True, exist_ok=True)
+            with open(self.store_path, "w", encoding="utf-8") as f:
+                json.dump(data, f, indent=2)
+        except Exception as exc:
+            LOGGER.warning("Could not write contact preference store: %s", exc)
+
+    def get_preference(self, prospect_id: str) -> Optional[ContactPreferenceRecord]:
+        if not prospect_id:
+            return None
+        data = self._read_data()
+        rec = data.get(prospect_id)
+        if not rec:
+            return None
+        try:
+            return ContactPreferenceRecord.model_validate(rec)
+        except Exception as exc:
+            LOGGER.warning("Malformed preference record for %s: %s", prospect_id, exc)
+            return None
+
+    def save_preference(self, prospect_id: str, record: ContactPreferenceRecord) -> None:
+        if not prospect_id:
+            return
+        data = self._read_data()
+        data[prospect_id] = record.model_dump()
+        self._write_data(data)
+
+
 DEFAULT_FEATURE_STDDEV_FLOORS: Dict[str, Tuple[float, float]] = {
     # feature_name: (min_stddev_ratio, min_stddev_abs)
     #

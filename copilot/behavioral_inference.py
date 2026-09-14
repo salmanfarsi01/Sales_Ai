@@ -167,7 +167,7 @@ class DownstreamInferenceEngine:
         current_frame: MultiWindowEvidenceFrame,
         recent_frames: Optional[List[MultiWindowEvidenceFrame]] = None,
     ) -> DownstreamInferenceState:
-        start_t = time.monotonic()
+        start_t = time.perf_counter()
         version = self._call_state_versions.get(call_sid, 0) + 1
         self._call_state_versions[call_sid] = version
         frames = (recent_frames or []) + [current_frame]
@@ -525,7 +525,7 @@ class DownstreamInferenceEngine:
             "available" if self.acoustic_provider.is_available() else "unavailable"
         )
 
-        latency_ms = round((time.monotonic() - start_t) * 1000.0, 3)
+        latency_ms = max(0.01, round((time.perf_counter() - start_t) * 1000.0, 2))
 
         return DownstreamInferenceState(
             call_sid=call_sid,

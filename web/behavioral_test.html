@@ -994,6 +994,11 @@ function renderResults(data) {
         <span class="light"></span>
         acoustic evidence: ${inf.acoustic_evidence || 'unavailable'}
       </div>
+      ${data.prospect_contact_preference ? `
+      <div class="badge on" style="border-color:rgba(37,99,235,0.4); background:rgba(37,99,235,0.08); color:#2563eb;" title="Stored preference: ${escapeHtml(data.prospect_contact_preference.details || '')}">
+        <span class="light" style="background:#2563eb;"></span>
+        contact pref: ${escapeHtml(data.prospect_contact_preference.preference.replace('_', ' '))}
+      </div>` : ''}
     </div>`;
 
   // Behavioral Inference dimensions
@@ -1044,6 +1049,7 @@ function renderResults(data) {
               <th>Question?</th>
               <th>Recurrence</th>
               <th>Boundary</th>
+              <th title="Soft Contact Preference">Pref.</th>
               <th>Spec.</th>
               <th>Future</th>
               <th>Conf</th>
@@ -1086,9 +1092,16 @@ function renderResults(data) {
         }
       }
 
-      const infLatText = (t.inference_latency_ms !== null && t.inference_latency_ms !== undefined)
-        ? `${t.inference_latency_ms}ms`
+      const infLatVal = Number(t.inference_latency_ms);
+      const infLatText = (!isNaN(infLatVal) && t.inference_latency_ms !== null && t.inference_latency_ms !== undefined)
+        ? `${infLatVal.toFixed(2)}ms`
         : '—';
+
+      let prefBadge = '—';
+      if (t.contact_preference && t.contact_preference !== 'none') {
+        const prefLabel = t.contact_preference.replace('_', ' ');
+        prefBadge = `<span class="badge" style="font-size:10px; padding:2px 6px; background:rgba(37,99,235,0.12); color:#2563eb; border:1px solid rgba(37,99,235,0.25); border-radius:4px; text-transform:capitalize;" title="${escapeHtml(t.contact_preference_details || t.contact_preference)}">${escapeHtml(prefLabel)}</span>`;
+      }
 
       const turnConf = t.turn_confidence !== undefined ? t.turn_confidence : t.semantic_confidence;
       const confPct = Math.round(turnConf * 100);
@@ -1116,6 +1129,7 @@ function renderResults(data) {
         <td><span class="mono" style="font-size:11px;">${escapeHtml(qText)}</span></td>
         <td><span class="mono" style="font-size:11px; color:${t.recurrence_type !== 'none' ? '#C93B2B' : 'inherit'}">${escapeHtml(recText)}</span></td>
         <td class="mono" style="${boundClass}">${t.boundary_score.toFixed(1)}</td>
+        <td>${prefBadge}</td>
         <td class="mono">${t.specificity_score.toFixed(2)}</td>
         <td class="mono">${t.future_language_score.toFixed(2)}</td>
         <td class="mono" style="font-weight:600; color:${confColor}; cursor:help;" title="${escapeHtml(confDriver)}">

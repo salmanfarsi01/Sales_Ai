@@ -60,6 +60,9 @@ class SemanticFeatureSnapshot(BaseModel):
     specificity_score: float = Field(0.0, ge=0.0, le=1.0)
     future_language_score: float = Field(0.0, ge=0.0, le=1.0)
     boundary_score: float = Field(0.0, ge=0.0, le=1.0)
+    contact_preference: Literal["none", "reduced_frequency", "channel_restriction", "timing_restriction"] = "none"
+    contact_preference_confidence: float = Field(0.0, ge=0.0, le=1.0)
+    contact_preference_details: Optional[str] = None
     agreement_score: float = Field(0.0, ge=0.0, le=1.0)
     filler_score: Optional[float] = None
     is_filler_available: bool = False
@@ -100,6 +103,44 @@ STOP_CONTACT_PATTERNS = [
     r"\b(put\s+me\s+on\s+the|on\s+the|to\s+the)\s+do\s+not\s+call\b",
     r"\bdnc\s+list\b",
 ]
+
+# Separate pattern dictionary for soft communication cadence and channel preferences.
+# Distinct from STOP_CONTACT_PATTERNS to guarantee soft preferences never trigger hard compliance overrides.
+SOFT_CONTACT_PREFERENCE_PATTERNS: Dict[str, List[str]] = {
+    "reduced_frequency": [
+        r"\bdon['’]?t\s+(text|call|message|reach\s+out)\s+(every\s+day|all\s+the\s+time|so\s+(often|much)|multiple\s+times|constantly|daily)\b",
+        r"\b(please\s+)?don['’]?t\s+call\s+so\s+often\b",
+        r"\bstop\s+calling\s+(so\s+much|so\s+often|every\s+day|multiple\s+times)\b",
+        r"\b(call|reach\s+out|contact)\s+(me\s+)?less\s+often\b",
+        r"\btoo\s+many\s+(calls|texts|messages)\b",
+        r"\bnot\s+every\s+day\b",
+        r"\bonce\s+a\s+(week|month)\s+is\s+(enough|fine|plenty)\b",
+    ],
+    "channel_restriction": [
+        r"\bemail\s+(instead\s+of|rather\s+than)\s+(calling|call|texting|text)\b",
+        r"\b(please\s+)?email\s+me\s+instead\b",
+        r"\b(just|only)\s+email\s+me\b",
+        r"\bdon['’]?t\s+call\s*(just|only|,)?\s*(send\s+an?\s+)?email\b",
+        r"\b(text|texting)\s+(only|instead)\b",
+        r"\bprefer\s+(an?\s+)?email\b",
+        r"\bprefer\s+(to\s+be\s+contacted\s+by|via)\s+email\b",
+        r"\bsend\s+me\s+an?\s+email\s+instead\b",
+        r"\breach\s+out\s+(by|via)\s+email\s+instead\b",
+        r"\bcommunicate\s+(by|via)\s+email\s+only\b",
+        r"\btext\s+me\s+instead\s+of\s+calling\b",
+    ],
+    "timing_restriction": [
+        r"\b(only\s+)?(reach\s+out|call|contact)\s+(during|in)\s+business\s+hours\b",
+        r"\bonly\s+during\s+business\s+hours\b",
+        r"\b(call|reach\s+out)\s+after\s+\d{1,2}(:\d{2})?\s*(am|pm)?\b",
+        r"\bdon['’]?t\s+call\s+before\s+\d{1,2}(:\d{2})?\s*(am|pm)?\b",
+        r"\bonly\s+(call|reach\s+out)\s+on\s+weekends\b",
+        r"\bcall\s+me\s+in\s+the\s+evening\b",
+        r"\bdon['’]?t\s+call\s+(during|while\s+i['’]?m\s+at)\s+work\b",
+        r"\bonly\s+call\s+in\s+the\s+afternoon\b",
+        r"\bcall\s+between\s+\d{1,2}\s+and\s+\d{1,2}\b",
+    ],
+}
 
 SPECIFICITY_PATTERNS = [
     r"\$\s*\d+[\d,]*(\.\d+)?\s*(k|m|million|thousand)?\b",
@@ -209,10 +250,47 @@ class SemanticFeatureEngine:
 
     def classify_boundary_deterministic(self, text: str) -> float:
         cleaned = text.strip().lower()
+        # Soft contact preferences must never accidentally satisfy the hard-boundary check
+        pref, _, _ = self.detect_contact_preference(cleaned)
+        if pref != "none":
+            hard_explicit_patterns = [
+                r"\b(do\s+not|don['’]?t)\s+call\s+(me\s+)?(any\s*more|again|ever)\b",
+                r"\bnever\s+call\b",
+                r"\bstop\s+calling\s+me\b",
+                r"\b(do\s+not|don['’]?t)\s+(ever\s+)?contact\b",
+                r"\bstop\s+contacting\b",
+                r"\bnot\s+call\s+(me\s+)?(any\s*more|again)\b",
+                r"\btake\s+me\s+off\b",
+                r"\b(take|remove)\s+(my\s+)?(name|number|info|information)\s+off\b",
+                r"\bremove\s+(my\s+)?(number|name)\b",
+                r"\blose\s+my\s+number\b",
+                r"\b(put\s+me\s+on\s+the|on\s+the|to\s+the)\s+do\s+not\s+call\b",
+                r"\bdnc\s+list\b",
+                r"\bcall\s+my\s+(attorney|lawyer)\b",
+                r"\balready\s+(have\s+an?\s+agent|listed|under\s+contract|represented|signed)\b",
+                r"\bunder\s+contract\b",
+                r"\bstop\s+harassing\b",
+                r"\bleave\s+me\s+alone\b",
+            ]
+            if any(re.search(p, cleaned, re.IGNORECASE) for p in hard_explicit_patterns):
+                return 1.0
+            return 0.0
+
         for pat in STOP_CONTACT_PATTERNS:
             if re.search(pat, cleaned, re.IGNORECASE):
                 return 1.0
         return 0.0
+
+    def detect_contact_preference(
+        self, text: str
+    ) -> Tuple[Literal["none", "reduced_frequency", "channel_restriction", "timing_restriction"], float, Optional[str]]:
+        cleaned = text.strip().lower()
+        for pref_type, patterns in SOFT_CONTACT_PREFERENCE_PATTERNS.items():
+            for pat in patterns:
+                match = re.search(pat, cleaned, re.IGNORECASE)
+                if match:
+                    return pref_type, 0.90, match.group(0)
+        return "none", 0.0, None
 
     def _is_objection_utterance(self, text: str, playbook_objections: Optional[List[Any]] = None) -> Tuple[bool, Optional[str]]:
         cleaned = text.strip().lower()
@@ -372,6 +450,13 @@ class SemanticFeatureEngine:
         elif any(re.search(pat, lower_text) for pat in POLITE_AGREEMENT_PATTERNS):
             agreement_score = 0.30
 
+        # Contact preference (soft preference distinct from hard boundary)
+        pref_type, pref_conf, pref_details = self.detect_contact_preference(utterance.text)
+        if boundary_score >= 0.8:
+            pref_type = "none"
+            pref_conf = 0.0
+            pref_details = None
+
         conf_profile = "heuristic_bypass" if is_bypass else "heuristic"
         conf = CONFIDENCE_BY_FEATURE[conf_profile]
         sem_conf = round(min(min(conf.values()), float(utterance.asr_confidence)), 2)
@@ -388,6 +473,9 @@ class SemanticFeatureEngine:
             specificity_score=round(specificity_score, 2),
             future_language_score=round(future_language_score, 2),
             boundary_score=round(boundary_score, 2),
+            contact_preference=pref_type,
+            contact_preference_confidence=pref_conf,
+            contact_preference_details=pref_details,
             agreement_score=round(agreement_score, 2),
             filler_score=None,
             is_filler_available=False,
@@ -409,6 +497,11 @@ class SemanticFeatureEngine:
     ) -> SemanticFeatureSnapshot:
         # 1. Deterministic boundary filter runs first (zero false negatives)
         boundary_score = self.classify_boundary_deterministic(utterance.text)
+        pref_type, pref_conf, pref_details = self.detect_contact_preference(utterance.text)
+        if boundary_score >= 0.8:
+            pref_type = "none"
+            pref_conf = 0.0
+            pref_details = None
         rec_id, rec_type, rec_count = self.detect_semantic_recurrence(
             utterance.text, context_history, playbook_objections
         )
@@ -421,10 +514,10 @@ class SemanticFeatureEngine:
 
         # Short fragment fast-path:
         # Avoid firing an expensive/slow LLM call on 1-2 word breathing fragments or simple nods (e.g., "case.", "So", "yeah")
-        # unless they contain explicit boundary language or terminal question marks.
+        # unless they contain explicit boundary language, soft contact preferences, or terminal question marks.
         words = utterance.text.strip().split()
         is_short_fragment = len(words) < 3 and not utterance.text.strip().endswith("?")
-        if is_short_fragment and boundary_score == 0.0 and rec_type == "none":
+        if is_short_fragment and boundary_score == 0.0 and rec_type == "none" and pref_type == "none":
             return self.analyze_deterministic_heuristic(
                 utterance, context_history, mode="heuristic_offline", is_bypass=True
             )
@@ -445,7 +538,7 @@ class SemanticFeatureEngine:
             f"- specificity_score: float 0.0 to 1.0 (dates, dollar amounts, named entities, hard numbers)\n"
             f"- future_language_score: float 0.0 to 1.0 (operational future commitment vs vague hypotheticals)\n"
             f"- agreement_score: float 0.0 to 1.0 (substantive meeting/pricing commitment ~0.8-1.0; polite nod like 'yeah' ~0.2-0.3)\n"
-            f"- boundary_score: float 0.0 or 1.0 (STRICT: 1.0 ONLY for explicit stop-contact, DNC, existing broker representation, or legal threats. Exploring options, general hesitation, or reluctance MUST be 0.0)\n\n"
+            f"- boundary_score: float 0.0 or 1.0 (STRICT: 1.0 ONLY for explicit stop-contact, DNC, existing broker representation, or legal threats. Exploring options, general hesitation, or soft cadence/channel preferences like 'don't call so often', 'email instead' MUST be 0.0)\n\n"
             f"Output ONLY raw JSON."
         )
 
@@ -481,9 +574,12 @@ class SemanticFeatureEngine:
             # Boundary detection is high-stakes compliance (zero false negatives from regex,
             # zero false positives from LLM hallucinations).
             # A deterministic regex match always produces 1.0.
-            # An LLM output is only accepted as a boundary if >= 0.80.
+            # An LLM output is only accepted as a boundary if >= 0.80, and only when not a soft preference.
             llm_boundary = float(parsed.get("boundary_score", 0.0))
-            effective_boundary = 1.0 if (boundary_score >= 0.8 or llm_boundary >= 0.8) else 0.0
+            if pref_type != "none":
+                effective_boundary = boundary_score
+            else:
+                effective_boundary = 1.0 if (boundary_score >= 0.8 or llm_boundary >= 0.8) else 0.0
             conf = CONFIDENCE_BY_FEATURE["llm"]
 
             raw_q = parsed.get("question_type", "none")
@@ -505,6 +601,9 @@ class SemanticFeatureEngine:
                 specificity_score=min(1.0, max(0.0, float(parsed.get("specificity_score", 0.0)))),
                 future_language_score=min(1.0, max(0.0, float(parsed.get("future_language_score", 0.0)))),
                 boundary_score=min(1.0, max(0.0, effective_boundary)),
+                contact_preference=pref_type,
+                contact_preference_confidence=pref_conf,
+                contact_preference_details=pref_details,
                 agreement_score=min(1.0, max(0.0, float(parsed.get("agreement_score", 0.0)))),
                 filler_score=None,
                 is_filler_available=False,

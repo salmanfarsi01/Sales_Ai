@@ -17,7 +17,12 @@ from typing import Optional, List, Dict, Any
 from .behavioral_normalization import NormalizedUtterance
 from .behavioral_timing import DeterministicTimingEngine, TimingFeatureSnapshot
 from .behavioral_semantic import SemanticFeatureEngine, SemanticFeatureSnapshot
-from .behavioral_baseline import BaselineAndChangePointEngine, BaselineProfile
+from .behavioral_baseline import (
+    BaselineAndChangePointEngine,
+    BaselineProfile,
+    ContactPreferenceStore,
+    ContactPreferenceRecord,
+)
 from .behavioral_evidence import MultiWindowAggregator, MultiWindowEvidenceFrame
 from .behavioral_inference import DownstreamInferenceEngine, DownstreamInferenceState
 
@@ -38,12 +43,15 @@ async def execute_behavioral_turn_pipeline(
     context_history: Optional[List[NormalizedUtterance]] = None,
     turn_index_start: int = 1,
     reports_dir: Optional[Path] = None,
+    preference_store: Optional[ContactPreferenceStore] = None,
 ) -> Dict[str, Any]:
     """Processes a chronological sequence of normalized utterances through the complete
     behavioral signal pipeline and returns the standard diagnostic payload.
     """
     if context_history is None:
         context_history = []
+
+    pref_store = preference_store or ContactPreferenceStore()
 
     last_timing_snap: Optional[TimingFeatureSnapshot] = None
     last_sem_snap: Optional[SemanticFeatureSnapshot] = None
@@ -114,6 +122,26 @@ async def execute_behavioral_turn_pipeline(
             else None
         )
 
+        # Contact preference detection and persistence
+        contact_pref = sem_snap.contact_preference if sem_snap else "none"
+        contact_pref_conf = sem_snap.contact_preference_confidence if sem_snap else 0.0
+        contact_pref_details = sem_snap.contact_preference_details if sem_snap else None
+        if speaker_role == "client" and contact_pref != "none" and prospect_id:
+            try:
+                pref_store.save_preference(
+                    prospect_id,
+                    ContactPreferenceRecord(
+                        preference=contact_pref,
+                        confidence=contact_pref_conf,
+                        details=contact_pref_details,
+                        first_observed_turn=current_turn_index,
+                        call_sid=call_sid,
+                        timestamp_ms=norm_utt.start_ms,
+                    ),
+                )
+            except Exception as exc:
+                LOGGER.warning("Could not persist contact preference for prospect %s: %s", prospect_id, exc)
+
         play_by_play_turns.append({
             "turn_index": current_turn_index,
             "speaker_id": speaker_role,
@@ -139,6 +167,9 @@ async def execute_behavioral_turn_pipeline(
             "recurrence_type": sem_snap.recurrence_type if sem_snap else "none",
             "recurrence_count": sem_snap.recurrence_count if sem_snap else 0,
             "boundary_score": sem_snap.boundary_score if sem_snap else 0.0,
+            "contact_preference": contact_pref,
+            "contact_preference_confidence": contact_pref_conf,
+            "contact_preference_details": contact_pref_details,
             "specificity_score": sem_snap.specificity_score if sem_snap else 0.0,
             "future_language_score": sem_snap.future_language_score if sem_snap else 0.0,
             "agreement_score": sem_snap.agreement_score if sem_snap else 0.0,
@@ -197,6 +228,11 @@ async def execute_behavioral_turn_pipeline(
         "prospect_baseline_locked": baseline_engine.is_locked("client"),
         "agent_baseline_wpm": agent_base_wpm,
         "prospect_baseline_wpm": prospect_base_wpm,
+        "prospect_contact_preference": (
+            pref_store.get_preference(prospect_id).model_dump()
+            if prospect_id and pref_store.get_preference(prospect_id)
+            else None
+        ),
         "calibration_progress": {
             "is_locked": baseline_engine.is_locked("client"),
             "agent_is_locked": baseline_engine.is_locked("salesperson"),
