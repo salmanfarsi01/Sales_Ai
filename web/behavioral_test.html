@@ -78,32 +78,6 @@
     }
   }
 
-  /* Mode Switch Tabs */
-  .mode-tabs {
-    display: flex;
-    background: #EAEFEF;
-    padding: 3px;
-    border-radius: 8px;
-    margin-bottom: 22px;
-  }
-  .mode-tab {
-    flex: 1;
-    text-align: center;
-    padding: 7px 10px;
-    font-size: 13px;
-    font-weight: 600;
-    color: var(--text-muted);
-    border: none;
-    background: transparent;
-    cursor: pointer;
-    border-radius: 6px;
-    transition: all 0.15s ease;
-  }
-  .mode-tab.active {
-    background: #FFFFFF;
-    color: var(--text);
-    box-shadow: 0 1px 4px rgba(0,0,0,0.06);
-  }
 
   .field { margin-bottom: 14px; }
   .field label {
@@ -154,60 +128,6 @@
     cursor: not-allowed;
   }
 
-  .record-zone {
-    margin-top: 16px;
-    padding: 20px 0 10px;
-    text-align: center;
-    border-top: 1px solid var(--border);
-  }
-  .record-btn {
-    width: 80px;
-    height: 80px;
-    border-radius: 50%;
-    border: 2px solid var(--accent);
-    background: #FFFFFF;
-    color: var(--accent);
-    cursor: pointer;
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
-    box-shadow: 0 2px 8px rgba(14, 173, 171, 0.12);
-    transition: background 0.15s, transform 0.1s, border-color 0.15s, box-shadow 0.15s;
-  }
-  .record-btn:hover {
-    background: var(--accent-dim);
-    box-shadow: 0 4px 12px rgba(14, 173, 171, 0.2);
-  }
-  .record-btn:active { transform: scale(0.96); }
-  .record-btn .dot {
-    width: 24px;
-    height: 24px;
-    border-radius: 50%;
-    background: var(--accent);
-    transition: all 0.2s ease;
-  }
-  .record-btn.recording {
-    border-color: var(--warn);
-    animation: pulse 1.6s ease-in-out infinite;
-    background: #FFFFFF;
-  }
-  .record-btn.recording .dot {
-    background: var(--warn);
-    border-radius: 5px;
-    width: 20px;
-    height: 20px;
-  }
-  @keyframes pulse {
-    0%, 100% { box-shadow: 0 0 0 0 rgba(226, 87, 76, 0.35); }
-    50% { box-shadow: 0 0 0 14px rgba(226, 87, 76, 0); }
-  }
-  .timer {
-    margin-top: 12px;
-    font-size: 22px;
-    font-weight: 600;
-    color: var(--text);
-    font-variant-numeric: tabular-nums;
-  }
   .status-line {
     margin-top: 4px;
     font-size: 12.5px;
@@ -552,42 +472,10 @@
 
   <!-- Left Control Panel -->
   <div class="panel panel-left">
-    <div class="mode-tabs">
-      <button id="tabSingle" class="mode-tab active" onclick="setMode('single')">Single Audio / Mic</button>
-      <button id="tabDual" class="mode-tab" onclick="setMode('dual')">Dual-Track Sync</button>
+    <p class="section-title">Dual-track behavioral signal test console</p>
+    <div class="dual-hero-desc">
+      Record Agent and Prospect separately — no file juggling required — then sync and analyze together.
     </div>
-
-    <!-- Mode 1: Single Audio Recording / Upload -->
-    <div id="panelSingleMode">
-      <p class="section-title">Single Audio / Diarization Setup</p>
-      <div class="field">
-        <label for="prospectId">Prospect ID</label>
-        <input id="prospectId" type="text" value="test_prospect_001">
-      </div>
-      <div class="field">
-        <label for="singleAudioFile">Or Upload Pre-recorded Audio (.wav, .mp3, .webm)</label>
-        <input type="file" id="singleAudioFile" accept="audio/*">
-      </div>
-      <button id="btnUploadSingle" class="btn-submit" onclick="uploadSingleAudio()" style="margin-bottom: 14px;">
-        Analyze Uploaded Audio
-      </button>
-
-      <div class="record-zone">
-        <div style="font-size: 12px; color: var(--text-muted); margin-bottom: 8px; font-weight: 500;">LIVE MICROPHONE RECORDING</div>
-        <button id="recordBtn" class="record-btn" aria-label="Start recording">
-          <span class="dot"></span>
-        </button>
-        <div class="timer mono" id="timer">00:00</div>
-        <div class="status-line" id="statusLine">Ready to record</div>
-      </div>
-    </div>
-
-    <!-- Mode 2: Dual-Track Audio Upload & Real-Time Recording -->
-    <div id="panelDualMode" style="display: none;">
-      <p class="section-title">Dual-track behavioral signal test console</p>
-      <div class="dual-hero-desc">
-        Record Agent and Prospect separately — no file juggling required — then sync and analyze together.
-      </div>
 
       <!-- Call setup -->
       <div class="setup-box">
@@ -682,7 +570,6 @@
       <div class="status-line" id="dualStatusLine" style="margin-top: 10px; text-align: center;">
         Record or upload both tracks to enable analysis
       </div>
-    </div>
 
     <div id="errorBox"></div>
   </div>
@@ -691,15 +578,13 @@
   <div class="panel" id="resultsPanel">
     <div class="placeholder">
       <div style="font-size: 32px; margin-bottom: 12px;">🎙️</div>
-      Record speech or upload single/dual audio tracks to inspect the real-time behavioral timeline and speaker diagnostics.
+      Record speech or upload dual audio tracks to inspect the real-time behavioral timeline and speaker diagnostics.
     </div>
   </div>
 
 </div>
 
 <script>
-let mediaRecorder, chunks = [], startTime, timerInterval, stream;
-
 // Dual-track recording state
 let activeDualRecorder = null; // { role, recorder, chunks, timerInterval, startTime, stream }
 let agentAudioBlob = null;
@@ -708,127 +593,15 @@ let agentRecordStartTime = 0;
 let prospectRecordStartTime = 0;
 let offsetManuallyEdited = false;
 
-const recordBtn = document.getElementById('recordBtn');
-const timerEl = document.getElementById('timer');
-const statusLine = document.getElementById('statusLine');
 const dualStatusLine = document.getElementById('dualStatusLine');
 const resultsPanel = document.getElementById('resultsPanel');
 const errorBox = document.getElementById('errorBox');
-
-function setMode(mode) {
-  const isSingle = mode === 'single';
-  document.getElementById('tabSingle').classList.toggle('active', isSingle);
-  document.getElementById('tabDual').classList.toggle('active', !isSingle);
-  document.getElementById('panelSingleMode').style.display = isSingle ? 'block' : 'none';
-  document.getElementById('panelDualMode').style.display = isSingle ? 'none' : 'block';
-  errorBox.innerHTML = '';
-}
-
-recordBtn.addEventListener('click', () => {
-  if (recordBtn.classList.contains('recording')) {
-    stopRecording();
-  } else {
-    startRecording();
-  }
-});
-
-async function startRecording() {
-  errorBox.innerHTML = '';
-  try {
-    stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-  } catch (err) {
-    showError('Microphone access was denied or unavailable.');
-    return;
-  }
-  chunks = [];
-  mediaRecorder = new MediaRecorder(stream);
-  mediaRecorder.ondataavailable = e => chunks.push(e.data);
-  mediaRecorder.onstop = handleStop;
-  mediaRecorder.start();
-
-  recordBtn.classList.add('recording');
-  recordBtn.setAttribute('aria-label', 'Stop recording');
-  statusLine.textContent = 'Recording live...';
-  startTime = Date.now();
-  timerInterval = setInterval(updateTimer, 250);
-  resultsPanel.innerHTML = '<div class="placeholder">Recording in progress...</div>';
-}
-
-function stopRecording() {
-  mediaRecorder.stop();
-  stream.getTracks().forEach(t => t.stop());
-  clearInterval(timerInterval);
-  recordBtn.classList.remove('recording');
-  recordBtn.setAttribute('aria-label', 'Start recording');
-  statusLine.textContent = 'Transcribing & analyzing...';
-  resultsPanel.innerHTML = '<div class="placeholder">Analyzing recording...</div>';
-}
-
-function updateTimer() {
-  const elapsed = Math.floor((Date.now() - startTime) / 1000);
-  const m = String(Math.floor(elapsed / 60)).padStart(2, '0');
-  const s = String(elapsed % 60).padStart(2, '0');
-  timerEl.textContent = `${m}:${s}`;
-}
 
 function getBaseApiUrl() {
   if (window.location.protocol === 'file:' || !window.location.port) {
     return 'http://127.0.0.1:5002';
   }
   return '';
-}
-
-async function handleStop() {
-  const blob = new Blob(chunks, { type: 'audio/webm' });
-  const endpoint = getBaseApiUrl() + '/api/test/analyze-recording';
-
-  const formData = new FormData();
-  formData.append('audio', blob, 'recording.webm');
-  formData.append('prospect_id', document.getElementById('prospectId').value);
-
-  try {
-    const res = await fetch(endpoint, { method: 'POST', body: formData });
-    if (!res.ok) throw new Error(`Server responded with ${res.status}`);
-    const data = await res.json();
-    renderResults(data);
-    statusLine.textContent = 'Ready to record';
-  } catch (err) {
-    showError(`Could not reach the analyze endpoint: ${err.message}`);
-    resultsPanel.innerHTML = '<div class="placeholder">No results — see error above.</div>';
-    statusLine.textContent = 'Ready to record';
-  }
-}
-
-async function uploadSingleAudio() {
-  errorBox.innerHTML = '';
-  const fileInput = document.getElementById('singleAudioFile');
-  if (!fileInput.files || fileInput.files.length === 0) {
-    showError('Please select an audio file first.');
-    return;
-  }
-  const file = fileInput.files[0];
-  const btn = document.getElementById('btnUploadSingle');
-  btn.disabled = true;
-  btn.textContent = 'Transcribing & Analyzing...';
-  resultsPanel.innerHTML = '<div class="placeholder">Processing single recording with speaker diarization...</div>';
-
-  const endpoint = getBaseApiUrl() + '/api/test/analyze-recording';
-  const formData = new FormData();
-  formData.append('audio', file, file.name);
-  formData.append('prospect_id', document.getElementById('prospectId').value);
-
-  try {
-    const res = await fetch(endpoint, { method: 'POST', body: formData });
-    if (!res.ok) throw new Error(`Server responded with ${res.status}`);
-    const data = await res.json();
-    renderResults(data);
-  } catch (err) {
-    showError(`Upload analysis failed: ${err.message}`);
-    resultsPanel.innerHTML = '<div class="placeholder">Analysis failed.</div>';
-  } finally {
-    btn.disabled = false;
-    btn.textContent = 'Analyze Uploaded Audio';
-  }
 }
 
 async function toggleRecordTrack(role) {
@@ -843,11 +616,6 @@ async function toggleRecordTrack(role) {
   // If currently recording the other track, stop that one first
   if (activeDualRecorder) {
     activeDualRecorder.recorder.stop();
-  }
-
-  // Also stop single-mic recorder if active
-  if (mediaRecorder && mediaRecorder.state === 'recording') {
-    stopRecording();
   }
 
   let micStream;
