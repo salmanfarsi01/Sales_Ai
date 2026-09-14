@@ -546,10 +546,6 @@
   <div>
     <h1>PitchProX Behavioral Signal Console</h1>
     <p>Real two-speaker timeline verification, isolated per-speaker baselines, and play-by-play audit table.</p>
-  </div>
-  <div style="font-size: 12px; color: var(--text-muted);">
-    Endpoint Port: <span class="mono" style="font-weight:600; color: var(--accent);">5002</span>
-  </div>
 </header>
 
 <div class="layout">
@@ -1362,16 +1358,7 @@ function renderResults(data) {
         <td class="mono" style="font-weight:600;">${Math.round(t.readiness_score * 100)}%</td>
       </tr>`;
     });
-    html += `</tbody></table></div>
-      <div class="table-notes">
-        <div><strong>Measurement Audit Notes:</strong></div>
-        <div>&bull; <strong>Turn WPM</strong>: Instantaneous rate for this specific turn computed as <code>(turn_words / (duration_ms / 60000))</code>.</div>
-        <div>&bull; <strong>Base WPM</strong>: Maintained completely independently for Agent vs. Prospect (calibrated once &ge; 60s, &ge; 3 turns, &ge; 15 words).</div>
-        <div>&bull; <strong>Latency</strong>: Cross-speaker turnaround time computed from when the previous speaker ended to when current speaker began (pauses &ge; 2000ms highlighted).</div>
-        <div>&bull; <strong>Inf Lat</strong>: Real-time per-turn behavioral engine compute latency (sub-10ms Stage 2 inference), completely isolated from external batch ASR transcription time.</div>
-        <div>&bull; <strong>Confidence</strong>: Strict weakest-link minimum of ASR transcription quality, baseline calibration lock, speaker separation certainty, and semantic extraction mode. Hover for driver reason.</div>
-        <div>&bull; <strong>Pause</strong>: Intra-turn silence &ge; 250ms calculated strictly from word-level timestamps.</div>
-      </div>`;
+    html += `</tbody></table></div>`;
   }
 
   // Saved evaluation report indicator
