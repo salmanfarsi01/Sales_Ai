@@ -22,7 +22,12 @@ def semantic_engine():
 
 
 def test_soft_contact_preference_patterns(semantic_engine):
-    # Test reduced_frequency
+    # Test reduced_frequency with auxiliary and object pronoun
+    pref, conf, details = semantic_engine.detect_contact_preference("...please don't start texting me every day before Thursday.")
+    assert pref == "reduced_frequency"
+    assert conf >= 0.85
+    assert "texting" in details and "every day" in details
+
     pref, conf, details = semantic_engine.detect_contact_preference("Please don't call so often, once a week is fine.")
     assert pref == "reduced_frequency"
     assert conf >= 0.85
@@ -48,8 +53,32 @@ def test_soft_contact_preference_patterns(semantic_engine):
     assert conf == 0.0
 
 
+def test_negative_cases_do_not_trigger_false_preferences(semantic_engine):
+    """Verifies that conversation phrases discussing market conditions, general inquiries,
+    or property activity do not trigger false positive contact preferences."""
+    negatives = [
+        "the market changed too much, don't call it a bubble",
+        "the listing had too many calls on the first weekend",
+        "a home like this comes on the market, but not every day",
+        "having an open house once a week is fine",
+        "we text all the time with our clients",
+        "don't call it too much of a problem",
+        "I wouldn't call you every day, don't worry",
+        "don't call that too much",
+        "we don't call buyers without pre-approval",
+        "you can call me anytime",
+        "call me whenever you want",
+    ]
+
+    for text in negatives:
+        pref, conf, details = semantic_engine.detect_contact_preference(text)
+        assert pref == "none", f"False positive contact preference for: '{text}', got {pref} ({details})"
+        assert conf == 0.0
+
+
 def test_soft_preference_does_not_trigger_boundary_override(semantic_engine):
     soft_utterances = [
+        "...please don't start texting me every day before Thursday.",
         "Please don't call so often, maybe once a week is plenty.",
         "Email instead of calling please.",
         "Just email me whenever you have updates.",
@@ -99,6 +128,40 @@ async def test_adversarial_mixed_turn_semantic_overrides_soft_preference(semanti
     snap = await semantic_engine.analyze_turn_semantic(utt, context_history=[])
     assert snap.boundary_score == 1.0
     assert snap.contact_preference == "none"
+
+
+@pytest.mark.asyncio
+async def test_multiturn_split_fragment_preserves_soft_preference_and_zero_boundary(semantic_engine):
+    """Proves that when an utterance is split across turns by a mid-sentence pause
+    (e.g. Turn 2: '...please don't start texting me every day before Thursday. I really don't like agents'
+          Turn 3: 'constantly following up with me.'),
+    the fragment in Turn 3 inherits the soft preference context, evaluates boundary_score to 0.0,
+    and does NOT trigger a false positive compliance override."""
+    turn_2 = NormalizedUtterance(
+        utterance_id="u_split_2",
+        call_sid="call_split_test",
+        speaker_id="client",
+        start_ms=9091,
+        end_ms=16791,
+        text="Yeah. Thursday at three is fine. One thing, though, please don't start texting me every day before Thursday. I really don't like agents",
+        words=[NormalizedWord(word="Thursday", start_ms=9091, end_ms=9500)],
+        asr_confidence=0.98,
+    )
+    turn_3 = NormalizedUtterance(
+        utterance_id="u_split_3",
+        call_sid="call_split_test",
+        speaker_id="client",
+        start_ms=17251,
+        end_ms=19271,
+        text="constantly following up with me.",
+        words=[NormalizedWord(word="constantly", start_ms=17251, end_ms=17800)],
+        asr_confidence=1.0,
+    )
+
+    snap_3 = await semantic_engine.analyze_turn_semantic(turn_3, context_history=[turn_2])
+    assert snap_3.boundary_score == 0.0, f"Turn 3 false positive boundary override: {snap_3.boundary_score}"
+    assert snap_3.contact_preference == "reduced_frequency"
+
 
 
 @pytest.mark.asyncio

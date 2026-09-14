@@ -108,37 +108,43 @@ STOP_CONTACT_PATTERNS = [
 # Distinct from STOP_CONTACT_PATTERNS to guarantee soft preferences never trigger hard compliance overrides.
 SOFT_CONTACT_PREFERENCE_PATTERNS: Dict[str, List[str]] = {
     "reduced_frequency": [
-        r"\bdon['’]?t\s+(text|call|message|reach\s+out)\s+(every\s+day|all\s+the\s+time|so\s+(often|much)|multiple\s+times|constantly|daily)\b",
-        r"\b(please\s+)?don['’]?t\s+call\s+so\s+often\b",
-        r"\bstop\s+calling\s+(so\s+much|so\s+often|every\s+day|multiple\s+times)\b",
-        r"\b(call|reach\s+out|contact)\s+(me\s+)?less\s+often\b",
-        r"\btoo\s+many\s+(calls|texts|messages)\b",
-        r"\bnot\s+every\s+day\b",
-        r"\bonce\s+a\s+(week|month)\s+is\s+(enough|fine|plenty)\b",
+        r"\bdon['’]?t\s+(?:start\s+|keep\s+|be\s+|go\s+and\s+)?(text|texting|call|calling|message|messaging|reach(?:ing)?\s+out)\s+(?:me\s+|us\s+)?(every\s+day|all\s+the\s+time|so\s+(often|much)|multiple\s+times|constantly|daily|nonstop|too\s+much)\b",
+        r"\b(please\s+)?don['’]?t\s+(?:start\s+|keep\s+|be\s+)?(call|calling|text|texting|message|messaging)\s+(?:me\s+|us\s+)?so\s+(often|much)\b",
+        r"\bstop\s+(calling|texting|messaging|reaching\s+out)\s+(?:me\s+|us\s+)?(so\s+much|so\s+often|every\s+day|multiple\s+times|all\s+the\s+time|constantly)\b",
+        r"\b(call|text|reach\s+out|contact)\s+(?:me\s+|us\s+)?less\s+often\b",
+        r"\b(getting|receive|receiving)\s+too\s+many\s+(calls|texts|messages)\b",
+        r"\b(?:that['’]?s|it['’]?s)\s+too\s+many\s+(calls|texts|messages)\b",
+        r"\btoo\s+many\s+(calls|texts|messages)\s+(?:from\s+you|already)\b",
+        r"\b(?:call|calling|text|texting|reach\s+out|reaching\s+out|message|messaging|contact)\s+(?:me\s+|us\s+)?(?:just\s+)?not\s+every\s+day\b",
+        r"\b(?:call|calling|text|texting|reach\s+out|contact|checking\s+in|updates?)\s+(?:me\s+|us\s+)?once\s+a\s+(week|month)\s+is\s+(enough|fine|plenty)\b",
+        r"\bonce\s+a\s+(week|month)\s+is\s+(enough|fine|plenty)\s+(?:for\s+(?:calls|texts|updates|me)|to\s+(?:call|text|check\s+in|touch\s+base))\b",
+        r"\bno\s+need\s+to\s+(call|text|message|reach\s+out)\s+(?:me\s+|us\s+)?(every\s+day|so\s+often|daily)\b",
     ],
     "channel_restriction": [
         r"\bemail\s+(instead\s+of|rather\s+than)\s+(calling|call|texting|text)\b",
-        r"\b(please\s+)?email\s+me\s+instead\b",
-        r"\b(just|only)\s+email\s+me\b",
+        r"\b(please\s+)?email\s+(?:me\s+|us\s+)?instead\b",
+        r"\b(just|only)\s+email\s+(?:me\s+|us\b)",
         r"\bdon['’]?t\s+call\s*(just|only|,)?\s*(send\s+an?\s+)?email\b",
         r"\b(text|texting)\s+(only|instead)\b",
+        r"\btext\s+(?:me\s+|us\s+)?instead\s+of\s+(calling|call)\b",
         r"\bprefer\s+(an?\s+)?email\b",
-        r"\bprefer\s+(to\s+be\s+contacted\s+by|via)\s+email\b",
-        r"\bsend\s+me\s+an?\s+email\s+instead\b",
-        r"\breach\s+out\s+(by|via)\s+email\s+instead\b",
-        r"\bcommunicate\s+(by|via)\s+email\s+only\b",
-        r"\btext\s+me\s+instead\s+of\s+calling\b",
+        r"\bprefer\s+(an?\s+)?text\b",
+        r"\bprefer\s+(to\s+be\s+contacted\s+by|via)\s+(email|text|message)\b",
+        r"\bsend\s+(?:me\s+|us\s+)?an?\s+email\s+instead\b",
+        r"\breach\s+out\s+(by|via)\s+(email|text)\s+instead\b",
+        r"\bcommunicate\s+(by|via)\s+(email|text)\s+only\b",
+        r"\b(just\s+)?send\s+(?:me\s+|us\s+)?(an?\s+)?email\b",
     ],
     "timing_restriction": [
-        r"\b(only\s+)?(reach\s+out|call|contact)\s+(during|in)\s+business\s+hours\b",
+        r"\b(only\s+)?(reach\s+out|call|text|contact)\s+(during|in)\s+business\s+hours\b",
         r"\bonly\s+during\s+business\s+hours\b",
-        r"\b(call|reach\s+out)\s+after\s+\d{1,2}(:\d{2})?\s*(am|pm)?\b",
-        r"\bdon['’]?t\s+call\s+before\s+\d{1,2}(:\d{2})?\s*(am|pm)?\b",
-        r"\bonly\s+(call|reach\s+out)\s+on\s+weekends\b",
-        r"\bcall\s+me\s+in\s+the\s+evening\b",
-        r"\bdon['’]?t\s+call\s+(during|while\s+i['’]?m\s+at)\s+work\b",
-        r"\bonly\s+call\s+in\s+the\s+afternoon\b",
-        r"\bcall\s+between\s+\d{1,2}\s+and\s+\d{1,2}\b",
+        r"\b(call|text|reach\s+out)\s+(?:me\s+|us\s+)?after\s+\d{1,2}(:\d{2})?\s*(am|pm)?\b",
+        r"\bdon['’]?t\s+(call|text)\s+(?:me\s+|us\s+)?before\s+\d{1,2}(:\d{2})?\s*(am|pm)?\b",
+        r"\bonly\s+(call|text|reach\s+out)\s+on\s+weekends\b",
+        r"\b(call|text)\s+(?:me\s+|us\s+)?in\s+the\s+(evening|afternoon|morning)\b",
+        r"\bdon['’]?t\s+(call|text)\s+(?:during|while\s+i['’]?m\s+at)\s+work\b",
+        r"\bonly\s+(call|text)\s+in\s+the\s+(afternoon|evening|morning)\b",
+        r"\b(call|text)\s+between\s+\d{1,2}\s+and\s+\d{1,2}\b",
     ],
 }
 
@@ -452,6 +458,17 @@ class SemanticFeatureEngine:
 
         # Contact preference (soft preference distinct from hard boundary)
         pref_type, pref_conf, pref_details = self.detect_contact_preference(utterance.text)
+
+        # Multi-turn thought stitching: check if ongoing thought continues soft preference
+        if context_history and context_history[-1].speaker_id == utterance.speaker_id:
+            prev_turn = context_history[-1]
+            combined_turn_text = f"{prev_turn.text.strip()} {utterance.text.strip()}"
+            comb_pref_type, comb_pref_conf, comb_pref_details = self.detect_contact_preference(combined_turn_text)
+            if comb_pref_type != "none" and pref_type == "none":
+                pref_type = comb_pref_type
+                pref_conf = comb_pref_conf
+                pref_details = comb_pref_details
+
         if boundary_score >= 0.8:
             pref_type = "none"
             pref_conf = 0.0
@@ -498,6 +515,18 @@ class SemanticFeatureEngine:
         # 1. Deterministic boundary filter runs first (zero false negatives)
         boundary_score = self.classify_boundary_deterministic(utterance.text)
         pref_type, pref_conf, pref_details = self.detect_contact_preference(utterance.text)
+
+        # Multi-turn thought stitching: if current turn is a fragment or continuation
+        # of a previous turn from the same speaker, check combined text for contact preferences
+        if context_history and context_history[-1].speaker_id == utterance.speaker_id:
+            prev_turn = context_history[-1]
+            combined_turn_text = f"{prev_turn.text.strip()} {utterance.text.strip()}"
+            comb_pref_type, comb_pref_conf, comb_pref_details = self.detect_contact_preference(combined_turn_text)
+            if comb_pref_type != "none" and pref_type == "none":
+                pref_type = comb_pref_type
+                pref_conf = comb_pref_conf
+                pref_details = comb_pref_details
+
         if boundary_score >= 0.8:
             pref_type = "none"
             pref_conf = 0.0
@@ -538,7 +567,7 @@ class SemanticFeatureEngine:
             f"- specificity_score: float 0.0 to 1.0 (dates, dollar amounts, named entities, hard numbers)\n"
             f"- future_language_score: float 0.0 to 1.0 (operational future commitment vs vague hypotheticals)\n"
             f"- agreement_score: float 0.0 to 1.0 (substantive meeting/pricing commitment ~0.8-1.0; polite nod like 'yeah' ~0.2-0.3)\n"
-            f"- boundary_score: float 0.0 or 1.0 (STRICT: 1.0 ONLY for explicit stop-contact, DNC, existing broker representation, or legal threats. Exploring options, general hesitation, or soft cadence/channel preferences like 'don't call so often', 'email instead' MUST be 0.0)\n\n"
+            f"- boundary_score: float 0.0 or 1.0 (STRICT: 1.0 ONLY for explicit cease-and-desist, DNC list, legal threats, or existing representation. General complaints about follow-up cadence, pushiness, or frequency like 'constantly following up', 'don't text every day', 'too many calls' are NOT boundaries and MUST be 0.0)\n\n"
             f"Output ONLY raw JSON."
         )
 
@@ -574,12 +603,23 @@ class SemanticFeatureEngine:
             # Boundary detection is high-stakes compliance (zero false negatives from regex,
             # zero false positives from LLM hallucinations).
             # A deterministic regex match always produces 1.0.
-            # An LLM output is only accepted as a boundary if >= 0.80, and only when not a soft preference.
+            # An LLM output is only accepted as a boundary if >= 0.80, when not a soft preference,
+            # and when the utterance contains actual compliance boundary terminology.
             llm_boundary = float(parsed.get("boundary_score", 0.0))
+            has_boundary_cues = bool(re.search(
+                r"\b(stop|contact|call|calling|text|texting|agent|broker|realtor|lawyer|attorney|remove|dnc|harass|alone|list|contract)\b",
+                utterance.text,
+                re.IGNORECASE,
+            ))
+
             if pref_type != "none":
                 effective_boundary = boundary_score
+            elif boundary_score >= 0.8:
+                effective_boundary = 1.0
+            elif llm_boundary >= 0.8 and has_boundary_cues:
+                effective_boundary = 1.0
             else:
-                effective_boundary = 1.0 if (boundary_score >= 0.8 or llm_boundary >= 0.8) else 0.0
+                effective_boundary = 0.0
             conf = CONFIDENCE_BY_FEATURE["llm"]
 
             raw_q = parsed.get("question_type", "none")
