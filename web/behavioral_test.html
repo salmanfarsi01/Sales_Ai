@@ -615,8 +615,11 @@
             <span>Prospect Start Offset (ms)</span>
           </label>
           <input id="prospectOffsetMs" type="number" value="0" placeholder="0">
+          <div id="offsetAutoBadge" style="display:none; font-size: 11.5px; color: var(--accent); background: rgba(30,136,229,0.08); border: 1px solid rgba(30,136,229,0.25); border-radius: 4px; padding: 4px 8px; margin-top: 5px; line-height: 1.4;">
+            ⏱️ <strong>Auto-detected offset:</strong> <span id="offsetAutoText">0ms</span> based on real-world recording timestamps.
+          </div>
           <div style="font-size: 11px; color: var(--text-muted); margin-top: 4px; line-height: 1.4;">
-            0 = recorded together. If the Prospect track started later, enter roughly how many milliseconds later (e.g. 2500 for 2.5s). If it started earlier, use a negative number (e.g. -1000).
+            0 = recorded together. When recorded sequentially in this console, the offset is calculated automatically from when you clicked Record. You can also edit it manually.
           </div>
         </div>
       </div>
@@ -705,6 +708,9 @@ let mediaRecorder, chunks = [], startTime, timerInterval, stream;
 let activeDualRecorder = null; // { role, recorder, chunks, timerInterval, startTime, stream }
 let agentAudioBlob = null;
 let prospectAudioBlob = null;
+let agentRecordStartTime = 0;
+let prospectRecordStartTime = 0;
+let offsetManuallyEdited = false;
 
 const recordBtn = document.getElementById('recordBtn');
 const timerEl = document.getElementById('timer');
@@ -867,6 +873,11 @@ async function toggleRecordTrack(role) {
   };
 
   const recStartTime = Date.now();
+  if (role === 'agent') {
+    agentRecordStartTime = recStartTime;
+  } else {
+    prospectRecordStartTime = recStartTime;
+  }
   const btn = document.getElementById(`${role}RecordBtn`);
   const timer = document.getElementById(`${role}Timer`);
   const status = document.getElementById(`${role}Status`);
@@ -920,6 +931,7 @@ async function toggleRecordTrack(role) {
     if (fileInput) fileInput.value = '';
 
     activeDualRecorder = null;
+    autoComputeOffsetIfAvailable();
     updateDualSubmitState();
   };
 
@@ -934,12 +946,32 @@ async function toggleRecordTrack(role) {
   rec.start(100);
 }
 
+function autoComputeOffsetIfAvailable() {
+  if (agentRecordStartTime > 0 && prospectRecordStartTime > 0 && !offsetManuallyEdited) {
+    const diffMs = prospectRecordStartTime - agentRecordStartTime;
+    const offsetInput = document.getElementById('prospectOffsetMs');
+    const badge = document.getElementById('offsetAutoBadge');
+    const badgeText = document.getElementById('offsetAutoText');
+    if (offsetInput) {
+      offsetInput.value = diffMs;
+    }
+    if (badge && badgeText) {
+      const sec = (Math.abs(diffMs) / 1000).toFixed(1);
+      const sign = diffMs >= 0 ? '+' : '';
+      badgeText.textContent = `${sign}${diffMs}ms (${sec}s)`;
+      badge.style.display = 'block';
+    }
+  }
+}
+
 function clearTrack(role) {
   if (role === 'agent') {
     agentAudioBlob = null;
+    agentRecordStartTime = 0;
     document.getElementById('agentAudioFile').value = '';
   } else {
     prospectAudioBlob = null;
+    prospectRecordStartTime = 0;
     document.getElementById('prospectAudioFile').value = '';
   }
   const card = document.getElementById(`${role}Card`);
@@ -959,6 +991,13 @@ function clearTrack(role) {
   }
   const clearBtn = document.getElementById(`${role}ClearBtn`);
   if (clearBtn) clearBtn.style.display = 'none';
+
+  const badge = document.getElementById('offsetAutoBadge');
+  if (badge) badge.style.display = 'none';
+  if (!offsetManuallyEdited) {
+    const offsetInput = document.getElementById('prospectOffsetMs');
+    if (offsetInput) offsetInput.value = '0';
+  }
 
   updateDualSubmitState();
 }
@@ -1066,8 +1105,8 @@ async function uploadDualAudio() {
   formData.append('prospect_id', prospectId);
   formData.append('call_sid', callId);
   formData.append('prospect_offset_ms', offsetVal);
-  formData.append('agent_start_epoch_ms', '0');
-  formData.append('prospect_start_epoch_ms', '0');
+  formData.append('agent_start_epoch_ms', agentRecordStartTime ? String(agentRecordStartTime) : '0');
+  formData.append('prospect_start_epoch_ms', prospectRecordStartTime ? String(prospectRecordStartTime) : '0');
 
   try {
     const res = await fetch(endpoint, { method: 'POST', body: formData });
@@ -1097,6 +1136,14 @@ window.addEventListener('DOMContentLoaded', () => {
     if (epInput) {
       epInput.value = `${window.location.origin}/api/test/analyze-two-tracks`;
     }
+  }
+  const offsetInput = document.getElementById('prospectOffsetMs');
+  if (offsetInput) {
+    offsetInput.addEventListener('input', () => {
+      offsetManuallyEdited = true;
+      const badge = document.getElementById('offsetAutoBadge');
+      if (badge) badge.style.display = 'none';
+    });
   }
   updateDualSubmitState();
 });

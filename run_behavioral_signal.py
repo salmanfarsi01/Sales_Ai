@@ -243,6 +243,11 @@ async def analyze_two_tracks(
             raise HTTPException(status_code=400, detail="Both audio tracks are empty")
 
         active_call_sid = call_sid or f"call_{uuid.uuid4().hex[:8]}"
+        # Ensure clean session state for fresh dual-track analysis so previous runs don't leak turns
+        session_key = f"{prospect_id}_{active_call_sid}"
+        if session_key in prospect_sessions:
+            LOGGER.info("Resetting existing session '%s' for fresh dual-track analysis", session_key)
+            prospect_sessions.pop(session_key, None)
         session = get_or_create_session(prospect_id, active_call_sid)
         session["baseline_engine"].agent_id = agent_id
 
