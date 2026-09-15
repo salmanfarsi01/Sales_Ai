@@ -44,6 +44,7 @@ class DecisionStructure(BaseModel):
 
 class ObjectionRecord(BaseModel):
     objection_id: str = Field(default_factory=lambda: f"obj_{uuid.uuid4().hex[:8]}")
+    recurrence_id: Optional[str] = Field(None, description="Anchored Behavioral Signal Engine recurrence tracking ID")
     canonical_category: str = Field(..., description="e.g. commission_fee, timing_market, representation_broker, price")
     initial_statement: str
     latest_statement: str

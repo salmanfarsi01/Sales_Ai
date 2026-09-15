@@ -12,6 +12,7 @@ from .conversation_state_models import (
     StateChangeRecord,
 )
 from .conversation_facts import PersistentFactsManager
+from .conversation_objections import ObjectionLifecycleEngine
 
 LOGGER = logging.getLogger("copilot.conversation_state_manager")
 
@@ -28,11 +29,13 @@ class ConversationStateManager:
         self.call_sid = call_sid
         self.current_state = initial_snapshot or ConversationStateSnapshot(call_sid=call_sid)
         self.facts_manager = PersistentFactsManager(initial_facts=self.current_state.facts)
+        self.objections_engine = ObjectionLifecycleEngine(initial_objections=self.current_state.objections)
 
     def process_turn_bundle(
         self,
         bundle: BehavioralSignalInputBundle,
         decision_updates: Optional[Dict[str, Any]] = None,
+        fact_updates: Optional[List[Dict[str, Any]]] = None,
     ) -> ConversationStateSnapshot:
         """Applies a verified Behavioral Signal Engine turn bundle to update the conversation truth."""
         # Stale-write protection (Client Principle #9)
@@ -139,7 +142,42 @@ class ConversationStateManager:
                 )
             )
 
-        # 4. Sync facts
+        # 4. Evaluate Objection Lifecycle (Sprint 2 - Phase 3)
+        updated_objs, obj_changes, next_version = self.objections_engine.evaluate_turn(
+            bundle=bundle,
+            current_version=next_version,
+        )
+        self.current_state.objections = updated_objs
+        changes.extend(obj_changes)
+
+        # 5. Process Fact Updates if provided
+        if fact_updates:
+            for fu in fact_updates:
+                self.facts_manager.record_fact(
+                    category=fu.get("category", "general"),
+                    fact_key=fu["fact_key"],
+                    fact_value=fu["fact_value"],
+                    source_turn_id=bundle.turn_id,
+                    timestamp_ms=bundle.timestamp_ms,
+                    confidence=fu.get("confidence", 1.0),
+                    notes=fu.get("notes"),
+                )
+            next_version += 1
+            changes.append(
+                StateChangeRecord(
+                    state_version_before=next_version - 1,
+                    state_version_after=next_version,
+                    field_path="facts",
+                    old_value=[f.model_dump() for f in self.current_state.facts],
+                    new_value=[f.model_dump() for f in self.facts_manager.get_all_facts()],
+                    triggering_turn_id=bundle.turn_id,
+                    evidence_ids=bundle.contributing_evidence_ids,
+                    reason=f"Recorded {len(fact_updates)} persistent fact update(s).",
+                    timestamp_ms=bundle.timestamp_ms,
+                )
+            )
+
+        # 6. Sync facts snapshot
         self.current_state.facts = self.facts_manager.get_all_facts()
 
         # Update metadata
