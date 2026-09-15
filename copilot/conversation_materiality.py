@@ -84,10 +84,18 @@ class MaterialityFilter:
         forced_targets: Set[MaterialityTarget] = set()
         forced_reasons: List[str] = []
 
-        # 1. Hard Compliance Boundary Overrides (boundary_score >= 0.70 or hard stop text)
+        # 1. Hard Compliance Boundary Overrides
+        # Architectural Note on 0.70 vs 0.80/0.85 Thresholds:
+        # Downstream engines enforce specific cutoffs:
+        #   - Behavioral Inference collapses Readiness & caps Trust at boundary_score >= 0.80
+        #   - State Manager activates hard_boundary at boundary_score >= 0.85
+        # As a Tier-1 gatekeeper, the Materiality Filter's override threshold is intentionally
+        # set lower (>= 0.70) to serve as a protective funnel buffer. This guarantees that
+        # elevated or borderline boundary threat turns are NEVER clipped at the front gate
+        # before downstream engines evaluate them against their specific operational thresholds.
         if bundle.boundary_score >= 0.70:
             forced_targets.update(["contact_compliance", "objections", "dimensions"])
-            forced_reasons.append("Deterministic Override: boundary_score >= 0.70 requires contact_compliance, objections, and dimensions.")
+            forced_reasons.append("Deterministic Override: boundary_score >= 0.70 (buffer below 0.80/0.85 firing thresholds) requires contact_compliance, objections, and dimensions.")
 
         # 2. Contact Preference Overrides
         if bundle.contact_preference != "none":
@@ -152,6 +160,7 @@ class MaterialityFilter:
             r"\blose\s+my\s+number\b",
         ]
         has_boundary_words = any(re.search(p, text_lower) for p in boundary_markers)
+        # Protective gate buffer: triggers at 0.70 so downstream engines can evaluate at 0.80/0.85
         has_boundary_score = bundle.boundary_score >= 0.70
 
         pref_markers = [
@@ -188,11 +197,20 @@ class MaterialityFilter:
             r"\b(?:decision\s+maker|handles?\s+the\s+decisions?)\b",
             r"\b(?:co-owner|co-signer)\b",
         ]
-        # Actual real property title / deed ownership
-        title_deed_markers = [
-            r"\b(?:on\s+the\s+deed|on\s+the\s+title|holds?\s+the\s+title|holds?\s+title|co-owns?\s+(?:the\s+)?(?:title|deed|property|house|home)|co-owns?)\b",
-            r"\b(?:title\s+and\s+deed|deed\s+and\s+title)\b",
+        # Explicit Legal Instruments: Definitive title/deed markers, immune to casual idiom phrases
+        explicit_instrument_markers = [
+            r"\b(?:on\s+the\s+deed|on\s+the\s+title|holds?\s+(?:the\s+)?title|title\s+and\s+deed|deed\s+and\s+title)\b",
+            r"\b(?:on\s+the\s+contract|on\s+the\s+mortgage)\b",
         ]
+        # Loose Ownership Language: Subject to figurative joke/hyperbole disqualification
+        loose_ownership_markers = [
+            r"\b(?:co-owns?\s+(?:the\s+)?(?:title|deed|property|house|home)|co-owns?)\b",
+            r"\b(?:owns?\s+(?:the\s+)?(?:house|property|home|place))\b",
+        ]
+
+        has_explicit_instrument = any(re.search(p, text_lower) for p in explicit_instrument_markers)
+        has_loose_ownership = any(re.search(p, text_lower) for p in loose_ownership_markers)
+
         # Figurative / hyperbolic idiom filter (e.g. "jokes he practically owns the place")
         figurative_ownership = bool(
             re.search(
@@ -201,19 +219,19 @@ class MaterialityFilter:
             )
         )
 
-        has_title_deed = any(re.search(p, text_lower) for p in title_deed_markers)
         has_legal_authority = any(re.search(p, text_lower) for p in legal_authority_markers)
         has_direct_marital = any(re.search(p, text_lower) for p in direct_marital_markers)
         extended_family = bool(re.search(r"\b(?:brother(?:-in-law)?|sister(?:-in-law)?|in-law|cousin|uncle|aunt|parent)\b", text_lower))
 
-        # Extended family only counts if paired with real title/deed or legal authority, and not a figurative joke
-        has_extended_with_role = extended_family and (has_title_deed or has_legal_authority)
+        # Real title ownership: Explicit legal instrument ALWAYS holds; loose ownership only holds if not a figurative idiom
+        valid_title_ownership = has_explicit_instrument or (has_loose_ownership and not figurative_ownership)
+        has_extended_with_role = extended_family and (valid_title_ownership or has_legal_authority)
 
         is_decision_structure = (
             has_direct_marital
             or has_legal_authority
             or has_extended_with_role
-            or (has_title_deed and not figurative_ownership)
+            or valid_title_ownership
         )
 
         if is_decision_structure:

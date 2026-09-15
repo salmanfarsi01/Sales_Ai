@@ -409,3 +409,36 @@ class TestConversationStateSprint4Materiality:
         assert len(dim_records) == 1
         assert "Updated downstream inference dimension scores" in dim_records[0].reason
 
+    def test_casual_idiom_filler_does_not_suppress_explicit_legal_deed(self):
+        """Adversarial check in opposite direction:
+
+        A genuine, literal ownership disclosure phrased casually with words like
+        'practically' or 'acts like' (e.g. 'he practically lives here now that he's on the deed with us'
+        or 'he acts like he owns the place because he actually is on the deed with us')
+        must NEVER be rejected by the idiom filter because an explicit legal instrument is named.
+        """
+        filter_engine = MaterialityFilter()
+
+        # Case 1: "he practically lives here now that he's on the deed with us"
+        bundle1 = _create_bundle(
+            turn_id=3,
+            speaker_id="client",
+            text="He practically lives here now that he's on the deed with us.",
+        )
+        res1 = filter_engine.classify_turn(bundle1)
+        assert res1.is_material is True
+        assert "decision_structure" in res1.affected_targets
+        assert "facts" in res1.affected_targets
+
+        # Case 2: "he acts like he owns the place because he actually is on the deed with us"
+        bundle2 = _create_bundle(
+            turn_id=4,
+            speaker_id="client",
+            text="He acts like he owns the place because he actually is on the deed with us.",
+        )
+        res2 = filter_engine.classify_turn(bundle2)
+        assert res2.is_material is True
+        assert "decision_structure" in res2.affected_targets
+        assert "facts" in res2.affected_targets
+
+

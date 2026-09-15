@@ -110,6 +110,31 @@ class StateChangeRecord(BaseModel):
     timestamp_ms: int
 
 
+MomentumTrend = Literal["advancing", "stable", "stalling", "regressing"]
+
+
+class MomentumBreakdown(BaseModel):
+    """Structured breakdown of 7-family weighted momentum score and trajectory (Phase 6)."""
+    momentum_score: float = Field(..., ge=0.0, le=100.0, description="Overall momentum score on 0 - 100 scale")
+    trend: MomentumTrend = "stable"
+    trend_delta: float = 0.0
+    family_scores: Dict[str, float] = Field(default_factory=dict)
+    confidence: float = Field(1.0, ge=0.0, le=1.0)
+
+
+class ReadinessBreakdown(BaseModel):
+    """Multi-dimensional readiness breakdown with explainable blocker caps (Phase 6)."""
+    readiness_score: float = Field(..., ge=0.0, le=100.0, description="Final capped readiness score on 0 - 100 scale")
+    uncapped_score: float = Field(..., ge=0.0, le=100.0, description="Readiness score before applying blocker caps")
+    emotional_readiness: float = Field(..., ge=0.0, le=100.0)
+    logical_readiness: float = Field(..., ge=0.0, le=100.0)
+    logistical_readiness: float = Field(..., ge=0.0, le=100.0)
+    decision_readiness: float = Field(..., ge=0.0, le=100.0)
+    active_blocker_caps: List[str] = Field(default_factory=list)
+    capped_reason: Optional[str] = None
+    confidence: float = Field(1.0, ge=0.0, le=1.0)
+
+
 class ConversationStateSnapshot(BaseModel):
     """Current truth about the conversation at turn N."""
     state_id: str = Field(default_factory=lambda: f"state_{uuid.uuid4().hex[:10]}")
@@ -122,6 +147,8 @@ class ConversationStateSnapshot(BaseModel):
     facts: List[PersistentFactRecord] = Field(default_factory=list)
     dimensions: DimensionScores = Field(default_factory=DimensionScores)
     contact_compliance: ContactComplianceState = Field(default_factory=ContactComplianceState)
+    momentum: Optional[MomentumBreakdown] = None
+    readiness: Optional[ReadinessBreakdown] = None
     overall_confidence: float = Field(0.75, ge=0.0, le=1.0)
     change_history: List[StateChangeRecord] = Field(default_factory=list)
 

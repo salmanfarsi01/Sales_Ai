@@ -15,6 +15,8 @@ from .conversation_facts import PersistentFactsManager
 from .conversation_objections import ObjectionLifecycleEngine
 from .conversation_supersession import TruthSupersessionDetector
 from .conversation_materiality import MaterialityFilter
+from .conversation_scoring import ConversationScoringEngine
+from .conversation_scoring_config import ConversationScoringConfig
 
 LOGGER = logging.getLogger("copilot.conversation_state_manager")
 
@@ -27,13 +29,19 @@ class StaleStateUpdateError(ValueError):
 class ConversationStateManager:
     """Core state engine coordinating snapshots, explainability tracking, and monotonic versioning."""
 
-    def __init__(self, call_sid: str, initial_snapshot: Optional[ConversationStateSnapshot] = None):
+    def __init__(
+        self,
+        call_sid: str,
+        initial_snapshot: Optional[ConversationStateSnapshot] = None,
+        scoring_config: Optional[ConversationScoringConfig] = None,
+    ):
         self.call_sid = call_sid
         self.current_state = initial_snapshot or ConversationStateSnapshot(call_sid=call_sid)
         self.facts_manager = PersistentFactsManager(initial_facts=self.current_state.facts)
         self.objections_engine = ObjectionLifecycleEngine(initial_objections=self.current_state.objections)
         self.supersession_detector = TruthSupersessionDetector()
         self.materiality_filter = MaterialityFilter()
+        self.scoring_engine = ConversationScoringEngine(config=scoring_config)
 
     def process_turn_bundle(
         self,
@@ -235,6 +243,12 @@ class ConversationStateManager:
         # 7. Sync facts snapshot
         self.current_state.facts = self.facts_manager.get_all_facts()
 
+        # 8. Compute Momentum & Readiness Scoring (Phase 6)
+        momentum_res = self.scoring_engine.compute_momentum(bundle, self.current_state)
+        readiness_res = self.scoring_engine.compute_readiness(bundle, self.current_state)
+        self.current_state.momentum = momentum_res
+        self.current_state.readiness = readiness_res
+
         # Update metadata
         self.current_state.last_updated_turn_id = bundle.turn_id
         self.current_state.last_updated_timestamp_ms = bundle.timestamp_ms
@@ -243,6 +257,7 @@ class ConversationStateManager:
             bundle.inference_confidence,
             bundle.semantic_confidence,
             self.current_state.decision_structure.confidence,
+            readiness_res.confidence,
         )
         self.current_state.change_history.extend(changes)
 
