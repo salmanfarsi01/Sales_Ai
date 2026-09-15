@@ -106,6 +106,7 @@ class StateChangeRecord(BaseModel):
     triggering_turn_id: int
     evidence_ids: List[str] = Field(default_factory=list)
     reason: str
+    confidence: float = Field(1.0, ge=0.0, le=1.0)
     timestamp_ms: int
 
 
@@ -126,6 +127,12 @@ class ConversationStateSnapshot(BaseModel):
 
     def get_active_facts(self) -> List[PersistentFactRecord]:
         return [f for f in self.facts if f.status == "active"]
+
+    def get_active_fact(self, fact_key: str) -> Optional[PersistentFactRecord]:
+        for f in reversed(self.facts):
+            if f.fact_key == fact_key and f.status == "active":
+                return f
+        return None
 
     def get_superseded_facts(self) -> List[PersistentFactRecord]:
         return [f for f in self.facts if f.status == "superseded"]

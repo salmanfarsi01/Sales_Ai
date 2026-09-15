@@ -13,6 +13,8 @@ from .conversation_state_models import (
 )
 from .conversation_facts import PersistentFactsManager
 from .conversation_objections import ObjectionLifecycleEngine
+from .conversation_supersession import TruthSupersessionDetector
+from .conversation_materiality import MaterialityFilter
 
 LOGGER = logging.getLogger("copilot.conversation_state_manager")
 
@@ -30,6 +32,8 @@ class ConversationStateManager:
         self.current_state = initial_snapshot or ConversationStateSnapshot(call_sid=call_sid)
         self.facts_manager = PersistentFactsManager(initial_facts=self.current_state.facts)
         self.objections_engine = ObjectionLifecycleEngine(initial_objections=self.current_state.objections)
+        self.supersession_detector = TruthSupersessionDetector()
+        self.materiality_filter = MaterialityFilter()
 
     def process_turn_bundle(
         self,
@@ -57,69 +61,85 @@ class ConversationStateManager:
                 f"({bundle.timestamp_ms}ms) than current processed turn ({self.current_state.last_updated_timestamp_ms}ms)."
             )
 
+        # Tier-1 Turn-Level Gating: Materiality Filter (Phase 5 / Sprint 4)
+        materiality = self.materiality_filter.classify_turn(
+            bundle=bundle,
+            current_state=self.current_state,
+            has_explicit_fact_updates=bool(fact_updates),
+        )
+
         changes: List[StateChangeRecord] = []
         old_version = self.current_state.state_version
         next_version = old_version
 
-        # 1. Update Dimensions (independent scoring, no auto-coupling)
-        new_dims = DimensionScores(
-            trust=bundle.trust.score,
-            trust_confidence=bundle.trust.confidence,
-            emotion_valence=bundle.emotion.expressed_valence,
-            emotion_tension=bundle.emotion.tension_level,
-            emotion_confidence=bundle.emotion.confidence,
-            engagement=bundle.engagement.score,
-            engagement_confidence=bundle.engagement.confidence,
-            momentum=bundle.momentum.score,
-            momentum_confidence=bundle.momentum.confidence,
-            readiness=bundle.readiness.score,
-            readiness_confidence=bundle.readiness.confidence,
-            pacing=bundle.pacing.score,
-            pacing_confidence=bundle.pacing.confidence,
-        )
-        if new_dims != self.current_state.dimensions:
-            next_version += 1
-            changes.append(
-                StateChangeRecord(
-                    state_version_before=old_version,
-                    state_version_after=next_version,
-                    field_path="dimensions",
-                    old_value=self.current_state.dimensions.model_dump(),
-                    new_value=new_dims.model_dump(),
-                    triggering_turn_id=bundle.turn_id,
-                    evidence_ids=bundle.contributing_evidence_ids,
-                    reason="Updated downstream inference dimension scores from Behavioral Signal Engine.",
-                    timestamp_ms=bundle.timestamp_ms,
-                )
-            )
-            self.current_state.dimensions = new_dims
+        # If turn is non-material (no targets affected and no manual decision/fact updates),
+        # preserve state version and dimension stability entirely without mutating state.
+        if not materiality.is_material and not decision_updates and not fact_updates:
+            self.current_state.last_updated_turn_id = bundle.turn_id
+            self.current_state.last_updated_timestamp_ms = bundle.timestamp_ms
+            return self.current_state
 
-        # 2. Update Contact/Compliance State
-        hard_boundary = bundle.boundary_score >= 0.85
-        boundary_reason = "Triggered by upstream compliance boundary detection" if hard_boundary else None
-        new_compliance = ContactComplianceState(
-            hard_boundary_active=hard_boundary,
-            hard_boundary_reason=boundary_reason,
-            contact_preference=bundle.contact_preference,
-            contact_preference_details=bundle.contact_preference_details,
-            contact_preference_confidence=bundle.contact_preference_confidence,
-        )
-        if new_compliance != self.current_state.contact_compliance:
-            next_version += 1
-            changes.append(
-                StateChangeRecord(
-                    state_version_before=next_version - 1,
-                    state_version_after=next_version,
-                    field_path="contact_compliance",
-                    old_value=self.current_state.contact_compliance.model_dump(),
-                    new_value=new_compliance.model_dump(),
-                    triggering_turn_id=bundle.turn_id,
-                    evidence_ids=bundle.contributing_evidence_ids,
-                    reason=f"Updated compliance state (boundary={hard_boundary}, pref={bundle.contact_preference}).",
-                    timestamp_ms=bundle.timestamp_ms,
-                )
+        # 1. Update Dimensions (Gated by Materiality)
+        if "dimensions" in materiality.affected_targets:
+            new_dims = DimensionScores(
+                trust=bundle.trust.score,
+                trust_confidence=bundle.trust.confidence,
+                emotion_valence=bundle.emotion.expressed_valence,
+                emotion_tension=bundle.emotion.tension_level,
+                emotion_confidence=bundle.emotion.confidence,
+                engagement=bundle.engagement.score,
+                engagement_confidence=bundle.engagement.confidence,
+                momentum=bundle.momentum.score,
+                momentum_confidence=bundle.momentum.confidence,
+                readiness=bundle.readiness.score,
+                readiness_confidence=bundle.readiness.confidence,
+                pacing=bundle.pacing.score,
+                pacing_confidence=bundle.pacing.confidence,
             )
-            self.current_state.contact_compliance = new_compliance
+            if new_dims != self.current_state.dimensions:
+                next_version += 1
+                changes.append(
+                    StateChangeRecord(
+                        state_version_before=old_version,
+                        state_version_after=next_version,
+                        field_path="dimensions",
+                        old_value=self.current_state.dimensions.model_dump(),
+                        new_value=new_dims.model_dump(),
+                        triggering_turn_id=bundle.turn_id,
+                        evidence_ids=bundle.contributing_evidence_ids,
+                        reason="Updated downstream inference dimension scores from Behavioral Signal Engine.",
+                        timestamp_ms=bundle.timestamp_ms,
+                    )
+                )
+                self.current_state.dimensions = new_dims
+
+        # 2. Update Contact/Compliance State (Gated by Materiality)
+        if "contact_compliance" in materiality.affected_targets:
+            hard_boundary = bundle.boundary_score >= 0.85
+            boundary_reason = "Triggered by upstream compliance boundary detection" if hard_boundary else None
+            new_compliance = ContactComplianceState(
+                hard_boundary_active=hard_boundary,
+                hard_boundary_reason=boundary_reason,
+                contact_preference=bundle.contact_preference,
+                contact_preference_details=bundle.contact_preference_details,
+                contact_preference_confidence=bundle.contact_preference_confidence,
+            )
+            if new_compliance != self.current_state.contact_compliance:
+                next_version += 1
+                changes.append(
+                    StateChangeRecord(
+                        state_version_before=next_version - 1,
+                        state_version_after=next_version,
+                        field_path="contact_compliance",
+                        old_value=self.current_state.contact_compliance.model_dump(),
+                        new_value=new_compliance.model_dump(),
+                        triggering_turn_id=bundle.turn_id,
+                        evidence_ids=bundle.contributing_evidence_ids,
+                        reason=f"Updated compliance state (boundary={hard_boundary}, pref={bundle.contact_preference}).",
+                        timestamp_ms=bundle.timestamp_ms,
+                    )
+                )
+                self.current_state.contact_compliance = new_compliance
 
         # 3. Apply Decision Structure updates if provided
         if decision_updates:
@@ -142,13 +162,14 @@ class ConversationStateManager:
                 )
             )
 
-        # 4. Evaluate Objection Lifecycle (Sprint 2 - Phase 3)
-        updated_objs, obj_changes, next_version = self.objections_engine.evaluate_turn(
-            bundle=bundle,
-            current_version=next_version,
-        )
-        self.current_state.objections = updated_objs
-        changes.extend(obj_changes)
+        # 4. Evaluate Objection Lifecycle (Gated by Materiality)
+        if "objections" in materiality.affected_targets:
+            updated_objs, obj_changes, next_version = self.objections_engine.evaluate_turn(
+                bundle=bundle,
+                current_version=next_version,
+            )
+            self.current_state.objections = updated_objs
+            changes.extend(obj_changes)
 
         # 5. Process Fact Updates if provided
         if fact_updates:
@@ -177,7 +198,41 @@ class ConversationStateManager:
                 )
             )
 
-        # 6. Sync facts snapshot
+        # 6. Evaluate Truth Supersession (Gated by Materiality)
+        if "facts" in materiality.affected_targets and bundle.speaker_id == "client":
+            supersession_decisions = self.supersession_detector.evaluate_turn(
+                candidate_text=bundle.utterance_text,
+                active_facts=self.facts_manager.get_active_facts(),
+                decision_structure=self.current_state.decision_structure,
+            )
+            for decision in supersession_decisions:
+                if decision.has_supersession and decision.target_fact_id:
+                    effective_conf = round(min(decision.confidence, bundle.semantic_confidence, bundle.inference_confidence), 3)
+                    old_f, new_f = self.facts_manager.supersede_fact(
+                        old_fact_id=decision.target_fact_id,
+                        new_fact_value=decision.new_truth_value or bundle.utterance_text,
+                        source_turn_id=bundle.turn_id,
+                        timestamp_ms=bundle.timestamp_ms,
+                        confidence=effective_conf,
+                        notes=decision.reasoning,
+                    )
+                    next_version += 1
+                    changes.append(
+                        StateChangeRecord(
+                            state_version_before=next_version - 1,
+                            state_version_after=next_version,
+                            field_path=f"facts.{decision.target_fact_key}",
+                            old_value=old_f.fact_value,
+                            new_value=new_f.fact_value,
+                            triggering_turn_id=bundle.turn_id,
+                            evidence_ids=bundle.contributing_evidence_ids,
+                            reason=f"Truth supersession ({decision.relation}): {decision.reasoning}",
+                            confidence=effective_conf,
+                            timestamp_ms=bundle.timestamp_ms,
+                        )
+                    )
+
+        # 7. Sync facts snapshot
         self.current_state.facts = self.facts_manager.get_all_facts()
 
         # Update metadata
