@@ -5,20 +5,21 @@ from ConversationState_Implementation_Plan.md:
 
 Client Principles:
 1. Current truth supersedes old truth, old preserved in history (Principle #1)
-2. Evidence separate from interpretation, traceable (Principles #2 & #4)
-3. Not every field updates on every turn (Principle #3 / Phase 5)
-4. Objection reactivated in new words retains history (Principle #5 / Phase 3)
-5. Persistent facts survive unrelated turns (Principle #6 / Phase 2)
-6. Dimensions move independently (Principle #7)
-7. Uncertainty preserved, not forced to certainty (Principle #8)
-8. Stale async result cannot overwrite newer state (Principle #9)
+2. Evidence separate from interpretation (Principle #2)
+3. Interpreted changes traceable to evidence IDs (Principle #4)
+4. Not every field updates on every turn / filler suppressed (Principle #3 / Phase 5)
+5. Objection reactivated in new words retains history (Principle #5 / Phase 3)
+6. Persistent facts survive unrelated turns (Principle #6 / Phase 2)
+7. Dimensions move independently (Principle #7)
+8. Uncertainty preserved, not forced to certainty (Principle #8)
+9. Stale async result cannot overwrite newer state (Principle #9)
 
 Specification Document Acceptance Tests:
-9. Friendly-but-passive prospect -> high engagement, moderate readiness only (Test A)
-10. Confirmed walkthrough = success even if call was short (Test B)
-11. 'Send me something' alone != conversion (Test C)
-12. Repeated commission objection stays unresolved despite polite 'okay' (Test D)
-13. Absent decision-maker caps readiness despite high enthusiasm (Test E)
+10. Friendly-but-passive prospect -> high engagement, moderate readiness naturally (< 70.0) without blocker cap (Test A)
+11. Confirmed walkthrough = success even if call was short (Test B)
+12. 'Send me something' alone != conversion (Test C)
+13. Repeated commission objection: stays unresolved on polite filler, but resolves on genuine commitment (Test D)
+14. Absent decision-maker caps readiness despite high enthusiasm (Test E)
 """
 
 import pytest
@@ -168,13 +169,14 @@ class TestConversationStatePhase10Acceptance:
         assert superseded_list[0].superseded_at_turn_id == 8
 
     # =========================================================================
-    # 2. Client Principles #2 & #4: Evidence Separate from Interpretation, Traceable
+    # 2. Client Principle #2: Evidence Separated from Interpretation
     # =========================================================================
-    def test_client_principles_2_and_4_evidence_separated_from_interpretation_traceable(self):
-        """Principles #2 & #4: Evidence is what Behavioral Signal reported; interpretation
-        is what ConversationState concluded. Every state change links back to evidence IDs.
+    def test_client_principle_2_evidence_separated_from_interpretation(self):
+        """Principle #2: Evidence is what Behavioral Signal reported; interpretation
+        is what ConversationState concluded. Evidence and interpretation are stored
+        as genuinely separate data models and fields.
         """
-        manager = ConversationStateManager(call_sid="CA_p10_principle_2_4")
+        manager = ConversationStateManager(call_sid="CA_p10_principle_2")
 
         evidence_keys = ["ev_acoustic_speech_rate_drop", "ev_semantic_commission_mention"]
         t1 = _create_turn_bundle(
@@ -189,22 +191,54 @@ class TestConversationStatePhase10Acceptance:
 
         state = manager.process_turn_bundle(t1)
 
-        # Invariant A: Raw evidence is separate from interpreted model
+        # Invariant A: Raw evidence bundle carries the upstream signal evidence unchanged
         assert hasattr(t1, "contributing_evidence_ids")
         assert all(k in t1.contributing_evidence_ids for k in evidence_keys)
-        assert len(t1.contributing_evidence_ids) >= len(evidence_keys)
-        # Interpreted state maintains dimensions, readiness, objections separately
+        # Invariant B: State domain models are structurally isolated from the raw evidence object
+        assert isinstance(state.dimensions.trust, float)
         assert state.dimensions.trust == 0.55
         assert state.dimensions.emotion_tension == 0.45
         assert len(state.objections) == 1
+        assert state.objections[0].canonical_category == "commission_fee"
+        # Invariant C: Processing state did NOT mutate or delete the raw bundle's evidence
+        assert set(evidence_keys).issubset(set(t1.contributing_evidence_ids))
 
-        # Invariant B: Audited state changes link back to the exact evidence IDs
+    # =========================================================================
+    # 3. Client Principle #4: Interpreted Changes Traceable to Evidence IDs
+    # =========================================================================
+    def test_client_principle_4_interpreted_changes_traceable_to_evidence_ids(self):
+        """Principle #4: Every single interpreted mutation can be queried backward
+        to the exact contributing evidence IDs that justified it.
+        """
+        manager = ConversationStateManager(call_sid="CA_p10_principle_4")
+
+        evidence_keys = ["ev_pitch_variance_drop", "ev_semantic_objection_fee"]
+        t1 = _create_turn_bundle(
+            turn_id=1,
+            speaker_id="client",
+            text="I cannot pay a 6 percent commission on this sale.",
+            trust=0.55,
+            emotion_tension=0.45,
+            recurrence_id="rec_fee_99",
+            evidence_ids=evidence_keys,
+        )
+
+        state = manager.process_turn_bundle(t1)
+
+        # Invariant A: Every state change record contains originating evidence IDs
         assert len(state.change_history) > 0
+        for change in state.change_history:
+            assert len(change.evidence_ids) > 0, f"Change {change.field_path} has no evidence IDs"
+            assert change.state_version_after > change.state_version_before
+
+        # Invariant B: Specific interpreted domain changes trace backward to input evidence keys
         dim_change = next((c for c in state.change_history if c.field_path == "dimensions"), None)
         assert dim_change is not None
         assert any(ev in dim_change.evidence_ids for ev in evidence_keys)
-        assert dim_change.state_version_after <= state.state_version
-        assert state.change_history[-1].state_version_after == state.state_version
+
+        obj_change = next((c for c in state.change_history if "objections" in c.field_path), None)
+        assert obj_change is not None
+        assert any(ev in obj_change.evidence_ids for ev in evidence_keys)
 
     # =========================================================================
     # 3. Client Principle #3 (Phase 5): Not Every Field Updates on Every Turn
@@ -442,8 +476,8 @@ class TestConversationStatePhase10Acceptance:
     # =========================================================================
     def test_spec_acceptance_friendly_passive_prospect_readiness_capped(self):
         """Spec Test A: A friendly, agreeable prospect with vague optimism
-        yields high engagement but moderate readiness only (<= 50.0).
-        Conversion gate must remain closed.
+        yields high engagement but moderate readiness naturally through weighted scoring (< 70.0),
+        without firing an explicit blocker cap. Conversion gate remains closed due to lack of concrete value.
         """
         manager = ConversationStateManager(call_sid="CA_p10_spec_test_a")
 
@@ -461,11 +495,23 @@ class TestConversationStatePhase10Acceptance:
         )
         s1 = manager.process_turn_bundle(t1)
 
-        # Invariants
+        # Invariant A: Engagement is high, but readiness is moderate purely from natural weighted scoring
         assert s1.dimensions.engagement >= 0.75
         assert s1.readiness.readiness_score < 70.0
+
+        # Invariant B: ZERO blocker caps active (Proves this is NOT a blocker cap, unlike Spec Test E)
+        assert len(s1.readiness.active_blocker_caps) == 0
+        assert s1.readiness.readiness_score == s1.readiness.uncapped_score
+        assert s1.readiness.capped_reason is None
+
+        # Invariant C: Gate is closed specifically due to vague filler guard on value recognition, NOT a decision blocker
         assert s1.conversion_gate.is_open is False
+        assert "clear_value_reason" in s1.conversion_gate.failed_conditions
+        assert "decision_maker_aligned" not in s1.conversion_gate.failed_conditions
+
+        # Invariant D: Push strength recommends alternative close for agreeable-but-vague prospect
         assert s1.push_strength.state == "two_window_choice"
+        assert "binary choice" in s1.push_strength.recommended_action.lower()
 
     # =========================================================================
     # 10. Spec Doc Acceptance Test B: Confirmed Walkthrough on Short Call
@@ -576,13 +622,43 @@ class TestConversationStatePhase10Acceptance:
         )
         s4 = manager.process_turn_bundle(t4)
 
-        # Invariant: Objection remains unresolved, blocking conversion gate
+        # Negative Boundary Invariant (Turn 4): Objection remains unresolved, blocking conversion gate
         comm_obj = next((o for o in s4.objections if o.canonical_category == "commission_fee"), None)
         assert comm_obj is not None
         assert comm_obj.lifecycle_state in ("unresolved", "reactivated")
         assert s4.conversion_gate.is_open is False
         assert "objections_resolved_or_partial" in s4.conversion_gate.failed_conditions
         assert s4.push_strength.state == "resolve_then_ask"
+
+        # Turn 5: Agent presents concrete proof comps
+        t5 = _create_turn_bundle(
+            turn_id=5,
+            speaker_id="salesperson",
+            text="Fair enough John. Let me bring the actual closed HUD comps on your street to verify the net proceeds.",
+            salesperson_strategy_tag="hyperlocal_comps",
+        )
+        s5 = manager.process_turn_bundle(t5)
+
+        # Turn 6: Prospect shows genuine forward advance and concrete resolution commitment
+        t6 = _create_turn_bundle(
+            turn_id=6,
+            speaker_id="client",
+            text="Alright, that sounds fair. Show me those closed comps on Thursday at three.",
+            agreement=0.85,
+            future_lang=0.75,
+            readiness=0.82,
+            specificity=0.85,
+        )
+        s6 = manager.process_turn_bundle(t6)
+
+        # Positive Boundary Invariant (Turn 6): Legitimate forward commitment DOES resolve objection
+        comm_obj_resolved = next((o for o in s6.objections if o.canonical_category == "commission_fee"), None)
+        assert comm_obj_resolved is not None
+        assert comm_obj_resolved.lifecycle_state == "resolved"
+        assert comm_obj_resolved.resolution_evidence is not None
+        assert "objections_resolved_or_partial" not in s6.conversion_gate.failed_conditions
+        assert s6.conversion_gate.is_open is True
+        assert s6.push_strength.state == "direct_ask"
 
     # =========================================================================
     # 13. Spec Doc Acceptance Test E: Absent Decision-Maker Caps Readiness
@@ -611,9 +687,17 @@ class TestConversationStatePhase10Acceptance:
         }
         s1 = manager.process_turn_bundle(t1, decision_updates=decision_payload)
 
-        # Invariants
+        # Invariant A: Deterministic blocker cap actively fires (unlike Spec Test A)
         assert "absent_decision_maker" in s1.readiness.active_blocker_caps
+        assert "Absent/unconfirmed decision maker" in s1.readiness.capped_reason
+
+        # Invariant B: Uncapped readiness was high (> 60.0), but is strictly bounded to <= 55.0
+        assert s1.readiness.uncapped_score > 60.0
         assert s1.readiness.readiness_score <= 55.0
+        assert s1.readiness.readiness_score < s1.readiness.uncapped_score
+
+        # Invariant C: Gate is closed specifically due to missing decision authority, NOT lack of value
         assert s1.conversion_gate.is_open is False
         assert "decision_maker_aligned" in s1.conversion_gate.failed_conditions
+        assert "clear_value_reason" not in s1.conversion_gate.failed_conditions
         assert s1.push_strength.state in ("two_window_choice", "protect_and_shorten")
