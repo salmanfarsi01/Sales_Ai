@@ -17,6 +17,7 @@ from .conversation_supersession import TruthSupersessionDetector
 from .conversation_materiality import MaterialityFilter
 from .conversation_scoring import ConversationScoringEngine
 from .conversation_scoring_config import ConversationScoringConfig
+from .conversation_conversion import MeetingConversionGateEngine
 
 LOGGER = logging.getLogger("copilot.conversation_state_manager")
 
@@ -42,6 +43,7 @@ class ConversationStateManager:
         self.supersession_detector = TruthSupersessionDetector()
         self.materiality_filter = MaterialityFilter()
         self.scoring_engine = ConversationScoringEngine(config=scoring_config)
+        self.conversion_engine = MeetingConversionGateEngine(config=scoring_config)
 
     def process_turn_bundle(
         self,
@@ -249,6 +251,54 @@ class ConversationStateManager:
         self.current_state.momentum = momentum_res
         self.current_state.readiness = readiness_res
 
+        # 9. Evaluate Meeting/Conversion Gate & Push Strength (Phase 7 / Sprint 6)
+        prev_gate = self.current_state.conversion_gate
+        prev_conv = self.current_state.conversion_event
+        gate_res = self.conversion_engine.evaluate_gate(bundle, self.current_state)
+        push_res = self.conversion_engine.evaluate_push_strength(bundle, self.current_state, gate_res)
+        conv_res = self.conversion_engine.evaluate_conversion_event(
+            bundle, self.current_state, gate_res, previous_event=prev_conv
+        )
+
+        # Explainability tracking for conversion state changes
+        if prev_gate is None or prev_gate.is_open != gate_res.is_open:
+            next_version += 1
+            changes.append(
+                StateChangeRecord(
+                    state_version_before=next_version - 1,
+                    state_version_after=next_version,
+                    field_path="conversion_gate",
+                    old_value=prev_gate.model_dump() if prev_gate else None,
+                    new_value=gate_res.model_dump(),
+                    triggering_turn_id=bundle.turn_id,
+                    evidence_ids=bundle.contributing_evidence_ids,
+                    reason=f"Meeting gate transitioned to {'OPEN' if gate_res.is_open else 'CLOSED'}. Failed conditions: {gate_res.failed_conditions or 'None'}.",
+                    confidence=gate_res.confidence,
+                    timestamp_ms=bundle.timestamp_ms,
+                )
+            )
+
+        if conv_res and (prev_conv is None or prev_conv.status != conv_res.status):
+            next_version += 1
+            changes.append(
+                StateChangeRecord(
+                    state_version_before=next_version - 1,
+                    state_version_after=next_version,
+                    field_path="conversion_event",
+                    old_value=prev_conv.model_dump() if prev_conv else None,
+                    new_value=conv_res.model_dump(),
+                    triggering_turn_id=bundle.turn_id,
+                    evidence_ids=bundle.contributing_evidence_ids,
+                    reason=f"Conversion event updated: {conv_res.conversion_type} status={conv_res.status} (followup_is_conversion={conv_res.followup_is_conversion}).",
+                    confidence=conv_res.confirmation_confidence,
+                    timestamp_ms=bundle.timestamp_ms,
+                )
+            )
+
+        self.current_state.conversion_gate = gate_res
+        self.current_state.push_strength = push_res
+        self.current_state.conversion_event = conv_res
+
         # Update metadata
         self.current_state.last_updated_turn_id = bundle.turn_id
         self.current_state.last_updated_timestamp_ms = bundle.timestamp_ms
@@ -258,6 +308,7 @@ class ConversationStateManager:
             bundle.semantic_confidence,
             self.current_state.decision_structure.confidence,
             readiness_res.confidence,
+            gate_res.confidence,
         )
         self.current_state.change_history.extend(changes)
 

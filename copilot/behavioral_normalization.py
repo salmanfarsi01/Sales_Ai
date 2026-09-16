@@ -104,6 +104,7 @@ def normalize_deepgram_result(
                 )
             )
 
+    is_estimated_timing = False
     if normalized_words:
         utt_start_ms = normalized_words[0].start_ms
         utt_end_ms = normalized_words[-1].end_ms
@@ -111,6 +112,7 @@ def normalize_deepgram_result(
         if word_confs:
             asr_confidence = sum(word_confs) / len(word_confs)
     else:
+        is_estimated_timing = True
         start_sec = float(raw_start) if raw_start is not None else 0.0
         dur_sec = float(raw_duration) if raw_duration is not None else 0.0
         utt_start_ms = max(0, int(round(start_sec * 1000))) + stream_offset_ms

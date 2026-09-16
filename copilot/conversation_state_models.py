@@ -135,6 +135,77 @@ class ReadinessBreakdown(BaseModel):
     confidence: float = Field(1.0, ge=0.0, le=1.0)
 
 
+PushStrengthState = Literal[
+    "protect_and_shorten",
+    "resolve_then_ask",
+    "direct_ask",
+    "two_window_choice",
+    "reduce_friction_reask",
+    "respect_record_exit",
+]
+
+ConversionType = Literal[
+    "in_person_meeting",
+    "property_walkthrough",
+    "phone_consultation",
+    "video_call",
+    "document_review",
+    "information_send",
+    "unspecified",
+]
+
+ConversionStatus = Literal[
+    "not_attempted",
+    "eligible",
+    "proposed",
+    "tentative",
+    "confirmed",
+    "blocked",
+    "declined",
+]
+
+
+class GateConditionResult(BaseModel):
+    """Evaluation result for one of the 7 meeting gate conditions."""
+    condition_name: str
+    met: bool
+    score_or_value: Any = None
+    threshold: Any = None
+    reason: str
+
+
+class MeetingConversionGate(BaseModel):
+    """Boolean safety gate with explainable condition census (Phase 7)."""
+    is_open: bool = Field(False, description="True if and only if all 7 conditions are satisfied simultaneously")
+    status: Literal["open", "closed"] = "closed"
+    conditions: List[GateConditionResult] = Field(default_factory=list)
+    failed_conditions: List[str] = Field(default_factory=list)
+    blocking_reasons: List[str] = Field(default_factory=list)
+    confidence: float = Field(1.0, ge=0.0, le=1.0)
+
+
+class PushStrengthRecommendation(BaseModel):
+    """Strategic recommendation for how assertive to be when closing (Phase 7)."""
+    state: PushStrengthState
+    rationale: str
+    recommended_action: str
+    confidence: float = Field(1.0, ge=0.0, le=1.0)
+
+
+class ConversionEventObject(BaseModel):
+    """Structured commitment / conversion tracking entity (Phase 7)."""
+    event_id: str = Field(default_factory=lambda: f"conv_{uuid.uuid4().hex[:8]}")
+    conversion_type: ConversionType = "unspecified"
+    status: ConversionStatus = "not_attempted"
+    start_at: Optional[str] = None
+    location_or_format: Optional[str] = None
+    participants: List[str] = Field(default_factory=list)
+    confirmation_confidence: float = Field(0.0, ge=0.0, le=1.0)
+    source_turn_ids: List[int] = Field(default_factory=list)
+    blocking_items: List[str] = Field(default_factory=list)
+    followup_is_conversion: bool = False
+
+
 class ConversationStateSnapshot(BaseModel):
     """Current truth about the conversation at turn N."""
     state_id: str = Field(default_factory=lambda: f"state_{uuid.uuid4().hex[:10]}")
@@ -149,6 +220,9 @@ class ConversationStateSnapshot(BaseModel):
     contact_compliance: ContactComplianceState = Field(default_factory=ContactComplianceState)
     momentum: Optional[MomentumBreakdown] = None
     readiness: Optional[ReadinessBreakdown] = None
+    conversion_gate: Optional[MeetingConversionGate] = None
+    push_strength: Optional[PushStrengthRecommendation] = None
+    conversion_event: Optional[ConversionEventObject] = None
     overall_confidence: float = Field(0.75, ge=0.0, le=1.0)
     change_history: List[StateChangeRecord] = Field(default_factory=list)
 
@@ -166,3 +240,4 @@ class ConversationStateSnapshot(BaseModel):
 
     def get_unresolved_objections(self) -> List[ObjectionRecord]:
         return [o for o in self.objections if o.lifecycle_state in ("unresolved", "reactivated", "partially_resolved")]
+

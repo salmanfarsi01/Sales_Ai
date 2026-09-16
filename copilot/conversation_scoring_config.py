@@ -65,6 +65,19 @@ class ConversationScoringConfig(BaseModel):
     trend_advancing_delta: float = Field(4.0, ge=0.0, description="Rolling momentum delta >= +4.0 classifies advancing")
     trend_regressing_delta: float = Field(-4.0, le=0.0, description="Rolling momentum delta <= -4.0 classifies regressing")
 
+    # -------------------------------------------------------------------------
+    # 5. Meeting/Conversion Gate & Push Strength Thresholds (Phase 7 / Sprint 6)
+    # -------------------------------------------------------------------------
+    gate_min_trust: float = Field(0.45, ge=0.0, le=1.0, description="Condition 1: Minimum trust level for open gate")
+    gate_max_tension: float = Field(0.65, ge=0.0, le=1.0, description="Condition 1: Maximum emotion tension before trust collapses")
+    gate_min_engagement: float = Field(0.50, ge=0.0, le=1.0, description="Condition 2: Minimum engagement on-topic")
+    gate_min_value_recognition: float = Field(50.0, ge=0.0, le=100.0, description="Condition 4: Minimum value recognition score")
+    gate_min_logistical_readiness: float = Field(40.0, ge=0.0, le=100.0, description="Condition 6: Minimum logistical readiness score")
+    direct_ask_min_trust: float = Field(0.65, ge=0.0, le=1.0, description="Minimum trust level for direct_ask push strength")
+    two_window_choice_min_agreement: float = Field(0.60, ge=0.0, le=1.0, description="Minimum agreement for agreeable-but-vague classification")
+    two_window_choice_max_specificity: float = Field(0.45, ge=0.0, le=1.0, description="Maximum specificity for agreeable-but-vague classification")
+    reduce_friction_logistical_upper: float = Field(55.0, ge=0.0, le=100.0, description="Upper bound for soft logistical hesitation before direct ask")
+
     @model_validator(mode="after")
     def validate_weights(self) -> ConversationScoringConfig:
         momentum_sum = (

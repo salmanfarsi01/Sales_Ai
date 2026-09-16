@@ -2,7 +2,7 @@ from dotenv import load_dotenv
 import uvicorn
 import os
 
-load_dotenv(override=True)
+load_dotenv(override=False)
 
 if __name__ == "__main__":
     port = int(os.getenv("COPILOT_PORT", os.getenv("COPILOT_WEB_PORT", "5000")))

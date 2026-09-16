@@ -22,7 +22,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, JSONResponse
 
 # Load environment variables (.env)
-load_dotenv(override=True)
+load_dotenv(override=False)
 
 # Behavioral Signal Engine imports
 from copilot.calibration import SpeechToTextEngine
