@@ -330,6 +330,7 @@ class MaterialityFilter:
                 or trust_delta >= 0.08
                 or readiness_delta >= 0.08
                 or engagement_delta >= 0.08
+                or (bundle.speaker_id == "client" and bundle.agreement_score >= 0.70)
             )
 
             if has_behavioral_shift:

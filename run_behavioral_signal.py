@@ -60,6 +60,8 @@ LOGGER = logging.getLogger("behavioral_signal_server")
 
 STATIC_DIR = Path(__file__).resolve().parent / "web"
 HTML_FILE = STATIC_DIR / "behavioral_test.html"
+REPLAY_HTML_FILE = STATIC_DIR / "conversation_state_replay.html"
+REPORTS_DIR = Path(__file__).resolve().parent / "reports"
 
 # Initialize FastAPI app
 app = FastAPI(
@@ -89,9 +91,8 @@ prospect_sessions: Dict[str, Dict[str, Any]] = {}
 def get_or_create_session(prospect_id: str, call_sid: str) -> Dict[str, Any]:
     session_key = f"{prospect_id}_{call_sid}"
     if session_key not in prospect_sessions:
-        timing_engine = DeterministicTimingEngine()
-        semantic_engine = SemanticFeatureEngine()
         cal_window_ms = int(os.getenv("BEHAVIORAL_CALIBRATION_WINDOW_MS", str(DEFAULT_INTRA_CALL_WINDOW_MS)))
+        timing_engine = DeterministicTimingEngine()
         baseline_engine = BaselineAndChangePointEngine(
             call_sid=call_sid,
             prospect_id=prospect_id,
@@ -104,11 +105,12 @@ def get_or_create_session(prospect_id: str, call_sid: str) -> Dict[str, Any]:
             baseline_engine=baseline_engine,
             store=evidence_store,
         )
+        semantic_engine = SemanticFeatureEngine()
         prospect_sessions[session_key] = {
             "timing_engine": timing_engine,
-            "semantic_engine": semantic_engine,
             "baseline_engine": baseline_engine,
             "aggregator": aggregator,
+            "semantic_engine": semantic_engine,
             "context_history": [],
             "turn_index": 0,
         }
@@ -122,6 +124,12 @@ async def serve_test_console():
     if not HTML_FILE.exists():
         raise HTTPException(status_code=404, detail="behavioral_test.html not found in web/ directory")
     return FileResponse(HTML_FILE)
+
+
+# Shared ConversationState Replay & Inspection Console Router (Phase 9)
+from copilot.conversation_replay import get_conversation_replay_router
+
+app.include_router(get_conversation_replay_router(reports_dir=REPORTS_DIR, html_file_path=REPLAY_HTML_FILE))
 
 
 @app.get("/api/test/health")
@@ -343,10 +351,11 @@ if __name__ == "__main__":
     host = os.getenv("BEHAVIORAL_HOST", "127.0.0.1")
 
     print("\n" + "=" * 65)
-    print("  [*] PITCHPROX BEHAVIORAL SIGNAL ENGINE TEST SERVER")
-    print(f"  --> Web UI Console:   http://{host}:{port}/behavioral-test")
-    print(f"  --> Live Endpoint:    http://{host}:{port}/api/test/analyze-recording")
-    print(f"  --> Dual Track:       http://{host}:{port}/api/test/analyze-two-tracks")
+    print("  [*] PITCHPROX BEHAVIORAL SIGNAL & CONVERSATION STATE SERVER")
+    print(f"  --> Behavioral Console:   http://{host}:{port}/behavioral-test")
+    print(f"  --> State Replay Console: http://{host}:{port}/conversation-state-replay")
+    print(f"  --> Live Endpoint:        http://{host}:{port}/api/test/analyze-recording")
+    print(f"  --> Dual Track:           http://{host}:{port}/api/test/analyze-two-tracks")
     print("=" * 65 + "\n")
 
     uvicorn.run("run_behavioral_signal:app", host=host, port=port, reload=True, log_level="info")

@@ -58,6 +58,7 @@ async def execute_behavioral_turn_pipeline(
     last_evidence_frame: Optional[MultiWindowEvidenceFrame] = None
     last_inference_state: Optional[DownstreamInferenceState] = None
     play_by_play_turns: List[Dict[str, Any]] = []
+    turn_bundles: List[Any] = []
 
     current_turn_index = turn_index_start - 1
 
@@ -191,6 +192,27 @@ async def execute_behavioral_turn_pipeline(
             "is_baseline_locked": baseline_engine.is_locked(speaker_role),
         })
 
+        # 7. Extract Behavioral Signal Input Bundle for ConversationState (Phase 9)
+        if sem_snap and inference_state:
+            try:
+                from .conversation_state_contract import extract_behavioral_bundle
+                strat_tag = norm_utt.metadata.get("salesperson_strategy_tag") if norm_utt.metadata else None
+                strat_source = "strategic_engine" if strat_tag else "none"
+                bundle = extract_behavioral_bundle(
+                    turn_id=current_turn_index,
+                    speaker_id=speaker_role,
+                    utterance_text=norm_utt.text,
+                    inference_state=inference_state,
+                    semantic_snapshot=sem_snap,
+                    contact_preference_record=pref_store.get_preference(prospect_id) if prospect_id else None,
+                    salesperson_strategy_tag=strat_tag,
+                    salesperson_strategy_source=strat_source,
+                )
+                bundle.timestamp_ms = norm_utt.start_ms
+                turn_bundles.append(bundle)
+            except Exception as exc:
+                LOGGER.warning("Could not extract BehavioralSignalInputBundle for turn %d: %s", current_turn_index, exc)
+
     agent_prof = baseline_engine.get_active_profile("salesperson")
     prospect_prof = baseline_engine.get_active_profile("client")
     agent_base_wpm = (
@@ -278,5 +300,27 @@ async def execute_behavioral_turn_pipeline(
             LOGGER.info("Saved behavioral signal report to: %s", report_path)
         except Exception as exc:
             LOGGER.warning("Could not save behavioral signal report to disk: %s", exc)
+
+    # 8. Replay through ConversationStateManager & Persist State Replay Report (Phase 9)
+    if turn_bundles:
+        try:
+            from .conversation_replay import ConversationReplayEngine
+            conv_engine = ConversationReplayEngine(reports_dir=reports_dir)
+            source_tag = (
+                "synthetic_simulation"
+                if "sim_" in call_sid.lower()
+                else ("recording_replay" if ("test_" in call_sid.lower() or "ca_" in call_sid.lower()) else "live_call")
+            )
+            conv_report = conv_engine.replay_call(
+                call_sid=call_sid,
+                bundles=turn_bundles,
+                save_report=True,
+                source=source_tag,
+            )
+            result_payload["conversation_state"] = conv_report.final_state.model_dump()
+            result_payload["conversation_state_report"] = conv_report.report_file
+            LOGGER.info("Generated ConversationState replay report for call %s: %s", call_sid, conv_report.report_file)
+        except Exception as exc:
+            LOGGER.warning("Could not generate ConversationState replay for call %s: %s", call_sid, exc)
 
     return result_payload

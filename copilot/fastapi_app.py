@@ -65,6 +65,7 @@ from .behavioral_inference import (
     DownstreamInferenceState,
 )
 from .behavioral_pipeline_service import execute_behavioral_turn_pipeline
+from .conversation_replay import ReplayDialogueRequest
 
 LOGGER = logging.getLogger("copilot.fastapi")
 STATIC = Path(__file__).resolve().parent.parent / "web"
@@ -549,6 +550,7 @@ class FastAPICopilot:
             if not test_file.exists():
                 raise HTTPException(status_code=404, detail="Behavioral test UI file not found")
             return FileResponse(test_file)
+
 
         @app.get("/health")
         async def health():
@@ -1479,6 +1481,13 @@ class FastAPICopilot:
                     for idx, u in enumerate(merged_utts)
                 ],
             }
+
+        # -------------------------------------------------------------
+        # ConversationState Inspection & Replay Router (Phase 9)
+        # Shared service router mounted identically across applications
+        # -------------------------------------------------------------
+        from copilot.conversation_replay import get_conversation_replay_router
+        app.include_router(get_conversation_replay_router(html_file_path=STATIC / "conversation_state_replay.html"))
 
         return app
 
