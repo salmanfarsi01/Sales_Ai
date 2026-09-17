@@ -500,7 +500,7 @@
     <span class="kpi-value mono" id="kpiMomentum">—</span>
   </div>
   <div class="kpi-item">
-    <span class="kpi-label">Readiness</span>
+    <span class="kpi-label" title="Gate-Aware & Blocker-Capped Composite Readiness (0–100)">Composite Readiness</span>
     <span class="kpi-value mono" id="kpiReadiness">—</span>
   </div>
   <div class="kpi-item">
@@ -810,13 +810,13 @@
     } else {
       col1.innerHTML = `
         <div class="card-unit">
-          <div class="card-unit-title">Dimensions (V${sBefore.state_version})</div>
+          <div class="card-unit-title">Raw Behavioral Dimensions (V${sBefore.state_version})</div>
           ${renderDimensionBar('Trust', sBefore.dimensions.trust, '#3B82F6')}
           ${renderDimensionBar('Tension', sBefore.dimensions.emotion_tension, '#EF4444')}
           ${renderDimensionBar('Valence', sBefore.dimensions.emotion_valence, '#10B981')}
           ${renderDimensionBar('Engagement', sBefore.dimensions.engagement, '#0EADAB')}
           ${renderDimensionBar('Momentum', sBefore.dimensions.momentum, '#8B5CF6')}
-          ${renderDimensionBar('Readiness', sBefore.dimensions.readiness, '#F59E0B')}
+          ${renderDimensionBar('Raw Readiness', sBefore.dimensions.readiness, '#F59E0B', 'Uncapped Behavioral Signal Engine prior (0.00–1.00)')}
         </div>
 
         <div class="card-unit">
@@ -927,42 +927,82 @@
     const col4 = document.getElementById('col4Body');
     col4.innerHTML = `
       <!-- Conversion Gate & Push Strength -->
-      <div class="card-unit" style="border: 1px solid ${gate.is_open ? 'var(--prospect-border)' : 'var(--danger-border)'}; background: ${gate.is_open ? 'rgba(16, 185, 129, 0.05)' : 'rgba(239, 68, 68, 0.05)'};">
-        <div class="card-unit-title">
-          <span>Meeting / Conversion Gate</span>
-          <span class="badge ${gate.is_open ? 'badge-open' : 'badge-closed'}">${gate.is_open ? 'OPEN' : 'CLOSED'}</span>
-        </div>
+      ${gate && gate.conditions && gate.conditions.length > 0 ? `
+        <div class="card-unit" style="border: 1px solid ${gate.is_open ? 'var(--prospect-border)' : 'var(--danger-border)'}; background: ${gate.is_open ? 'rgba(16, 185, 129, 0.05)' : 'rgba(239, 68, 68, 0.05)'};">
+          <div class="card-unit-title">
+            <span>Meeting / Conversion Gate</span>
+            <span class="badge ${gate.is_open ? 'badge-open' : 'badge-closed'}">${gate.is_open ? 'OPEN' : 'CLOSED'}</span>
+          </div>
 
-        <div style="margin: 10px 0;">
-          <div style="font-size: 11px; text-transform: uppercase; color: var(--text-dim); font-weight: 700;">Push Strength Recommendation</div>
-          <div style="display:flex;align-items:center;gap:8px;margin-top:4px;">
-            <span class="badge badge-push" style="font-size:13px;padding:3px 10px;">${push.state || '—'}</span>
-          </div>
-          <div style="font-size: 12px; margin-top: 6px; color: var(--text);">
-            <strong>Action:</strong> ${push.recommended_action || '—'}
-          </div>
-          <div style="font-size: 11.5px; color: var(--text-muted); margin-top: 4px;">
-            <strong>Rationale:</strong> ${push.rationale || '—'}
-          </div>
-        </div>
-
-        <!-- 7 Conditions List -->
-        <div style="margin-top: 12px; border-top: 1px solid var(--border); padding-top: 8px;">
-          <div style="font-size: 11px; font-weight: 700; color: var(--text-dim); text-transform: uppercase; margin-bottom: 6px;">7 Simultaneous Conditions</div>
-          ${(gate.conditions || []).map(c => `
-            <div class="gate-condition-row">
-              <span class="cond-icon ${c.met ? 'pass' : 'fail'}">${c.met ? '✓' : '✗'}</span>
-              <div style="flex:1">
-                <div style="display:flex;justify-content:space-between">
-                  <strong style="color:${c.met ? 'var(--text)' : '#F87171'}">${c.condition_name}</strong>
-                  <span class="mono" style="font-size:11px">${formatCondValue(c.score_or_value)}</span>
-                </div>
-                <div style="font-size:11px;color:var(--text-muted)">${c.reason}</div>
-              </div>
+          <div style="margin: 10px 0;">
+            <div style="font-size: 11px; text-transform: uppercase; color: var(--text-dim); font-weight: 700;">Push Strength Recommendation</div>
+            <div style="display:flex;align-items:center;gap:8px;margin-top:4px;">
+              <span class="badge badge-push" style="font-size:13px;padding:3px 10px;">${push.state || '—'}</span>
             </div>
-          `).join('')}
+            <div style="font-size: 12px; margin-top: 6px; color: var(--text);">
+              <strong>Action:</strong> ${push.recommended_action || '—'}
+            </div>
+            <div style="font-size: 11.5px; color: var(--text-muted); margin-top: 4px;">
+              <strong>Rationale:</strong> ${push.rationale || '—'}
+            </div>
+          </div>
+
+          <!-- 7 Conditions List -->
+          <div style="margin-top: 12px; border-top: 1px solid var(--border); padding-top: 8px;">
+            <div style="font-size: 11px; font-weight: 700; color: var(--text-dim); text-transform: uppercase; margin-bottom: 6px;">7 Simultaneous Conditions</div>
+            ${(gate.conditions || []).map(c => `
+              <div class="gate-condition-row">
+                <span class="cond-icon ${c.met ? 'pass' : 'fail'}">${c.met ? '✓' : '✗'}</span>
+                <div style="flex:1">
+                  <div style="display:flex;justify-content:space-between">
+                    <strong style="color:${c.met ? 'var(--text)' : '#F87171'}">${c.condition_name}</strong>
+                    <span class="mono" style="font-size:11px">${formatCondValue(c.score_or_value)}</span>
+                  </div>
+                  <div style="font-size:11px;color:var(--text-muted)">${c.reason}</div>
+                </div>
+              </div>
+            `).join('')}
+          </div>
         </div>
-      </div>
+      ` : `
+        <div class="card-unit" style="border: 1px dashed var(--border); text-align: center; padding: 18px 12px; color: var(--text-dim);">
+          <div style="font-size: 16px; margin-bottom: 4px;">⏳</div>
+          <strong style="color: var(--text-muted); font-size: 12.5px;">Meeting / Conversion Gate: Pending</strong>
+          <div style="font-size: 11px; margin-top: 4px;">Gate evaluation initializes once the prospect engages with conversational evidence.</div>
+        </div>
+      `}
+
+      <!-- Composite Readiness Breakdown (Sprint 5) -->
+      ${sAfter.readiness ? `
+        <div class="card-unit" style="border-left: 3px solid #F59E0B;">
+          <div class="card-unit-title" style="display:flex; justify-content:space-between; align-items:center;">
+            <span style="color:#F59E0B;">Composite Readiness (Sprint 5)</span>
+            <span class="mono" style="font-size:14px; font-weight:700; color:#F59E0B;">${sAfter.readiness.readiness_score !== undefined ? sAfter.readiness.readiness_score.toFixed(1) : '—'}%</span>
+          </div>
+          ${sAfter.readiness.active_blocker_caps && sAfter.readiness.active_blocker_caps.length > 0 ? `
+            <div style="background: rgba(239, 68, 68, 0.15); border: 1px solid rgba(239, 68, 68, 0.3); border-radius: 4px; padding: 6px 8px; margin: 8px 0; font-size: 11px;">
+              <div style="color: #F87171; font-weight: 600;">🔒 Blocker Cap Applied (Capped from ${sAfter.readiness.uncapped_score !== undefined ? sAfter.readiness.uncapped_score.toFixed(1) : '—'}%)</div>
+              <div style="color: var(--text-dim); margin-top: 2px;">${sAfter.readiness.capped_reason || sAfter.readiness.active_blocker_caps.join(', ')}</div>
+            </div>
+          ` : `
+            <div style="font-size: 11px; color: var(--text-dim); margin: 4px 0 8px 0;">No active blocker caps applied (Score = Uncapped).</div>
+          `}
+          <div style="display:grid; grid-template-columns: 1fr 1fr; gap: 6px; font-size: 11.5px; margin-top: 6px;">
+            <div style="background: var(--bg); padding: 5px 8px; border-radius: 4px; border: 1px solid var(--border);">
+              <span style="color:var(--text-dim);">Emotional:</span> <strong class="mono" style="float:right;">${sAfter.readiness.emotional_readiness !== undefined ? sAfter.readiness.emotional_readiness.toFixed(0) : '—'}%</strong>
+            </div>
+            <div style="background: var(--bg); padding: 5px 8px; border-radius: 4px; border: 1px solid var(--border);">
+              <span style="color:var(--text-dim);">Logical:</span> <strong class="mono" style="float:right;">${sAfter.readiness.logical_readiness !== undefined ? sAfter.readiness.logical_readiness.toFixed(0) : '—'}%</strong>
+            </div>
+            <div style="background: var(--bg); padding: 5px 8px; border-radius: 4px; border: 1px solid var(--border);">
+              <span style="color:var(--text-dim);">Logistical:</span> <strong class="mono" style="float:right;">${sAfter.readiness.logistical_readiness !== undefined ? sAfter.readiness.logistical_readiness.toFixed(0) : '—'}%</strong>
+            </div>
+            <div style="background: var(--bg); padding: 5px 8px; border-radius: 4px; border: 1px solid var(--border);">
+              <span style="color:var(--text-dim);">Decision:</span> <strong class="mono" style="float:right;">${sAfter.readiness.decision_readiness !== undefined ? sAfter.readiness.decision_readiness.toFixed(0) : '—'}%</strong>
+            </div>
+          </div>
+        </div>
+      ` : ''}
 
       <!-- Conversion Event Card if present -->
       ${convEvt ? `
@@ -983,22 +1023,22 @@
 
       <!-- Updated Dimensions -->
       <div class="card-unit">
-        <div class="card-unit-title">Dimensions (V${sAfter.state_version || 0})</div>
+        <div class="card-unit-title">Raw Behavioral Dimensions (V${sAfter.state_version || 0})</div>
         ${renderDimensionBar('Trust', sAfter.dimensions.trust, '#3B82F6')}
         ${renderDimensionBar('Tension', sAfter.dimensions.emotion_tension, '#EF4444')}
         ${renderDimensionBar('Valence', sAfter.dimensions.emotion_valence, '#10B981')}
         ${renderDimensionBar('Engagement', sAfter.dimensions.engagement, '#0EADAB')}
         ${renderDimensionBar('Momentum', sAfter.dimensions.momentum, '#8B5CF6')}
-        ${renderDimensionBar('Readiness', sAfter.dimensions.readiness, '#F59E0B')}
+        ${renderDimensionBar('Raw Readiness', sAfter.dimensions.readiness, '#F59E0B', 'Uncapped Behavioral Signal Engine prior (0.00–1.00)')}
       </div>
     `;
   }
 
-  function renderDimensionBar(label, val, color) {
+  function renderDimensionBar(label, val, color, tooltip = '') {
     const v = val !== undefined && val !== null ? val : 0.5;
     const pct = Math.max(0, Math.min(100, Math.round(v * 100)));
     return `
-      <div class="dim-row">
+      <div class="dim-row" ${tooltip ? `title="${tooltip}"` : ''}>
         <span class="dim-label">${label}</span>
         <div class="dim-bar-wrapper">
           <div class="dim-bar-fill" style="width: ${pct}%; background: ${color}"></div>

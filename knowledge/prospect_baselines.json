@@ -6,7 +6,7 @@
     "speech_rate_wpm": {
       "mean": 200.0,
       "stddev": 36.0,
-      "sample_count": 103
+      "sample_count": 135
     },
     "avg_pause_duration_ms": {
       "mean": 0.0,
@@ -16,14 +16,14 @@
     "response_latency_ms": {
       "mean": 7200.0,
       "stddev": 2160.0,
-      "sample_count": 75
+      "sample_count": 99
     },
     "turn_length_words": {
       "mean": 20.0,
       "stddev": 7.0,
-      "sample_count": 103
+      "sample_count": 135
     },
-    "call_count": 26,
+    "call_count": 34,
     "updated_at_ms": 66000
   },
   "prospect_99": {
@@ -33,7 +33,7 @@
     "speech_rate_wpm": {
       "mean": 100.0,
       "stddev": 18.0,
-      "sample_count": 100
+      "sample_count": 132
     },
     "avg_pause_duration_ms": {
       "mean": 0.0,
@@ -43,14 +43,14 @@
     "response_latency_ms": {
       "mean": 800.0,
       "stddev": 240.0,
-      "sample_count": 100
+      "sample_count": 132
     },
     "turn_length_words": {
       "mean": 10.0,
       "stddev": 3.5,
-      "sample_count": 100
+      "sample_count": 132
     },
-    "call_count": 25,
+    "call_count": 33,
     "updated_at_ms": 72800
   }
 }

@@ -299,8 +299,15 @@ class MeetingConversionGateEngine:
                 confidence=conf,
             )
 
-        # 4. Gate Open + High Trust: Direct ask
+        # 4. Gate Open + High Trust: Direct ask / Confirm & Respect
         if gate.is_open and dims.trust >= cfg.direct_ask_min_trust:
+            if comp.contact_preference == "reduced_frequency":
+                return PushStrengthRecommendation(
+                    state="direct_ask",
+                    rationale="Meeting gate is open and prospect requested reduced frequency. Confirmed appointment must respect cadence preference.",
+                    recommended_action="Confirm the scheduled appointment time and explicitly reassure prospect that frequent follow-up messages will not be sent.",
+                    confidence=conf,
+                )
             return PushStrengthRecommendation(
                 state="direct_ask",
                 rationale=f"Meeting gate is open and trust is strong ({dims.trust:.2f}). Conversation state fully supports a confident, direct close.",
@@ -311,10 +318,17 @@ class MeetingConversionGateEngine:
         # 5. Agreeable-but-Vague: Two-window choice
         # Prospect is polite/agreeable but specificity is low or non-committal
         is_agreeable = bundle.agreement_score >= cfg.two_window_choice_min_agreement or dims.trust >= 0.60
-        is_vague = bundle.specificity_score <= cfg.two_window_choice_max_specificity or not bool(
+        is_vague = (bundle.specificity_score <= cfg.two_window_choice_max_specificity) and not bool(
             any(f.category == "timeline" and f.status == "active" for f in current_state.facts)
         )
         if not gate.is_open and is_agreeable and is_vague:
+            if comp.contact_preference == "reduced_frequency":
+                return PushStrengthRecommendation(
+                    state="two_window_choice",
+                    rationale="Prospect is agreeable with low contact frequency preference. Respect cadence while offering binary choice.",
+                    recommended_action="Offer a low-friction binary choice while reassuring prospect that contact frequency will remain minimal.",
+                    confidence=conf,
+                )
             return PushStrengthRecommendation(
                 state="two_window_choice",
                 rationale="Prospect is agreeable but vague on concrete commitments. Open-ended closing requests invite polite brush-offs.",
@@ -334,6 +348,13 @@ class MeetingConversionGateEngine:
 
         # 7. Fallback when Gate is Open
         if gate.is_open:
+            if comp.contact_preference == "reduced_frequency":
+                return PushStrengthRecommendation(
+                    state="direct_ask",
+                    rationale="All 7 meeting gate conditions satisfied with reduced frequency preference.",
+                    recommended_action="Confirm appointment time directly and reassure prospect that frequent messages will not be sent.",
+                    confidence=conf,
+                )
             return PushStrengthRecommendation(
                 state="direct_ask",
                 rationale="All 7 meeting gate conditions are satisfied.",
@@ -435,12 +456,22 @@ class MeetingConversionGateEngine:
         ]
         is_meeting_topic = any(re.search(pat, text_lower) for pat in meeting_patterns)
 
-        if gate.is_open and is_confirming and (is_meeting_topic or has_time):
+        # Check if timeline fact exists with confirmed meeting time
+        confirmed_fact = next((f for f in current_state.facts if f.fact_key == "confirmed_meeting_time" and f.status == "active"), None)
+        has_meeting_confirmation = bool(confirmed_fact) or is_meeting_topic or has_time
+
+        if (gate.is_open or confirmed_fact) and is_confirming and has_meeting_confirmation:
+            extracted_slot = (
+                (confirmed_fact.fact_value if confirmed_fact else None)
+                or (previous_event.start_at if previous_event else None)
+                or (has_time and "Confirmed Window")
+                or "Confirmed Time Slot"
+            )
             return ConversionEventObject(
                 event_id=previous_event.event_id if previous_event else f"conv_{uuid.uuid4().hex[:8]}",
                 conversion_type="in_person_meeting",
                 status="confirmed",
-                start_at=has_time and "Confirmed Window" or (previous_event.start_at if previous_event else "Confirmed Window"),
+                start_at=extracted_slot,
                 location_or_format="Scheduled Meeting",
                 participants=["Client", "Agent"],
                 confirmation_confidence=0.85,

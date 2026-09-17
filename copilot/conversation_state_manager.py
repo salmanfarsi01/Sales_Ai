@@ -1,20 +1,24 @@
 from __future__ import annotations
 
 import logging
+import re
+import uuid
 from typing import Any, Dict, List, Optional
 
 from .conversation_state_contract import BehavioralSignalInputBundle
 from .conversation_state_models import (
     ConversationStateSnapshot,
     DecisionStructure,
+    DecisionStakeholder,
     DimensionScores,
     ContactComplianceState,
+    PushStrengthRecommendation,
     StateChangeRecord,
 )
 from .conversation_facts import PersistentFactsManager
 from .conversation_objections import ObjectionLifecycleEngine
 from .conversation_supersession import TruthSupersessionDetector
-from .conversation_materiality import MaterialityFilter
+from .conversation_materiality import MaterialityFilter, ABSENT_DECISION_MAKER_PATTERNS
 from .conversation_scoring import ConversationScoringEngine
 from .conversation_scoring_config import ConversationScoringConfig
 from .conversation_conversion import MeetingConversionGateEngine
@@ -44,6 +48,8 @@ class ConversationStateManager:
         self.materiality_filter = MaterialityFilter()
         self.scoring_engine = ConversationScoringEngine(config=scoring_config)
         self.conversion_engine = MeetingConversionGateEngine(config=scoring_config)
+        self.prior_bundle: Optional[BehavioralSignalInputBundle] = None
+        self.has_prospect_spoken: bool = False
 
     def process_turn_bundle(
         self,
@@ -52,6 +58,8 @@ class ConversationStateManager:
         fact_updates: Optional[List[Dict[str, Any]]] = None,
     ) -> ConversationStateSnapshot:
         """Applies a verified Behavioral Signal Engine turn bundle to update the conversation truth."""
+        if bundle.speaker_id == "client":
+            self.has_prospect_spoken = True
         # Stale-write protection (Client Principle #9)
         # 1. Strictly reject turns with turn_id older than latest processed turn
         if bundle.turn_id < self.current_state.last_updated_turn_id:
@@ -76,6 +84,7 @@ class ConversationStateManager:
             bundle=bundle,
             current_state=self.current_state,
             has_explicit_fact_updates=bool(fact_updates),
+            prior_bundle=self.prior_bundle,
         )
 
         changes: List[StateChangeRecord] = []
@@ -87,6 +96,7 @@ class ConversationStateManager:
         if not materiality.is_material and not decision_updates and not fact_updates:
             self.current_state.last_updated_turn_id = bundle.turn_id
             self.current_state.last_updated_timestamp_ms = bundle.timestamp_ms
+            self.prior_bundle = bundle
             return self.current_state
 
         # 1. Update Dimensions (Gated by Materiality)
@@ -151,11 +161,16 @@ class ConversationStateManager:
                 )
                 self.current_state.contact_compliance = new_compliance
 
-        # 3. Apply Decision Structure updates if provided
-        if decision_updates:
+        # 3. Apply Decision Structure updates (Explicit or Autonomous from bundle)
+        auto_decision_updates = None
+        if not decision_updates and bundle.speaker_id == "client":
+            auto_decision_updates = self._extract_autonomous_decision_updates(bundle, materiality)
+
+        effective_dec_updates = decision_updates or auto_decision_updates
+        if effective_dec_updates:
             next_version += 1
             old_dec = self.current_state.decision_structure.model_dump()
-            for k, v in decision_updates.items():
+            for k, v in effective_dec_updates.items():
                 if hasattr(self.current_state.decision_structure, k):
                     setattr(self.current_state.decision_structure, k, v)
             changes.append(
@@ -167,7 +182,7 @@ class ConversationStateManager:
                     new_value=self.current_state.decision_structure.model_dump(),
                     triggering_turn_id=bundle.turn_id,
                     evidence_ids=bundle.contributing_evidence_ids,
-                    reason="Updated decision structure fields.",
+                    reason=f"Updated decision structure ({', '.join(effective_dec_updates.keys())}).",
                     timestamp_ms=bundle.timestamp_ms,
                 )
             )
@@ -181,9 +196,11 @@ class ConversationStateManager:
             self.current_state.objections = updated_objs
             changes.extend(obj_changes)
 
-        # 5. Process Fact Updates if provided
-        if fact_updates:
-            for fu in fact_updates:
+        # 5. Process Fact Updates if provided or autonomously extracted from client disclosures
+        autonomous_fact_updates = self._extract_autonomous_fact_updates(bundle, materiality)
+        all_fact_updates = (fact_updates or []) + (autonomous_fact_updates or [])
+        if all_fact_updates:
+            for fu in all_fact_updates:
                 self.facts_manager.record_fact(
                     category=fu.get("category", "general"),
                     fact_key=fu["fact_key"],
@@ -203,7 +220,7 @@ class ConversationStateManager:
                     new_value=[f.model_dump() for f in self.facts_manager.get_all_facts()],
                     triggering_turn_id=bundle.turn_id,
                     evidence_ids=bundle.contributing_evidence_ids,
-                    reason=f"Recorded {len(fact_updates)} persistent fact update(s).",
+                    reason=f"Recorded {len(all_fact_updates)} persistent fact update(s).",
                     timestamp_ms=bundle.timestamp_ms,
                 )
             )
@@ -254,14 +271,27 @@ class ConversationStateManager:
         # 9. Evaluate Meeting/Conversion Gate & Push Strength (Phase 7 / Sprint 6)
         prev_gate = self.current_state.conversion_gate
         prev_conv = self.current_state.conversion_event
-        gate_res = self.conversion_engine.evaluate_gate(bundle, self.current_state)
-        push_res = self.conversion_engine.evaluate_push_strength(bundle, self.current_state, gate_res)
-        conv_res = self.conversion_engine.evaluate_conversion_event(
-            bundle, self.current_state, gate_res, previous_event=prev_conv
-        )
+
+        # Speaker Blindspot Protection: Gate evaluation is held pending until the prospect speaks,
+        # preventing evaluating agent questions against prospect conversion criteria.
+        if not self.has_prospect_spoken and bundle.speaker_id == "salesperson":
+            gate_res = None
+            push_res = PushStrengthRecommendation(
+                state="two_window_choice",
+                rationale="Awaiting prospect opening response.",
+                recommended_action="Discover prospect availability or offer two window choices once prospect responds.",
+                confidence=0.50,
+            )
+            conv_res = None
+        else:
+            gate_res = self.conversion_engine.evaluate_gate(bundle, self.current_state)
+            push_res = self.conversion_engine.evaluate_push_strength(bundle, self.current_state, gate_res)
+            conv_res = self.conversion_engine.evaluate_conversion_event(
+                bundle, self.current_state, gate_res, previous_event=prev_conv
+            )
 
         # Explainability tracking for conversion state changes
-        if prev_gate is None or prev_gate.is_open != gate_res.is_open:
+        if gate_res is not None and (prev_gate is None or prev_gate.is_open != gate_res.is_open):
             next_version += 1
             changes.append(
                 StateChangeRecord(
@@ -308,8 +338,147 @@ class ConversationStateManager:
             bundle.semantic_confidence,
             self.current_state.decision_structure.confidence,
             readiness_res.confidence,
-            gate_res.confidence,
+            gate_res.confidence if gate_res else 0.50,
         )
         self.current_state.change_history.extend(changes)
+        self.prior_bundle = bundle
 
         return self.current_state
+
+    def _extract_autonomous_decision_updates(
+        self,
+        bundle: BehavioralSignalInputBundle,
+        materiality: Any,
+    ) -> Optional[Dict[str, Any]]:
+        """Autonomously extracts decision structure updates from client disclosures when explicit updates are not provided."""
+        if bundle.speaker_id != "client":
+            return None
+
+        text = bundle.utterance_text.lower().strip()
+
+        # 1. Direct absent decision maker patterns
+        if any(re.search(pat, text) for pat in ABSENT_DECISION_MAKER_PATTERNS):
+            role = "co_decision_maker"
+            if "husband" in text:
+                role = "husband"
+            elif "wife" in text:
+                role = "wife"
+            elif "partner" in text or "spouse" in text:
+                role = "partner"
+            elif "attorney" in text or "lawyer" in text:
+                role = "attorney"
+            elif "he" in text:
+                role = "male_decision_maker"
+            elif "she" in text:
+                role = "female_decision_maker"
+
+            stakeholder = DecisionStakeholder(
+                stakeholder_id=f"stk_{uuid.uuid4().hex[:6]}",
+                role=role,
+                is_decision_maker=True,
+                presence="absent",
+                notes=f"Identified as absent decision maker from client disclosure: '{bundle.utterance_text[:60]}'",
+                confidence=0.85,
+            )
+
+            existing = list(self.current_state.decision_structure.stakeholders)
+            if not any(s.role == role and s.presence == "absent" for s in existing):
+                existing.append(stakeholder)
+
+            return {
+                "decision_maker_present": False,
+                "stakeholders": existing,
+            }
+
+        # 2. Affirmative confirmation of prior salesperson inquiry about third-party stakeholder
+        if self.prior_bundle and self.prior_bundle.speaker_id == "salesperson":
+            prior_text_l = self.prior_bundle.utterance_text.lower()
+            asked_stakeholder = any(w in prior_text_l for w in ["him involved", "her involved", "them involved", "husband", "wife", "partner", "spouse", "decision maker", "sign off"])
+            is_affirmative = (
+                bundle.agreement_score >= 0.60
+                or any(re.search(rf"\b{aff}\b", text) for aff in ["yeah", "yes", "definitely", "sure", "absolutely", "correct", "of course"])
+            )
+            if asked_stakeholder and is_affirmative:
+                role = "male_decision_maker" if "him" in prior_text_l else ("female_decision_maker" if "her" in prior_text_l else "co_decision_maker")
+                stakeholder = DecisionStakeholder(
+                    stakeholder_id=f"stk_{uuid.uuid4().hex[:6]}",
+                    role=role,
+                    is_decision_maker=True,
+                    presence="absent",
+                    notes=f"Confirmed stakeholder involvement in response to agent inquiry: '{bundle.utterance_text[:60]}'",
+                    confidence=0.80,
+                )
+                existing = list(self.current_state.decision_structure.stakeholders)
+                if not any(s.role == role and s.presence == "absent" for s in existing):
+                    existing.append(stakeholder)
+
+                return {
+                    "decision_maker_present": False,
+                    "stakeholders": existing,
+                }
+
+        return None
+
+    def _extract_autonomous_fact_updates(
+        self,
+        bundle: BehavioralSignalInputBundle,
+        materiality: Any,
+    ) -> List[Dict[str, Any]]:
+        """Autonomously extracts persistent facts (meeting confirmations, contact preferences, etc.) from dialogue evidence."""
+        if bundle.speaker_id != "client":
+            return []
+
+        updates: List[Dict[str, Any]] = []
+        text_lower = bundle.utterance_text.lower().strip()
+        existing_keys = {f.fact_key for f in self.current_state.facts if f.status == "active"}
+
+        # 1. Contact preference
+        if bundle.contact_preference != "none" and "contact_preference" not in existing_keys:
+            updates.append({
+                "category": "preference",
+                "fact_key": "contact_preference",
+                "fact_value": bundle.contact_preference,
+                "confidence": bundle.contact_preference_confidence or 0.85,
+                "notes": f"Communication preference declared: {bundle.contact_preference_details or bundle.contact_preference}",
+            })
+
+        # 2. Confirmed meeting / appointment time
+        # Case A: Prospect explicitly mentions day and time
+        time_day_match = re.search(
+            r"\b(monday|tuesday|wednesday|thursday|friday|saturday|sunday|tomorrow)\b.*?\b(?:at\s+)?(\d{1,2}(?::\d{2})?\s*(?:am|pm)?|one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve)\b",
+            text_lower,
+        )
+        if time_day_match and "confirmed_meeting_time" not in existing_keys:
+            updates.append({
+                "category": "timeline",
+                "fact_key": "confirmed_meeting_time",
+                "fact_value": time_day_match.group(0).title(),
+                "confidence": 0.85,
+                "notes": f"Prospect confirmed meeting time directly: '{bundle.utterance_text[:60]}'",
+            })
+        elif self.prior_bundle and self.prior_bundle.speaker_id == "salesperson":
+            # Case B: Salesperson proposed a day/time and prospect confirmed affirmatively
+            prior_text_lower = self.prior_bundle.utterance_text.lower()
+            prop_match = re.search(
+                r"\b(monday|tuesday|wednesday|thursday|friday|saturday|sunday|tomorrow)\b.*?\b(?:at\s+)?(\d{1,2}(?::\d{2})?\s*(?:am|pm)?|one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve)\b",
+                prior_text_lower,
+            )
+            is_affirmative = (
+                bundle.agreement_score >= 0.60
+                or any(re.search(rf"\b{aff}\b", text_lower) for aff in ["yeah", "yes", "definitely", "sure", "absolutely", "works", "perfect", "sounds good"])
+            )
+            if prop_match and is_affirmative and "confirmed_meeting_time" not in existing_keys:
+                raw_time_str = prop_match.group(0).title()
+                norm_time = raw_time_str
+                for word, num in [("One", "1:00 PM"), ("Two", "2:00 PM"), ("Three", "3:00 PM"), ("Four", "4:00 PM"), ("Five", "5:00 PM")]:
+                    if f"At {word}" in norm_time:
+                        norm_time = norm_time.replace(f"At {word}", f"at {num}")
+                updates.append({
+                    "category": "timeline",
+                    "fact_key": "confirmed_meeting_time",
+                    "fact_value": norm_time,
+                    "confidence": 0.85,
+                    "notes": f"Prospect confirmed proposed time '{raw_time_str}' from salesperson proposal.",
+                })
+
+        return updates

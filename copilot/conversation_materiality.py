@@ -13,6 +13,15 @@ from .conversation_objections import CANONICAL_OBJECTION_PATTERNS
 
 LOGGER = logging.getLogger("copilot.conversation_materiality")
 
+ABSENT_DECISION_MAKER_PATTERNS: List[str] = [
+    r"\b(?:he['’]?s|she['’]?s|they['’]?re)\s+not\s+going\s+to\s+make\s+a\s+decision\b",
+    r"\b(?:won['’]?t|will\s+not|can['’]?t|cannot)\s+make\s+a\s+decision\s+unless\b",
+    r"\b(?:my\s+)?(?:husband|wife|spouse|partner|boss|attorney|lawyer)\s+(?:is\s+not\s+here|is\s+out\s+of\s+town|handles?\s+all\s+(?:the\s+)?decisions?|makes?\s+all\s+(?:the\s+)?decisions?)\b",
+    r"\b(?:husband|wife|spouse|partner)\s+is\s+not\s+here\b",
+    r"\bwe\s+decide\s+everything\s+together\b",
+    r"\b(?:consult|check|talk|speak)\s+with\s+(?:my\s+)?(?:husband|wife|spouse|partner)\s+(?:first|before)\b",
+]
+
 MaterialityTarget = Literal[
     "dimensions",
     "facts",
@@ -64,6 +73,7 @@ class MaterialityFilter:
         bundle: BehavioralSignalInputBundle,
         current_state: Optional[ConversationStateSnapshot] = None,
         has_explicit_fact_updates: bool = False,
+        prior_bundle: Optional[BehavioralSignalInputBundle] = None,
     ) -> MaterialityClassification:
         """Evaluates whether a turn is material and which state sub-engines it affects."""
         api_key_groq = os.getenv("GROQ_API_KEY")
@@ -76,12 +86,28 @@ class MaterialityFilter:
         )
         if should_use_llm:
             try:
-                result = self._classify_via_llm(bundle, current_state, has_explicit_fact_updates, api_key_groq or "")
+                result = self._classify_via_llm(
+                    bundle,
+                    current_state,
+                    has_explicit_fact_updates,
+                    api_key_groq or "",
+                    prior_bundle=prior_bundle,
+                )
             except Exception as exc:
                 LOGGER.warning("LLM materiality classification failed, falling back to deterministic heuristic: %s", exc)
-                result = self._classify_via_heuristic(bundle, current_state, has_explicit_fact_updates)
+                result = self._classify_via_heuristic(
+                    bundle,
+                    current_state,
+                    has_explicit_fact_updates,
+                    prior_bundle=prior_bundle,
+                )
         else:
-            result = self._classify_via_heuristic(bundle, current_state, has_explicit_fact_updates)
+            result = self._classify_via_heuristic(
+                bundle,
+                current_state,
+                has_explicit_fact_updates,
+                prior_bundle=prior_bundle,
+            )
 
         # ---------------------------------------------------------------------
         # HARD DETERMINISTIC SAFETY OVERRIDES (Invariant Protection)
@@ -110,7 +136,11 @@ class MaterialityFilter:
             forced_reasons.append("Deterministic Override: upstream contact_preference requires contact_compliance and facts.")
 
         # 3. Objection Recurrence & Strategy Overrides
-        if bundle.recurrence_id or bundle.recurrence_type in ("same_objection_repeated", "concern_after_failed_reframe"):
+        is_sched_recurrence = bool(
+            bundle.recurrence_type in ("scheduling_detail_repeated", "scheduling_repeated", "positive_echo")
+            or (bundle.recurrence_id and (bundle.recurrence_id.startswith("SCHED_") or "sched" in bundle.recurrence_id.lower()))
+        )
+        if (bundle.recurrence_id or bundle.recurrence_type in ("same_objection_repeated", "concern_after_failed_reframe")) and not is_sched_recurrence:
             forced_targets.update(["objections", "dimensions"])
             forced_reasons.append("Deterministic Override: upstream recurrence_id requires objections and dimensions.")
 
@@ -122,6 +152,37 @@ class MaterialityFilter:
         if has_explicit_fact_updates:
             forced_targets.add("facts")
             forced_reasons.append("Deterministic Override: explicit fact updates supplied.")
+        # 5. Absent Decision-Maker & External Authority Overrides (Spec Test E / Client Principle #6)
+        if bundle.speaker_id == "client" and any(re.search(pat, bundle.utterance_text.lower()) for pat in ABSENT_DECISION_MAKER_PATTERNS):
+            forced_targets.update(["decision_structure", "facts"])
+            forced_reasons.append("Deterministic Override: client disclosure indicates absent/external decision-maker authority (Spec Test E).")
+
+        # 6. Behavioral & Acoustic Shifts (Client Principle #3: Dimension Stability & Materiality Gating)
+        # Protect dimension sync: If upstream inference in bundle meaningfully diverges
+        # from current state dimensions (delta >= 0.08 or client substantive agreement >= 0.70),
+        # dimensions MUST be updated, regardless of whether LLM or heuristic classified it.
+        if current_state and current_state.dimensions:
+            cur_dim = current_state.dimensions
+            valence_delta = abs(bundle.emotion.expressed_valence - cur_dim.emotion_valence)
+            tension_delta = abs(bundle.emotion.tension_level - cur_dim.emotion_tension)
+            trust_delta = abs(bundle.trust.score - cur_dim.trust)
+            readiness_delta = abs(bundle.readiness.score - cur_dim.readiness)
+            engagement_delta = abs(bundle.engagement.score - cur_dim.engagement)
+
+            has_behavioral_shift = (
+                valence_delta >= 0.08
+                or tension_delta >= 0.08
+                or trust_delta >= 0.08
+                or readiness_delta >= 0.08
+                or engagement_delta >= 0.08
+                or (bundle.speaker_id == "client" and bundle.agreement_score >= 0.70)
+            )
+            if has_behavioral_shift and (bundle.speaker_id == "client" or result.is_material):
+                forced_targets.add("dimensions")
+                forced_reasons.append(
+                    f"Deterministic Override: behavioral/acoustic shift detected "
+                    f"(trust_d={trust_delta:.2f}, ready_d={readiness_delta:.2f}, val_d={valence_delta:.2f})."
+                )
 
         if forced_targets:
             result.affected_targets.update(forced_targets)
@@ -136,6 +197,7 @@ class MaterialityFilter:
         bundle: BehavioralSignalInputBundle,
         current_state: Optional[ConversationStateSnapshot] = None,
         has_explicit_fact_updates: bool = False,
+        prior_bundle: Optional[BehavioralSignalInputBundle] = None,
     ) -> MaterialityClassification:
         """Deterministic heuristic classifier with adversarial dual-direction support."""
         text = bundle.utterance_text.strip()
@@ -201,8 +263,10 @@ class MaterialityFilter:
         legal_authority_markers = [
             r"\b(?:attorney|lawyer|power\s+of\s+attorney|executor|probate)\b",
             r"\b(?:sole\s+authority|joint\s+decision|consult\s+with|sign\s+off)\b",
-            r"\b(?:decision\s+maker|handles?\s+the\s+decisions?)\b",
+            r"\b(?:decision\s+maker|handles?\s+(?:all\s+)?(?:the\s+)?decisions?)\b",
             r"\b(?:co-owner|co-signer)\b",
+            r"\b(?:make\s+(?:a\s+|the\s+)?decision|makes?\s+(?:a\s+|the\s+)?decisions?|making\s+(?:a\s+|the\s+)?decision)\b",
+            r"\b(?:decide\s+everything\s+together|we\s+decide\s+together)\b",
         ]
         # Explicit Legal Instruments: Definitive title/deed markers, immune to casual idiom phrases
         explicit_instrument_markers = [
@@ -241,10 +305,34 @@ class MaterialityFilter:
             or valid_title_ownership
         )
 
-        if is_decision_structure:
+        # Inconsistency #3 Fix: Salesperson questions (inquiries about third parties/signers)
+        # are exploratory questions opening inquiry, not confirmed factual disclosures.
+        is_salesperson_question = (
+            bundle.speaker_id == "salesperson"
+            and (
+                text.endswith("?")
+                or bundle.question_type != "none"
+                or any(text_lower.startswith(q) for q in ["would you", "do you", "could you", "is there", "who", "what", "can you", "should we", "have you", "are you"])
+            )
+        )
+
+        if is_decision_structure and not is_salesperson_question:
             targets.add("decision_structure")
             targets.add("facts")  # Structural roles are also persistent facts
             reasons.append("References decision stakeholder, title ownership, or signing authority.")
+
+        # Inconsistency #5 (Turn 2) Fix: Check if client affirmatively confirms a prior salesperson inquiry about stakeholders
+        if bundle.speaker_id == "client" and prior_bundle and prior_bundle.speaker_id == "salesperson":
+            prior_text_l = prior_bundle.utterance_text.lower()
+            asked_stakeholder = any(w in prior_text_l for w in ["him involved", "her involved", "them involved", "husband", "wife", "partner", "spouse", "decision maker", "sign off", "on the title", "on the deed"])
+            is_affirmative = (
+                bundle.agreement_score >= 0.60
+                or any(re.search(rf"\b{aff}\b", text_lower) for aff in ["yeah", "yes", "definitely", "sure", "absolutely", "correct", "of course"])
+            )
+            if asked_stakeholder and is_affirmative:
+                targets.add("decision_structure")
+                targets.add("facts")
+                reasons.append("Client confirms third-party stakeholder involvement inquired by agent.")
 
         # ---------------------------------------------------------------------
         # 4. Objections & Reframe Strategies
@@ -256,9 +344,13 @@ class MaterialityFilter:
                 for o in current_state.objections
             )
         )
+        is_sched_rec = bool(
+            bundle.recurrence_type in ("scheduling_detail_repeated", "scheduling_repeated", "positive_echo")
+            or (bundle.recurrence_id and (bundle.recurrence_id.startswith("SCHED_") or "sched" in bundle.recurrence_id.lower()))
+        )
         has_objection_tag = bool(
-            bundle.recurrence_id
-            or bundle.recurrence_type in ("same_objection_repeated", "concern_after_failed_reframe")
+            (bundle.recurrence_id or bundle.recurrence_type in ("same_objection_repeated", "concern_after_failed_reframe"))
+            and not is_sched_rec
         )
         has_reframe_tag = bool(bundle.salesperson_strategy_tag)
         has_canonical_match = any(
@@ -305,7 +397,7 @@ class MaterialityFilter:
             r"\bif\s+(?:i|we)\s+believed\s+there\s+was\s+a\s+better\b",
             r"\bopen\s+to\s+moving\s+if\b",
         ]
-        if any(re.search(p, text_lower) for p in fact_domain_markers):
+        if any(re.search(p, text_lower) for p in fact_domain_markers) and not is_salesperson_question:
             targets.add("facts")
             reasons.append("Mentions deal parameters (timeline, pricing, or moving decision).")
 
@@ -367,11 +459,17 @@ class MaterialityFilter:
         current_state: Optional[ConversationStateSnapshot],
         has_explicit_fact_updates: bool,
         api_key: str,
+        prior_bundle: Optional[BehavioralSignalInputBundle] = None,
     ) -> MaterialityClassification:
-        """LLM-based comparative classification."""
+        """LLM-based comparative classification with conversational context."""
+        prior_context = ""
+        if prior_bundle:
+            prior_context = f"Prior Turn [Speaker: {prior_bundle.speaker_id}]: \"{prior_bundle.utterance_text}\"\n"
+
         prompt = (
             f"You are an expert sales conversational linguist evaluating turn materiality.\n\n"
-            f"Utterance: \"{bundle.utterance_text}\"\n"
+            f"{prior_context}"
+            f"Current Utterance: \"{bundle.utterance_text}\"\n"
             f"Speaker: {bundle.speaker_id}\n"
             f"Recurrence/Objection ID: {bundle.recurrence_id or 'None'}\n"
             f"Boundary Score: {bundle.boundary_score:.2f}\n\n"
@@ -385,7 +483,11 @@ class MaterialityFilter:
             f"1. Casual pleasantries or weather chatter ('Looks like rain', 'Good morning') with no deal facts are NOT material.\n"
             f"2. Statements that superficially look like casual chatter but contain embedded structural facts "
             f"('We were having coffee talking about how my brother-in-law co-owns the deed') MUST be marked for decision_structure and facts.\n"
-            f"3. A pure factual disclosure should NOT mark dimensions unless significant emotion/tension is present.\n\n"
+            f"3. A pure factual disclosure should NOT mark dimensions unless significant emotion/tension is present.\n"
+            f"4. AGENT INQUIRIES & PROPOSALS: Questions or scheduling proposals asked by the salesperson (e.g. 'Thursday at three still work?', 'Would you want him involved?', 'Who else makes decisions?') "
+            f"are exploratory inquiries/proposals, NOT established deal facts. Do NOT mark decision_structure or facts for an agent inquiry alone; wait for prospect confirmation.\n"
+            f"5. PROSPECT CONFIRMATIONS: If the salesperson previously proposed a meeting time or asked about involving a stakeholder, and the prospect affirmatively confirms "
+            f"('Yeah. Definitely.', 'Yes', 'Absolutely', 'Thursday works'), this prospect confirmation IS material for facts (and decision_structure if involving stakeholders).\n\n"
             f"Respond with raw JSON containing:\n"
             f"- is_material: boolean\n"
             f"- affected_targets: list of strings from ['dimensions', 'facts', 'objections', 'decision_structure', 'contact_compliance']\n"

@@ -108,7 +108,7 @@ STOP_CONTACT_PATTERNS = [
 # Distinct from STOP_CONTACT_PATTERNS to guarantee soft preferences never trigger hard compliance overrides.
 SOFT_CONTACT_PREFERENCE_PATTERNS: Dict[str, List[str]] = {
     "reduced_frequency": [
-        r"\bdon['’]?t\s+(?:start\s+|keep\s+|be\s+|go\s+and\s+)?(text|texting|call|calling|message|messaging|reach(?:ing)?\s+out)\s+(?:me\s+|us\s+)?(every\s+day|all\s+the\s+time|so\s+(often|much)|multiple\s+times|constantly|daily|nonstop|too\s+much)\b",
+        r"\bdon['’]?t\s+(?:start\s+|keep\s+|be\s+|go\s+and\s+)?(text|texting|call|calling|message|messaging|reach(?:ing)?\s+out)\s+(?:me\s+|us\s+)?(every\s+(?:single\s+)?day|all\s+the\s+time|so\s+(often|much)|multiple\s+times|constantly|daily|nonstop|too\s+much)\b",
         r"\b(please\s+)?don['’]?t\s+(?:start\s+|keep\s+|be\s+)?(call|calling|text|texting|message|messaging)\s+(?:me\s+|us\s+)?so\s+(often|much)\b",
         r"\bstop\s+(calling|texting|messaging|reaching\s+out)\s+(?:me\s+|us\s+)?(so\s+much|so\s+often|every\s+day|multiple\s+times|all\s+the\s+time|constantly)\b",
         r"\b(call|text|reach\s+out|contact)\s+(?:me\s+|us\s+)?less\s+often\b",
@@ -157,6 +157,8 @@ SPECIFICITY_PATTERNS = [
     r"\b(january|february|march|april|may|june|july|august|september|october|november|december)\b",
     r"\b(monday|tuesday|wednesday|thursday|friday|saturday|sunday)\b",
     r"\b\d{1,2}(:\d{2})?\s*(am|pm)\b",
+    r"\bat\s+(one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve|\d{1,2})(:\d{2})?\b",
+    r"\b(one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve|\d{1,2})\s*o'?clock\b",
     r"\b(yesterday|tomorrow|today)\b",
     r"\b(attorney|probate|tenant|landlord|contractor|escrow|appraiser|inspector)\b",
 ]
@@ -247,7 +249,7 @@ class SemanticFeatureEngine:
     def __init__(
         self,
         groq_client: Optional[Any] = None,
-        model: str = "qwen/qwen3.6-27b",
+        model: str = "qwen/qwen3.8-27b",
         timeout_seconds: float = 1.0,
     ):
         self.groq_client = groq_client
@@ -443,7 +445,12 @@ class SemanticFeatureEngine:
 
         # Specificity
         spec_matches = sum(1 for pat in SPECIFICITY_PATTERNS if re.search(pat, lower_text))
-        specificity_score = min(1.0, spec_matches * 0.35)
+        if spec_matches == 0:
+            specificity_score = 0.0
+        elif spec_matches == 1:
+            specificity_score = 0.40
+        else:
+            specificity_score = min(1.0, 0.40 + (spec_matches - 1) * 0.30)
 
         # Future Language
         future_matches = sum(1 for pat in FUTURE_LANGUAGE_PATTERNS if re.search(pat, lower_text))
@@ -585,7 +592,7 @@ class SemanticFeatureEngine:
                     "temperature": 0.1,
                     "max_tokens": 150,
                 }
-                if "qwen" in self.model.lower():
+                if any(m in self.model.lower() for m in ["o1", "o3", "qwq", "deepseek-r1"]):
                     kwargs["reasoning_effort"] = "none"
                 resp = client.chat.completions.create(**kwargs)
                 return resp.choices[0].message.content.strip()

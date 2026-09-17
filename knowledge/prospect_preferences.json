@@ -22,5 +22,21 @@
     "first_observed_turn": 4,
     "call_sid": "test_call_033",
     "timestamp_ms": 32465
+  },
+  "test_prospect_063": {
+    "preference": "reduced_frequency",
+    "confidence": 0.9,
+    "details": "don't start texting me every day",
+    "first_observed_turn": 2,
+    "call_sid": "test_call_063",
+    "timestamp_ms": 7192
+  },
+  "test_prospect_055": {
+    "preference": "reduced_frequency",
+    "confidence": 0.9,
+    "details": "don't start texting me every day",
+    "first_observed_turn": 2,
+    "call_sid": "test_call_055",
+    "timestamp_ms": 7841
   }
 }

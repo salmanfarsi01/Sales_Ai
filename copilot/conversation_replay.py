@@ -114,6 +114,7 @@ class ConversationReplayEngine:
         )
 
         timeline: List[TurnReplayStep] = []
+        prior_bundle: Optional[BehavioralSignalInputBundle] = None
 
         for bundle in bundles:
             # Capture deep copy of state before processing this turn
@@ -124,6 +125,7 @@ class ConversationReplayEngine:
                 bundle=bundle,
                 current_state=manager.current_state,
                 has_explicit_fact_updates=False,
+                prior_bundle=prior_bundle,
             )
 
             # Record change history length prior to processing
@@ -152,6 +154,7 @@ class ConversationReplayEngine:
                 state_after=state_after,
             )
             timeline.append(step)
+            prior_bundle = bundle
 
         final_state = manager.current_state.model_copy(deep=True)
 
