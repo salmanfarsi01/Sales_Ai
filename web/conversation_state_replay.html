@@ -955,7 +955,7 @@
               <div style="flex:1">
                 <div style="display:flex;justify-content:space-between">
                   <strong style="color:${c.met ? 'var(--text)' : '#F87171'}">${c.condition_name}</strong>
-                  <span class="mono" style="font-size:11px">${c.score_or_value !== null ? c.score_or_value : ''}</span>
+                  <span class="mono" style="font-size:11px">${formatCondValue(c.score_or_value)}</span>
                 </div>
                 <div style="font-size:11px;color:var(--text-muted)">${c.reason}</div>
               </div>
@@ -1012,6 +1012,20 @@
     if (val === null || val === undefined) return 'null';
     if (typeof val === 'object') {
       return JSON.stringify(val);
+    }
+    return String(val);
+  }
+
+  function formatCondValue(val) {
+    if (val === null || val === undefined) return '';
+    if (typeof val === 'object') {
+      if (val.trust !== undefined && val.tension !== undefined) {
+        return `Tr: ${Number(val.trust).toFixed(2)}, Ten: ${Number(val.tension).toFixed(2)}`;
+      }
+      return JSON.stringify(val);
+    }
+    if (typeof val === 'number') {
+      return Number.isInteger(val) ? val.toString() : val.toFixed(2);
     }
     return String(val);
   }
