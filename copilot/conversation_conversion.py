@@ -101,7 +101,7 @@ class MeetingConversionGateEngine:
             reason3 = f"Active unresolved objection(s) present: {', '.join(categories)}"
         else:
             if current_state.objections:
-                reason3 = f"All {len(current_state.objections)} raised objection(s) are resolved or partially resolved"
+                reason3 = f"All {len(current_state.objections)} raised objection(s) are resolved, partially resolved, or superseded"
             else:
                 reason3 = "No active objections raised (clean slate)"
 
@@ -129,12 +129,19 @@ class MeetingConversionGateEngine:
         # without concrete goal/timeline facts does NOT establish a clear value reason.
         is_vague_filler = (bundle.specificity_score <= cfg.two_window_choice_max_specificity) and not has_goal_facts
 
-        val_ok = not is_vague_filler and (
+        has_decision_to_stay = any(
+            o.lifecycle_state == "superseded" and o.superseded_by_objection_id == "decision_to_stay"
+            for o in current_state.objections
+        )
+
+        val_ok = not has_decision_to_stay and not is_vague_filler and (
             (val_score >= cfg.gate_min_value_recognition)
             or (agreement_factor >= 0.50 and logical_r >= 50.0)
         )
         if not val_ok:
-            if is_vague_filler:
+            if has_decision_to_stay:
+                reason4 = "Prospect explicitly decided to stay and not sell; transaction value proposition is void"
+            elif is_vague_filler:
                 reason4 = f"Vague conversational discourse (specificity={bundle.specificity_score:.2f} <= {cfg.two_window_choice_max_specificity:.2f}) lacks concrete value/problem justification"
             else:
                 reason4 = f"Value recognition ({val_score:.1f}) below threshold ({cfg.gate_min_value_recognition:.1f}) without compensating agreement"
@@ -268,11 +275,22 @@ class MeetingConversionGateEngine:
 
         # 1. Hard Boundary State: Immediate graceful exit
         has_boundary_obj = any(o.lifecycle_state == "boundary" for o in current_state.objections)
+        has_decision_to_stay = any(
+            o.lifecycle_state == "superseded" and o.superseded_by_objection_id == "decision_to_stay"
+            for o in current_state.objections
+        )
         if comp.hard_boundary_active or has_boundary_obj or bundle.boundary_score >= 0.85:
             return PushStrengthRecommendation(
                 state="respect_record_exit",
                 rationale="Hard boundary statement detected. Persuasion and conversion asks are prohibited.",
                 recommended_action="Acknowledge boundary gracefully, record compliance preference, and terminate call cleanly.",
+                confidence=conf,
+            )
+        if has_decision_to_stay:
+            return PushStrengthRecommendation(
+                state="respect_record_exit",
+                rationale="Prospect explicitly decided to stay and not sell. Persuasion and conversion asks are prohibited.",
+                recommended_action="Respect prospect decision to stay, record status in CRM, and terminate call gracefully.",
                 confidence=conf,
             )
 

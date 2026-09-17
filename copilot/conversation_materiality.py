@@ -157,6 +157,14 @@ class MaterialityFilter:
             forced_targets.update(["decision_structure", "facts"])
             forced_reasons.append("Deterministic Override: client disclosure indicates absent/external decision-maker authority (Spec Test E).")
 
+        # 5b. Decision to Stay / Cancel Sale Supersession Overrides
+        stay_patterns = [
+            r"\b(?:decided\s+to\s+stay|staying\s+put|not\s+selling\s+anymore|taking\s+it\s+off\s+the\s+market|pulling\s+(?:it\s+)?off\s+(?:the\s+)?market|not\s+moving|staying\s+in\s+the\s+home)\b",
+        ]
+        if bundle.speaker_id == "client" and any(re.search(p, bundle.utterance_text.lower()) for p in stay_patterns):
+            forced_targets.update(["objections", "facts"])
+            forced_reasons.append("Deterministic Override: client decision to stay/cancel sale supersedes active objections.")
+
         # 6. Behavioral & Acoustic Shifts (Client Principle #3: Dimension Stability & Materiality Gating)
         # Protect dimension sync: If upstream inference in bundle meaningfully diverges
         # from current state dimensions (delta >= 0.08 or client substantive agreement >= 0.70),

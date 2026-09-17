@@ -55,9 +55,15 @@ class ConversationScoringEngine:
             objection_score = 80.0  # Clean slate
         else:
             obj_states = [o.lifecycle_state for o in current_state.objections]
-            if "boundary" in obj_states:
+            # Client Principle / Behavioral Correctness: If an objection was superseded
+            # by a deal cancellation ("decision_to_stay"), it is a deal dead-end, NOT a progressive resolution.
+            has_dead_end_supersession = any(
+                o.lifecycle_state == "superseded" and o.superseded_by_objection_id == "decision_to_stay"
+                for o in current_state.objections
+            )
+            if "boundary" in obj_states or has_dead_end_supersession:
                 objection_score = 0.0
-            elif all(s == "resolved" for s in obj_states):
+            elif all(s in ("resolved", "superseded") for s in obj_states):
                 objection_score = 100.0
             elif any(s == "partially_resolved" for s in obj_states):
                 objection_score = 70.0

@@ -108,9 +108,60 @@ class ObjectionLifecycleEngine:
 
     def get_active_objection_by_category(self, category: str) -> Optional[ObjectionRecord]:
         for o in reversed(self._objections):
-            if o.canonical_category == category:
+            if o.canonical_category == category and o.lifecycle_state in ("unresolved", "clarified", "partially_resolved", "reactivated"):
                 return o
         return None
+
+    def get_active_objections(self) -> List[ObjectionRecord]:
+        """Returns all currently active (unresolved, clarified, partially_resolved, reactivated) objections."""
+        return [o for o in self._objections if o.lifecycle_state in ("unresolved", "clarified", "partially_resolved", "reactivated")]
+
+    def get_superseded_objections(self) -> List[ObjectionRecord]:
+        """Returns all superseded objections."""
+        return [o for o in self._objections if o.lifecycle_state == "superseded"]
+
+    def supersede_objection(
+        self,
+        old_objection_id: Optional[str] = None,
+        superseded_by_id: Optional[str] = None,
+        turn_id: int = 0,
+        reason: str = "Objection superseded by newer evidence",
+        current_version: int = 1,
+        evidence_ids: Optional[List[str]] = None,
+        timestamp_ms: int = 0,
+        *,
+        objection_id: Optional[str] = None,
+        superseded_by_objection_id: Optional[str] = None,
+        superseded_at_turn_id: Optional[int] = None,
+    ) -> Tuple[Optional[ObjectionRecord], Optional[StateChangeRecord], int]:
+        """Explicitly supersedes an active objection, linking lineage and recording state change."""
+        target_id = objection_id or old_objection_id
+        sup_by = superseded_by_objection_id or superseded_by_id
+        effective_turn = superseded_at_turn_id if superseded_at_turn_id is not None else turn_id
+
+        obj = self.get_objection_by_id(target_id) if target_id else None
+        if not obj or obj.lifecycle_state in ("resolved", "superseded", "boundary"):
+            return None, None, current_version
+
+        old_state = obj.lifecycle_state
+        obj.lifecycle_state = "superseded"
+        obj.superseded_by_objection_id = sup_by
+        obj.superseded_at_turn_id = effective_turn
+        obj.last_updated_turn_id = effective_turn
+
+        next_version = current_version + 1
+        change = StateChangeRecord(
+            state_version_before=current_version,
+            state_version_after=next_version,
+            field_path=f"objections.{obj.objection_id}.lifecycle_state",
+            old_value=old_state,
+            new_value="superseded",
+            triggering_turn_id=turn_id,
+            evidence_ids=evidence_ids or [],
+            reason=reason,
+            timestamp_ms=timestamp_ms,
+        )
+        return obj, change, next_version
 
     def evaluate_turn(
         self,
@@ -129,7 +180,7 @@ class ObjectionLifecycleEngine:
         # -------------------------------------------------------------------------
         if bundle.boundary_score >= 0.85 or bundle.recurrence_type == "boundary_repeated":
             for obj in self._objections:
-                if obj.lifecycle_state not in ("boundary", "resolved"):
+                if obj.lifecycle_state not in ("boundary", "resolved", "superseded"):
                     old_state = obj.lifecycle_state
                     obj.lifecycle_state = "boundary"
                     obj.last_updated_turn_id = bundle.turn_id
@@ -322,10 +373,69 @@ class ObjectionLifecycleEngine:
                     )
                 )
 
+                # Client Principle #5 / Supersession: If this new objection is concrete
+                # (spouse_authority, broker_representation, pricing_value), it supersedes
+                # any active generic hesitation ("general_hesitation")!
+                if category in ("spouse_authority", "broker_representation", "pricing_value"):
+                    for active_o in list(self._objections):
+                        if (
+                            active_o.objection_id != new_obj.objection_id
+                            and active_o.canonical_category == "general_hesitation"
+                            and active_o.lifecycle_state in ("unresolved", "clarified", "partially_resolved", "reactivated")
+                        ):
+                            old_s = active_o.lifecycle_state
+                            active_o.lifecycle_state = "superseded"
+                            active_o.superseded_by_objection_id = new_obj.objection_id
+                            active_o.superseded_at_turn_id = bundle.turn_id
+                            active_o.last_updated_turn_id = bundle.turn_id
+                            next_version += 1
+                            changes.append(
+                                StateChangeRecord(
+                                    state_version_before=next_version - 1,
+                                    state_version_after=next_version,
+                                    field_path=f"objections.{active_o.objection_id}.lifecycle_state",
+                                    old_value=old_s,
+                                    new_value="superseded",
+                                    triggering_turn_id=bundle.turn_id,
+                                    evidence_ids=bundle.contributing_evidence_ids,
+                                    reason=f"Generic hesitation superseded by concrete root objection '{category}'.",
+                                    timestamp_ms=bundle.timestamp_ms,
+                                )
+                            )
+
             # Clear any pending reframe since prospect raised/repeated a concern
             self.pending_reframe_objection_id = None
             self.pending_reframe_strategy = None
             return self._objections, changes, next_version
+
+        # Check for Decision to Stay / Cancellation of Sale that supersedes transactional objections
+        stay_patterns = [
+            r"\b(?:decided\s+to\s+stay|staying\s+put|not\s+selling\s+anymore|taking\s+it\s+off\s+the\s+market|pulling\s+(?:it\s+)?off\s+(?:the\s+)?market|not\s+moving|staying\s+in\s+the\s+home)\b",
+        ]
+        is_stay_or_cancel = any(re.search(p, bundle.utterance_text.lower()) for p in stay_patterns)
+        if is_stay_or_cancel:
+            for active_o in list(self._objections):
+                if active_o.lifecycle_state in ("unresolved", "clarified", "partially_resolved", "reactivated"):
+                    if active_o.canonical_category in ("commission_fee", "market_timing", "general_hesitation"):
+                        old_s = active_o.lifecycle_state
+                        active_o.lifecycle_state = "superseded"
+                        active_o.superseded_by_objection_id = "decision_to_stay"
+                        active_o.superseded_at_turn_id = bundle.turn_id
+                        active_o.last_updated_turn_id = bundle.turn_id
+                        next_version += 1
+                        changes.append(
+                            StateChangeRecord(
+                                state_version_before=next_version - 1,
+                                state_version_after=next_version,
+                                field_path=f"objections.{active_o.objection_id}.lifecycle_state",
+                                old_value=old_s,
+                                new_value="superseded",
+                                triggering_turn_id=bundle.turn_id,
+                                evidence_ids=bundle.contributing_evidence_ids,
+                                reason=f"Prospect decided not to sell/move; transactional objection '{active_o.canonical_category}' rendered moot and superseded.",
+                                timestamp_ms=bundle.timestamp_ms,
+                            )
+                        )
 
         # -------------------------------------------------------------------------
         # 4. Prospect Response to Pending Reframe / Targeted Objection

@@ -11,6 +11,7 @@ ObjectionLifecycleState = Literal[
     "resolved",
     "reactivated",
     "boundary",
+    "superseded",
 ]
 
 PersistentFactCategory = Literal[
@@ -55,6 +56,8 @@ class ObjectionRecord(BaseModel):
     attempted_strategies: List[str] = Field(default_factory=list)
     resolution_evidence: Optional[str] = None
     confidence: float = Field(0.85, ge=0.0, le=1.0)
+    superseded_by_objection_id: Optional[str] = None
+    superseded_at_turn_id: Optional[int] = None
 
 
 class PersistentFactRecord(BaseModel):
@@ -240,4 +243,10 @@ class ConversationStateSnapshot(BaseModel):
 
     def get_unresolved_objections(self) -> List[ObjectionRecord]:
         return [o for o in self.objections if o.lifecycle_state in ("unresolved", "reactivated", "partially_resolved")]
+
+    def get_active_objections(self) -> List[ObjectionRecord]:
+        return [o for o in self.objections if o.lifecycle_state in ("unresolved", "clarified", "partially_resolved", "reactivated")]
+
+    def get_superseded_objections(self) -> List[ObjectionRecord]:
+        return [o for o in self.objections if o.lifecycle_state == "superseded"]
 
