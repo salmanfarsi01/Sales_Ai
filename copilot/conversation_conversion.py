@@ -132,6 +132,9 @@ class MeetingConversionGateEngine:
         has_decision_to_stay = any(
             o.lifecycle_state == "superseded" and o.superseded_by_objection_id == "decision_to_stay"
             for o in current_state.objections
+        ) or any(
+            f.fact_key == "decision_to_stay" and f.status == "active"
+            for f in current_state.facts
         )
 
         val_ok = not has_decision_to_stay and not is_vague_filler and (
@@ -278,6 +281,9 @@ class MeetingConversionGateEngine:
         has_decision_to_stay = any(
             o.lifecycle_state == "superseded" and o.superseded_by_objection_id == "decision_to_stay"
             for o in current_state.objections
+        ) or any(
+            f.fact_key == "decision_to_stay" and f.status == "active"
+            for f in current_state.facts
         )
         if comp.hard_boundary_active or has_boundary_obj or bundle.boundary_score >= 0.85:
             return PushStrengthRecommendation(

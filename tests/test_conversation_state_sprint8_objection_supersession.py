@@ -316,3 +316,130 @@ def test_momentum_family_3_collapses_when_superseded_by_decision_to_stay():
     push = gate_engine.evaluate_push_strength(bundle=bundle, current_state=snapshot, gate=gate)
     assert push.state == "respect_record_exit"
     assert "decided to stay" in push.rationale
+
+
+def test_sim_mu5du135_full_8_turn_supersession_flow():
+    """End-to-end regression verifying the exact 8-turn dialogue from sim_mu5du135.
+
+    Guarantees:
+    - Turn 2: 'general_hesitation' registered from natural hesitation phrasing.
+    - Turn 4: 'spouse_authority' registered, decision_structure populated with absent wife,
+              and Trigger 1 fires (general_hesitation superseded by spouse_authority).
+    - Turn 6: 'commission_fee' registered (now 2 active objections: spouse_authority & commission_fee).
+    - Turn 8: 'decision_to_stay' fires, simultaneously superseding BOTH active objections,
+              recording decision_to_stay fact, collapsing Momentum Family 3 to 0.0,
+              closing the gate with explicit void reason, and setting push strength to respect_record_exit.
+    """
+    manager = ConversationStateManager(call_sid="sim_mu5du135_test")
+
+    # Turn 1: Agent intro
+    b1 = _create_turn_bundle(
+        1, "salesperson", "Hi Daniel, I noticed your home was listed previously — how's everything going with the sale?"
+    )
+    s1 = manager.process_turn_bundle(b1)
+    assert len(s1.objections) == 0
+
+    # Turn 2: Prospect generic hesitation
+    b2 = _create_turn_bundle(
+        2, "client", "Yeah, honestly we're just not sure this is the right time anymore."
+    )
+    s2 = manager.process_turn_bundle(b2)
+    assert len(s2.objections) == 1
+    assert s2.objections[0].canonical_category == "general_hesitation"
+    assert s2.objections[0].lifecycle_state == "unresolved"
+
+    # Turn 3: Agent clarifying question
+    b3 = _create_turn_bundle(
+        3, "salesperson", "That's totally understandable. Can you tell me more about what's giving you pause?"
+    )
+    s3 = manager.process_turn_bundle(b3)
+    assert len(s3.objections) == 1
+
+    # Turn 4: Prospect spousal disclosure & authority objection
+    b4 = _create_turn_bundle(
+        4, "client", "Well, my wife would really need to be part of this conversation too before we go any further."
+    )
+    s4 = manager.process_turn_bundle(b4)
+
+    # 1. Decision structure must be populated with absent spouse
+    assert s4.decision_structure.decision_maker_present is False
+    assert len(s4.decision_structure.stakeholders) == 1
+    stakeholder = s4.decision_structure.stakeholders[0]
+    assert stakeholder.role == "wife"
+    assert stakeholder.presence == "absent"
+
+    # 2. Objections: spouse_authority registered, general_hesitation superseded
+    assert len(s4.objections) == 2
+    hesitation = next(o for o in s4.objections if o.canonical_category == "general_hesitation")
+    spouse = next(o for o in s4.objections if o.canonical_category == "spouse_authority")
+    assert hesitation.lifecycle_state == "superseded"
+    assert hesitation.superseded_by_objection_id == spouse.objection_id
+    assert hesitation.superseded_at_turn_id == 4
+    assert spouse.lifecycle_state == "unresolved"
+    assert len(s4.get_active_objections()) == 1
+
+    # Turn 5: Agent inquiry
+    b5 = _create_turn_bundle(
+        5, "salesperson", "Of course, happy to loop her in. In the meantime, what commission structure were you expecting to pay?"
+    )
+    s5 = manager.process_turn_bundle(b5)
+
+    # Turn 6: Prospect fee objection
+    b6 = _create_turn_bundle(
+        6, "client", "Honestly the commission fee last time felt way too high for what we got out of it."
+    )
+    s6 = manager.process_turn_bundle(b6)
+
+    # Now 3 tracked objections: 1 superseded (hesitation), 2 active (spouse_authority & commission_fee)
+    assert len(s6.objections) == 3
+    fee = next(o for o in s6.objections if o.canonical_category == "commission_fee")
+    assert fee.lifecycle_state == "unresolved"
+    active_objs = s6.get_active_objections()
+    assert len(active_objs) == 2
+    assert {o.canonical_category for o in active_objs} == {"spouse_authority", "commission_fee"}
+
+    # Turn 7: Agent explanation
+    b7 = _create_turn_bundle(
+        7, "salesperson", "I hear you — we can walk through exactly what that fee covers if that would help."
+    )
+    s7 = manager.process_turn_bundle(b7)
+
+    # Turn 8: Prospect decision to stay in the house and cancel sale
+    b8 = _create_turn_bundle(
+        8, "client", "Actually, you know what, we've decided to just stay in the house. We're not going to sell after all."
+    )
+    s8 = manager.process_turn_bundle(b8)
+
+    # 1. Fact recorded for decision_to_stay
+    stay_facts = [f for f in s8.facts if f.fact_key == "decision_to_stay" and f.status == "active"]
+    assert len(stay_facts) == 1
+
+    # 2. BOTH active objections (spouse_authority AND commission_fee) must be superseded by decision_to_stay!
+    assert len(s8.get_active_objections()) == 0
+    superseded_objs = s8.get_superseded_objections()
+    assert len(superseded_objs) == 3
+
+    spouse_final = next(o for o in s8.objections if o.canonical_category == "spouse_authority")
+    fee_final = next(o for o in s8.objections if o.canonical_category == "commission_fee")
+    assert spouse_final.lifecycle_state == "superseded"
+    assert spouse_final.superseded_by_objection_id == "decision_to_stay"
+    assert fee_final.lifecycle_state == "superseded"
+    assert fee_final.superseded_by_objection_id == "decision_to_stay"
+
+    # 3. Momentum Family 3 (Objection Movement) must collapse to 0.0
+    assert s8.momentum.family_scores["objection_movement"] == 0.0
+
+    # 4. Conversion Gate Condition 4 (clear_value_reason) must fail with explicit reason
+    cond4 = next(c for c in s8.conversion_gate.conditions if c.condition_name == "clear_value_reason")
+    assert cond4.met is False
+    assert "decided to stay and not sell" in cond4.reason
+    assert s8.conversion_gate.is_open is False
+
+    # 5. Push Strength must transition to respect_record_exit
+    assert s8.push_strength.state == "respect_record_exit"
+    assert "decided to stay" in s8.push_strength.rationale
+
+    # 6. Change history must include Turn 8 state changes!
+    turn_8_changes = [ch for ch in s8.change_history if ch.triggering_turn_id == 8]
+    assert len(turn_8_changes) >= 2
+

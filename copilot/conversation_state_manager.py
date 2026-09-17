@@ -16,7 +16,7 @@ from .conversation_state_models import (
     StateChangeRecord,
 )
 from .conversation_facts import PersistentFactsManager
-from .conversation_objections import ObjectionLifecycleEngine
+from .conversation_objections import ObjectionLifecycleEngine, DECISION_TO_STAY_PATTERNS
 from .conversation_supersession import TruthSupersessionDetector
 from .conversation_materiality import MaterialityFilter, ABSENT_DECISION_MAKER_PATTERNS
 from .conversation_scoring import ConversationScoringEngine
@@ -197,7 +197,9 @@ class ConversationStateManager:
             changes.extend(obj_changes)
 
         # 5. Process Fact Updates if provided or autonomously extracted from client disclosures
-        autonomous_fact_updates = self._extract_autonomous_fact_updates(bundle, materiality)
+        autonomous_fact_updates = None
+        if not fact_updates and bundle.speaker_id == "client":
+            autonomous_fact_updates = self._extract_autonomous_fact_updates(bundle, materiality)
         all_fact_updates = (fact_updates or []) + (autonomous_fact_updates or [])
         if all_fact_updates:
             for fu in all_fact_updates:
@@ -480,5 +482,25 @@ class ConversationStateManager:
                     "confidence": 0.85,
                     "notes": f"Prospect confirmed proposed time '{raw_time_str}' from salesperson proposal.",
                 })
+
+        # 3. Decision to Stay / Cancellation of sale
+        if any(re.search(p, text_lower) for p in DECISION_TO_STAY_PATTERNS) and "decision_to_stay" not in existing_keys:
+            updates.append({
+                "category": "timeline",
+                "fact_key": "decision_to_stay",
+                "fact_value": "Prospect decided to stay in home / cancel sale",
+                "confidence": 0.90,
+                "notes": f"Decision to stay declared by prospect: '{bundle.utterance_text[:60]}'",
+            })
+
+        # 4. Spousal / Absent Decision Maker Involvement
+        if any(re.search(p, text_lower) for p in ABSENT_DECISION_MAKER_PATTERNS) and "spouse_involvement" not in existing_keys:
+            updates.append({
+                "category": "decision_maker",
+                "fact_key": "spouse_involvement",
+                "fact_value": "Spouse/wife involvement declared for decisions",
+                "confidence": 0.85,
+                "notes": f"Spouse involvement declared by prospect: '{bundle.utterance_text[:60]}'",
+            })
 
         return updates

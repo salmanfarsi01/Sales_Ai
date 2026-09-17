@@ -60,6 +60,9 @@ class ConversationScoringEngine:
             has_dead_end_supersession = any(
                 o.lifecycle_state == "superseded" and o.superseded_by_objection_id == "decision_to_stay"
                 for o in current_state.objections
+            ) or any(
+                f.fact_key == "decision_to_stay" and f.status == "active"
+                for f in current_state.facts
             )
             if "boundary" in obj_states or has_dead_end_supersession:
                 objection_score = 0.0

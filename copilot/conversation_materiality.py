@@ -9,7 +9,7 @@ from pydantic import BaseModel, Field
 
 from .conversation_state_contract import BehavioralSignalInputBundle
 from .conversation_state_models import ConversationStateSnapshot
-from .conversation_objections import CANONICAL_OBJECTION_PATTERNS
+from .conversation_objections import CANONICAL_OBJECTION_PATTERNS, DECISION_TO_STAY_PATTERNS
 
 LOGGER = logging.getLogger("copilot.conversation_materiality")
 
@@ -20,6 +20,9 @@ ABSENT_DECISION_MAKER_PATTERNS: List[str] = [
     r"\b(?:husband|wife|spouse|partner)\s+is\s+not\s+here\b",
     r"\bwe\s+decide\s+everything\s+together\b",
     r"\b(?:consult|check|talk|speak)\s+with\s+(?:my\s+)?(?:husband|wife|spouse|partner)\s+(?:first|before)\b",
+    r"\b(?:my\s+)?(?:husband|wife|spouse|partner)\b.*?\b(?:part\s+of\s+(?:this|the)\s+conversation|involved|loop(?:ed)?\s+in|present|here)\b",
+    r"\b(?:my\s+)?(?:husband|wife|spouse|partner)\b.*?\b(?:needs?|would\s+(?:really\s+)?need|has\s+to|must)\b.*?\b(?:conversation|decision|call|talk|meeting|input|present|here|further)\b",
+    r"\b(?:my\s+)?(?:husband|wife|spouse|partner)\b.*?\bbefore\s+(?:we|i)\s+(?:go\s+any\s+further|make\s+a\s+decision|proceed|move\s+forward)\b",
 ]
 
 MaterialityTarget = Literal[
@@ -154,15 +157,12 @@ class MaterialityFilter:
             forced_reasons.append("Deterministic Override: explicit fact updates supplied.")
         # 5. Absent Decision-Maker & External Authority Overrides (Spec Test E / Client Principle #6)
         if bundle.speaker_id == "client" and any(re.search(pat, bundle.utterance_text.lower()) for pat in ABSENT_DECISION_MAKER_PATTERNS):
-            forced_targets.update(["decision_structure", "facts"])
+            forced_targets.update(["decision_structure", "objections", "facts"])
             forced_reasons.append("Deterministic Override: client disclosure indicates absent/external decision-maker authority (Spec Test E).")
 
         # 5b. Decision to Stay / Cancel Sale Supersession Overrides
-        stay_patterns = [
-            r"\b(?:decided\s+to\s+stay|staying\s+put|not\s+selling\s+anymore|taking\s+it\s+off\s+the\s+market|pulling\s+(?:it\s+)?off\s+(?:the\s+)?market|not\s+moving|staying\s+in\s+the\s+home)\b",
-        ]
-        if bundle.speaker_id == "client" and any(re.search(p, bundle.utterance_text.lower()) for p in stay_patterns):
-            forced_targets.update(["objections", "facts"])
+        if bundle.speaker_id == "client" and any(re.search(p, bundle.utterance_text.lower()) for p in DECISION_TO_STAY_PATTERNS):
+            forced_targets.update(["objections", "facts", "dimensions"])
             forced_reasons.append("Deterministic Override: client decision to stay/cancel sale supersedes active objections.")
 
         # 6. Behavioral & Acoustic Shifts (Client Principle #3: Dimension Stability & Materiality Gating)

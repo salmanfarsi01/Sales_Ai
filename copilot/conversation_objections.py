@@ -49,14 +49,30 @@ CANONICAL_OBJECTION_PATTERNS: Dict[str, List[str]] = {
         r"\bmy\s+(?:wife|husband|spouse|partner)\s+(?:handles|decides|makes\s+the\s+decisions|isn't\s+on\s+board|wants|needs|is\s+hesitant|doesn't\s+want)\b",
         r"\bnot\s+my\s+decision\s+alone\b",
         r"\bdiscuss\s+(?:it\s+)?with\s+my\s+(?:wife|husband|spouse|partner)\b",
+        r"\b(?:my\s+)?(?:wife|husband|spouse|partner)\b.*?\b(?:part\s+of\s+(?:this|the)\s+conversation|loop(?:ed)?\s+in|needs?\s+to\s+be\s+(?:part|present|here|involved)|would\s+(?:really\s+)?need\s+to\s+be)\b",
+        r"\b(?:my\s+)?(?:wife|husband|spouse|partner)\b.*?\b(?:needs?|would\s+(?:really\s+)?need|has\s+to|must)\b.*?\b(?:conversation|decision|call|talk|meeting|input|further)\b",
+        r"\b(?:need\s+to|have\s+to|must|want\s+to|should|would\s+need\s+to)\s+(?:talk|speak|discuss|check|consult)\s+(?:to|with)\s+my\s+(?:wife|husband|spouse|partner)\b",
+        r"\b(?:wife|husband|spouse|partner)\b.*?\bbefore\s+(?:we|i)\s+(?:go|make|decide|move)\b",
     ],
     "general_hesitation": [
         r"\bnot\s+ready\s+(?:yet|to\s+sell|to\s+commit)\b",
         r"\bjust\s+(?:looking|browsing|curious)\b",
         r"\bneed\s+(?:more\s+)?time\s+to\s+think\b",
         r"\bthinking\s+it\s+over\b",
+        r"\b(?:just\s+)?not\s+sure\b.*?\b(?:right\s+time|ready|good\s+time|now)\b",
+        r"\b(?:just\s+)?not\s+sure\s+(?:this|if|about|whether|it['’]?s)\b",
+        r"\b(?:just\s+)?not\s+(?:completely\s+)?sure\b",
     ],
 }
+
+DECISION_TO_STAY_PATTERNS: List[str] = [
+    r"\b(?:decided|chosen|opting)\s+(?:to\s+)?(?:just\s+)?(?:stay|remain|stay\s+put|keep)\b",
+    r"\b(?:not\s+(?:going\s+to\s+|gonna\s+)?sell(?:ing)?|won['’]?t\s+be\s+selling)\b",
+    r"\b(?:taking|pulling)\s+(?:it\s+)?off\s+(?:the\s+)?market\b",
+    r"\b(?:stay|remain|staying)\s+in\s+(?:the|our)\s+(?:house|home|place)\b",
+    r"\b(?:not\s+(?:moving|relocating)|staying\s+put)\b",
+    r"\b(?:cancel(?:ling)?|call(?:ing)?\s+off)\s+(?:the\s+)?(?:sale|listing)\b",
+]
 
 
 def classify_objection_label(utterance_text: str) -> Optional[str]:
@@ -408,34 +424,30 @@ class ObjectionLifecycleEngine:
             self.pending_reframe_strategy = None
             return self._objections, changes, next_version
 
-        # Check for Decision to Stay / Cancellation of Sale that supersedes transactional objections
-        stay_patterns = [
-            r"\b(?:decided\s+to\s+stay|staying\s+put|not\s+selling\s+anymore|taking\s+it\s+off\s+the\s+market|pulling\s+(?:it\s+)?off\s+(?:the\s+)?market|not\s+moving|staying\s+in\s+the\s+home)\b",
-        ]
-        is_stay_or_cancel = any(re.search(p, bundle.utterance_text.lower()) for p in stay_patterns)
+        # Check for Decision to Stay / Cancellation of Sale that supersedes all sales/transactional objections
+        is_stay_or_cancel = any(re.search(p, bundle.utterance_text.lower()) for p in DECISION_TO_STAY_PATTERNS)
         if is_stay_or_cancel:
             for active_o in list(self._objections):
                 if active_o.lifecycle_state in ("unresolved", "clarified", "partially_resolved", "reactivated"):
-                    if active_o.canonical_category in ("commission_fee", "market_timing", "general_hesitation"):
-                        old_s = active_o.lifecycle_state
-                        active_o.lifecycle_state = "superseded"
-                        active_o.superseded_by_objection_id = "decision_to_stay"
-                        active_o.superseded_at_turn_id = bundle.turn_id
-                        active_o.last_updated_turn_id = bundle.turn_id
-                        next_version += 1
-                        changes.append(
-                            StateChangeRecord(
-                                state_version_before=next_version - 1,
-                                state_version_after=next_version,
-                                field_path=f"objections.{active_o.objection_id}.lifecycle_state",
-                                old_value=old_s,
-                                new_value="superseded",
-                                triggering_turn_id=bundle.turn_id,
-                                evidence_ids=bundle.contributing_evidence_ids,
-                                reason=f"Prospect decided not to sell/move; transactional objection '{active_o.canonical_category}' rendered moot and superseded.",
-                                timestamp_ms=bundle.timestamp_ms,
-                            )
+                    old_s = active_o.lifecycle_state
+                    active_o.lifecycle_state = "superseded"
+                    active_o.superseded_by_objection_id = "decision_to_stay"
+                    active_o.superseded_at_turn_id = bundle.turn_id
+                    active_o.last_updated_turn_id = bundle.turn_id
+                    next_version += 1
+                    changes.append(
+                        StateChangeRecord(
+                            state_version_before=next_version - 1,
+                            state_version_after=next_version,
+                            field_path=f"objections.{active_o.objection_id}.lifecycle_state",
+                            old_value=old_s,
+                            new_value="superseded",
+                            triggering_turn_id=bundle.turn_id,
+                            evidence_ids=bundle.contributing_evidence_ids,
+                            reason=f"Prospect decided not to sell/move; objection '{active_o.canonical_category}' rendered moot and superseded.",
+                            timestamp_ms=bundle.timestamp_ms,
                         )
+                    )
 
         # -------------------------------------------------------------------------
         # 4. Prospect Response to Pending Reframe / Targeted Objection

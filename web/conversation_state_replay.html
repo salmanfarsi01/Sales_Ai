@@ -1,799 +1,964 @@
 <!DOCTYPE html>
 <html lang="en">
+
 <head>
-<meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>PitchProX ConversationState Replay Console</title>
-<link rel="preconnect" href="https://fonts.googleapis.com">
-<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
-<style>
-  :root {
-    --bg: #0B0F14;
-    --surface: #111822;
-    --surface-card: #16202D;
-    --surface-hover: #1C2A3B;
-    --border: #223246;
-    --border-subtle: #192738;
-    --text: #F1F5F9;
-    --text-muted: #94A3B8;
-    --text-dim: #64748B;
-    --accent: #0EADAB;
-    --accent-hover: #0C9593;
-    --accent-dim: rgba(14, 173, 171, 0.12);
-    --accent-border: rgba(14, 173, 171, 0.35);
-    --agent: #3B82F6;
-    --agent-dim: rgba(59, 130, 246, 0.12);
-    --agent-border: rgba(59, 130, 246, 0.35);
-    --prospect: #10B981;
-    --prospect-dim: rgba(16, 185, 129, 0.12);
-    --prospect-border: rgba(16, 185, 129, 0.35);
-    --warn: #F59E0B;
-    --warn-dim: rgba(245, 158, 11, 0.12);
-    --warn-border: rgba(245, 158, 11, 0.35);
-    --danger: #EF4444;
-    --danger-dim: rgba(239, 68, 68, 0.12);
-    --danger-border: rgba(239, 68, 68, 0.35);
-    --purple: #8B5CF6;
-    --purple-dim: rgba(139, 92, 246, 0.12);
-  }
-
-  * { box-sizing: border-box; }
-  body {
-    margin: 0;
-    background: var(--bg);
-    color: var(--text);
-    font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
-    line-height: 1.5;
-    font-size: 13.5px;
-  }
-  .mono { font-family: 'JetBrains Mono', monospace; }
-
-  /* Header Bar */
-  header {
-    padding: 16px 28px;
-    background: var(--surface);
-    border-bottom: 1px solid var(--border);
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-    flex-wrap: wrap;
-    gap: 16px;
-    position: sticky;
-    top: 0;
-    z-index: 50;
-  }
-  .header-left {
-    display: flex;
-    align-items: center;
-    gap: 16px;
-  }
-  .brand-badge {
-    background: linear-gradient(135deg, var(--accent) 0%, #2563EB 100%);
-    color: #FFFFFF;
-    font-weight: 700;
-    font-size: 12px;
-    padding: 4px 8px;
-    border-radius: 6px;
-    letter-spacing: 0.5px;
-  }
-  h1 {
-    font-size: 17px;
-    font-weight: 600;
-    margin: 0;
-    color: var(--text);
-    display: flex;
-    align-items: center;
-    gap: 8px;
-  }
-  .header-sub {
-    font-size: 12px;
-    color: var(--text-dim);
-  }
-
-  /* Control Bar */
-  .control-bar {
-    display: flex;
-    align-items: center;
-    gap: 12px;
-  }
-  select, button, input {
-    font-family: inherit;
-    font-size: 13px;
-    border-radius: 6px;
-    padding: 7px 12px;
-    outline: none;
-    border: 1px solid var(--border);
-    background: var(--surface-card);
-    color: var(--text);
-  }
-  select:focus, input:focus {
-    border-color: var(--accent);
-  }
-  button {
-    cursor: pointer;
-    font-weight: 500;
-    transition: all 0.15s ease;
-  }
-  button.btn-primary {
-    background: var(--accent);
-    color: #FFFFFF;
-    border-color: var(--accent);
-  }
-  button.btn-primary:hover {
-    background: var(--accent-hover);
-  }
-  button.btn-ghost {
-    background: transparent;
-  }
-  button.btn-ghost:hover {
-    background: var(--surface-hover);
-  }
-
-  /* Ribbon KPI Summary */
-  .kpi-ribbon {
-    padding: 12px 28px;
-    background: var(--surface);
-    border-bottom: 1px solid var(--border-subtle);
-    display: flex;
-    align-items: center;
-    gap: 20px;
-    overflow-x: auto;
-  }
-  .kpi-item {
-    display: flex;
-    flex-direction: column;
-    gap: 2px;
-    min-width: 130px;
-  }
-  .kpi-label {
-    font-size: 11px;
-    font-weight: 600;
-    text-transform: uppercase;
-    letter-spacing: 0.5px;
-    color: var(--text-dim);
-  }
-  .kpi-value {
-    font-size: 14px;
-    font-weight: 600;
-    display: flex;
-    align-items: center;
-    gap: 6px;
-  }
-
-  /* Badges */
-  .badge {
-    display: inline-flex;
-    align-items: center;
-    gap: 5px;
-    padding: 2px 8px;
-    border-radius: 9999px;
-    font-size: 11.5px;
-    font-weight: 600;
-  }
-  .badge-open {
-    background: var(--prospect-dim);
-    color: #34D399;
-    border: 1px solid var(--prospect-border);
-  }
-  .badge-closed {
-    background: var(--danger-dim);
-    color: #F87171;
-    border: 1px solid var(--danger-border);
-  }
-  .badge-push {
-    background: var(--accent-dim);
-    color: var(--accent);
-    border: 1px solid var(--accent-border);
-    font-family: 'JetBrains Mono', monospace;
-  }
-  .badge-agent {
-    background: var(--agent-dim);
-    color: #60A5FA;
-    border: 1px solid var(--agent-border);
-  }
-  .badge-prospect {
-    background: var(--prospect-dim);
-    color: #34D399;
-    border: 1px solid var(--prospect-border);
-  }
-  .badge-material {
-    background: var(--purple-dim);
-    color: #C084FC;
-    border: 1px solid rgba(139, 92, 246, 0.35);
-  }
-  .badge-muted {
-    background: rgba(148, 163, 184, 0.1);
-    color: var(--text-muted);
-    border: 1px solid rgba(148, 163, 184, 0.2);
-  }
-
-  /* Main Replay Layout */
-  .main-container {
-    display: flex;
-    flex-direction: column;
-    height: calc(100vh - 128px);
-  }
-
-  /* Timeline Scrubber */
-  .timeline-bar {
-    padding: 14px 28px;
-    background: #0D131B;
-    border-bottom: 1px solid var(--border);
-    display: flex;
-    gap: 10px;
-    overflow-x: auto;
-    scrollbar-width: thin;
-  }
-  .timeline-card {
-    flex: 0 0 240px;
-    background: var(--surface-card);
-    border: 1px solid var(--border);
-    border-radius: 8px;
-    padding: 10px 12px;
-    cursor: pointer;
-    transition: all 0.15s ease;
-    user-select: none;
-  }
-  .timeline-card:hover {
-    border-color: var(--accent);
-    background: var(--surface-hover);
-  }
-  .timeline-card.active {
-    border-color: var(--accent);
-    background: rgba(14, 173, 171, 0.08);
-    box-shadow: 0 0 0 1px var(--accent);
-  }
-  .turn-header {
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-    margin-bottom: 6px;
-    font-size: 11.5px;
-  }
-  .turn-text-snippet {
-    font-size: 12px;
-    color: var(--text-muted);
-    white-space: nowrap;
-    overflow: hidden;
-    text-overflow: ellipsis;
-  }
-  .turn-footer {
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-    margin-top: 6px;
-    font-size: 11px;
-  }
-
-  /* 4-Column Synchronized View */
-  .columns-grid {
-    flex: 1;
-    display: grid;
-    grid-template-columns: 1fr 1fr 1fr 1.25fr;
-    gap: 0;
-    overflow: hidden;
-    background: var(--bg);
-  }
-  @media (max-width: 1200px) {
-    .columns-grid {
-      grid-template-columns: 1fr;
-      overflow-y: auto;
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>PitchProX ConversationState Replay Console</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link
+    href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap"
+    rel="stylesheet">
+  <style>
+    :root {
+      --bg: #FFFFFF;
+      --surface: #FFFFFF;
+      --surface-card: #FFFFFF;
+      --surface-hover: #F8FAFC;
+      --border: #CBD5E1;
+      --border-subtle: #E2E8F0;
+      --text: #000000;
+      --text-muted: #1E293B;
+      --text-dim: #334155;
+      --accent: #0D9488;
+      --accent-hover: #0F766E;
+      --accent-dim: #F0FDFA;
+      --accent-border: #99F6E4;
+      --agent: #1D4ED8;
+      --agent-dim: #EFF6FF;
+      --agent-border: #BFDBFE;
+      --prospect: #047857;
+      --prospect-dim: #ECFDF5;
+      --prospect-border: #A7F3D0;
+      --warn: #B45309;
+      --warn-dim: #FFFBEB;
+      --warn-border: #FDE68A;
+      --danger: #B91C1C;
+      --danger-dim: #FEF2F2;
+      --danger-border: #FECACA;
+      --purple: #6D28D9;
+      --purple-dim: #F5F3FF;
     }
-  }
 
-  .column-panel {
-    border-right: 1px solid var(--border);
-    display: flex;
-    flex-direction: column;
-    overflow: hidden;
-    background: var(--surface);
-  }
-  .column-panel:last-child {
-    border-right: none;
-  }
-  .column-header {
-    padding: 12px 18px;
-    border-bottom: 1px solid var(--border);
-    background: var(--surface-card);
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-  }
-  .column-title {
-    font-size: 12px;
-    font-weight: 700;
-    text-transform: uppercase;
-    letter-spacing: 0.6px;
-    color: var(--text-muted);
-  }
-  .column-body {
-    flex: 1;
-    padding: 16px 18px;
-    overflow-y: auto;
-    display: flex;
-    flex-direction: column;
-    gap: 16px;
-  }
+    * {
+      box-sizing: border-box;
+    }
 
-  /* Card Units inside Columns */
-  .card-unit {
-    background: var(--surface-card);
-    border: 1px solid var(--border);
-    border-radius: 8px;
-    padding: 14px;
-  }
-  .card-unit-title {
-    font-size: 11.5px;
-    font-weight: 700;
-    text-transform: uppercase;
-    letter-spacing: 0.5px;
-    color: var(--text-dim);
-    margin-bottom: 10px;
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-  }
+    body {
+      margin: 0;
+      background: var(--bg);
+      color: var(--text);
+      font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+      line-height: 1.5;
+      font-size: 13.5px;
+    }
 
-  /* Dimension Bars */
-  .dim-row {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    font-size: 12px;
-    margin-bottom: 7px;
-  }
-  .dim-label {
-    width: 80px;
-    color: var(--text-muted);
-  }
-  .dim-bar-wrapper {
-    flex: 1;
-    height: 6px;
-    background: rgba(255, 255, 255, 0.06);
-    border-radius: 3px;
-    margin: 0 10px;
-    overflow: hidden;
-  }
-  .dim-bar-fill {
-    height: 100%;
-    border-radius: 3px;
-    background: var(--accent);
-    transition: width 0.3s ease;
-  }
-  .dim-val {
-    width: 38px;
-    text-align: right;
-    font-weight: 600;
-    font-family: 'JetBrains Mono', monospace;
-    font-size: 11.5px;
-  }
+    .mono {
+      font-family: 'JetBrains Mono', monospace;
+    }
 
-  /* Diffs */
-  .diff-item {
-    background: #0B1017;
-    border: 1px solid var(--border);
-    border-radius: 6px;
-    padding: 10px;
-    margin-bottom: 8px;
-    font-size: 12px;
-  }
-  .diff-path {
-    font-weight: 600;
-    color: #60A5FA;
-    font-family: 'JetBrains Mono', monospace;
-    margin-bottom: 4px;
-  }
-  .diff-line {
-    display: flex;
-    align-items: center;
-    gap: 6px;
-    font-family: 'JetBrains Mono', monospace;
-    font-size: 11px;
-    margin: 2px 0;
-  }
-  .diff-old { color: #F87171; }
-  .diff-new { color: #34D399; }
-  .diff-reason {
-    font-size: 11.5px;
-    color: var(--text-muted);
-    margin-top: 6px;
-    padding-top: 4px;
-    border-top: 1px dashed var(--border-subtle);
-  }
+    /* Header Bar */
+    header {
+      padding: 16px 28px;
+      background: #FFFFFF;
+      border-bottom: 1px solid var(--border);
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      flex-wrap: wrap;
+      gap: 16px;
+      position: sticky;
+      top: 0;
+      z-index: 50;
+      box-shadow: 0 1px 2px rgba(0, 0, 0, 0.03);
+    }
 
-  /* Gate conditions list */
-  .gate-condition-row {
-    display: flex;
-    align-items: flex-start;
-    gap: 8px;
-    padding: 6px 0;
-    border-bottom: 1px solid rgba(255, 255, 255, 0.04);
-    font-size: 12px;
-  }
-  .gate-condition-row:last-child {
-    border-bottom: none;
-  }
-  .cond-icon {
-    font-weight: 700;
-    font-size: 13px;
-    line-height: 1;
-  }
-  .cond-icon.pass { color: #34D399; }
-  .cond-icon.fail { color: #F87171; }
+    .header-left {
+      display: flex;
+      align-items: center;
+      gap: 16px;
+    }
 
-  /* Modal */
-  .modal-backdrop {
-    display: none;
-    position: fixed;
-    top: 0; left: 0; right: 0; bottom: 0;
-    background: rgba(0, 0, 0, 0.7);
-    z-index: 100;
-    justify-content: center;
-    align-items: center;
-  }
-  .modal-backdrop.open { display: flex; }
-  .modal-card {
-    background: var(--surface-card);
-    border: 1px solid var(--border);
-    border-radius: 10px;
-    width: 600px;
-    max-width: 90vw;
-    padding: 24px;
-    display: flex;
-    flex-direction: column;
-    gap: 16px;
-  }
-  textarea {
-    width: 100%;
-    height: 180px;
-    background: var(--bg);
-    border: 1px solid var(--border);
-    color: var(--text);
-    font-family: 'JetBrains Mono', monospace;
-    font-size: 12px;
-    padding: 10px;
-    border-radius: 6px;
-    resize: vertical;
-  }
-</style>
+    .brand-badge {
+      background: linear-gradient(135deg, var(--accent) 0%, #2563EB 100%);
+      color: #FFFFFF;
+      font-weight: 700;
+      font-size: 12px;
+      padding: 4px 8px;
+      border-radius: 6px;
+      letter-spacing: 0.5px;
+    }
+
+    h1 {
+      font-size: 17px;
+      font-weight: 700;
+      margin: 0;
+      color: var(--text);
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+
+    .header-sub {
+      font-size: 12px;
+      color: var(--text-dim);
+    }
+
+    /* Control Bar */
+    .control-bar {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+    }
+
+    select,
+    button,
+    input {
+      font-family: inherit;
+      font-size: 13px;
+      border-radius: 6px;
+      padding: 7px 12px;
+      outline: none;
+      border: 1px solid #CBD5E1;
+      background: #FFFFFF;
+      color: var(--text);
+    }
+
+    select:focus,
+    input:focus {
+      border-color: var(--accent);
+      box-shadow: 0 0 0 2px rgba(13, 148, 136, 0.15);
+    }
+
+    button {
+      cursor: pointer;
+      font-weight: 500;
+      transition: all 0.15s ease;
+    }
+
+    button.btn-primary {
+      background: var(--accent);
+      color: #FFFFFF;
+      border-color: var(--accent);
+    }
+
+    button.btn-primary:hover {
+      background: var(--accent-hover);
+    }
+
+    button.btn-ghost {
+      background: #F8FAFC;
+      color: #1E293B;
+      border: 1px solid #CBD5E1;
+    }
+
+    button.btn-ghost:hover {
+      background: #F1F5F9;
+      color: #0F172A;
+    }
+
+    /* Ribbon KPI Summary */
+    .kpi-ribbon {
+      padding: 12px 28px;
+      background: #FFFFFF;
+      border-bottom: 1px solid var(--border);
+      display: flex;
+      align-items: center;
+      gap: 20px;
+      overflow-x: auto;
+    }
+
+    .kpi-item {
+      display: flex;
+      flex-direction: column;
+      gap: 2px;
+      min-width: 130px;
+    }
+
+    .kpi-label {
+      font-size: 11px;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+      color: var(--text-dim);
+    }
+
+    .kpi-value {
+      font-size: 14px;
+      font-weight: 700;
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      color: var(--text);
+    }
+
+    /* Badges */
+    .badge {
+      display: inline-flex;
+      align-items: center;
+      gap: 5px;
+      padding: 2px 8px;
+      border-radius: 9999px;
+      font-size: 11.5px;
+      font-weight: 600;
+    }
+
+    .badge-open {
+      background: #ECFDF5;
+      color: #065F46;
+      border: 1px solid #A7F3D0;
+    }
+
+    .badge-closed {
+      background: #FEF2F2;
+      color: #991B1B;
+      border: 1px solid #FECACA;
+    }
+
+    .badge-push {
+      background: #F0FDFA;
+      color: #0F766E;
+      border: 1px solid #99F6E4;
+      font-family: 'JetBrains Mono', monospace;
+    }
+
+    .badge-agent {
+      background: #EFF6FF;
+      color: #1E40AF;
+      border: 1px solid #BFDBFE;
+    }
+
+    .badge-prospect {
+      background: #ECFDF5;
+      color: #065F46;
+      border: 1px solid #A7F3D0;
+    }
+
+    .badge-material {
+      background: #F5F3FF;
+      color: #6D28D9;
+      border: 1px solid #DDD6FE;
+    }
+
+    .badge-muted {
+      background: #F1F5F9;
+      color: #475569;
+      border: 1px solid #CBD5E1;
+    }
+
+    /* Main Replay Layout */
+    .main-container {
+      display: flex;
+      flex-direction: column;
+      height: calc(100vh - 128px);
+      background: #FFFFFF;
+    }
+
+    /* Timeline Scrubber */
+    .timeline-bar {
+      padding: 14px 28px;
+      background: #F8FAFC;
+      border-bottom: 1px solid var(--border);
+      display: flex;
+      gap: 10px;
+      overflow-x: auto;
+      scrollbar-width: thin;
+    }
+
+    .timeline-card {
+      flex: 0 0 240px;
+      background: #FFFFFF;
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 10px 12px;
+      cursor: pointer;
+      transition: all 0.15s ease;
+      user-select: none;
+      box-shadow: 0 1px 2px rgba(0, 0, 0, 0.04);
+    }
+
+    .timeline-card:hover {
+      border-color: var(--accent);
+      background: #F8FAFC;
+    }
+
+    .timeline-card.active {
+      border-color: var(--accent);
+      background: #F0FDFA;
+      box-shadow: 0 0 0 2px rgba(13, 148, 136, 0.25);
+    }
+
+    .turn-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin-bottom: 6px;
+      font-size: 11.5px;
+      color: var(--text);
+    }
+
+    .turn-text-snippet {
+      font-size: 12px;
+      color: var(--text-muted);
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+
+    .turn-footer {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin-top: 6px;
+      font-size: 11px;
+    }
+
+    /* 4-Column Synchronized View (Column 3 expanded for readable audit diffs) */
+    .columns-grid {
+      flex: 1;
+      display: grid;
+      grid-template-columns: 0.95fr 1fr 1.6fr 1.25fr;
+      gap: 0;
+      overflow: hidden;
+      background: #FFFFFF;
+    }
+
+    @media (max-width: 1280px) {
+      .columns-grid {
+        grid-template-columns: 1fr;
+        overflow-y: auto;
+      }
+    }
+
+    .column-panel {
+      border-right: 1px solid var(--border);
+      display: flex;
+      flex-direction: column;
+      overflow: hidden;
+      background: #FFFFFF;
+    }
+
+    .column-panel:last-child {
+      border-right: none;
+    }
+
+    .column-header {
+      padding: 12px 18px;
+      border-bottom: 1px solid var(--border);
+      background: #F8FAFC;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+    }
+
+    .column-title {
+      font-size: 12px;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: 0.6px;
+      color: #000000;
+    }
+
+    .column-body {
+      flex: 1;
+      padding: 16px 18px;
+      overflow-y: auto;
+      display: flex;
+      flex-direction: column;
+      gap: 16px;
+      background: #FFFFFF;
+    }
+
+    /* Card Units inside Columns */
+    .card-unit {
+      background: #FFFFFF;
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 14px;
+      box-shadow: 0 1px 2px rgba(0, 0, 0, 0.04);
+    }
+
+    .card-unit-title {
+      font-size: 11.5px;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+      color: #000000;
+      margin-bottom: 10px;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+    }
+
+    /* Dimension Bars */
+    .dim-row {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      font-size: 12px;
+      margin-bottom: 7px;
+    }
+
+    .dim-label {
+      width: 90px;
+      color: #000000;
+      font-weight: 500;
+    }
+
+    .dim-bar-wrapper {
+      flex: 1;
+      height: 7px;
+      background: #E2E8F0;
+      border-radius: 4px;
+      margin: 0 10px;
+      overflow: hidden;
+    }
+
+    .dim-bar-fill {
+      height: 100%;
+      border-radius: 4px;
+      background: var(--accent);
+      transition: width 0.3s ease;
+    }
+
+    .dim-val {
+      width: 38px;
+      text-align: right;
+      font-weight: 700;
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 11.5px;
+      color: #000000;
+    }
+
+    /* Diffs (Column 3: Changes & Audit Trail) */
+    .diff-item {
+      background: #FFFFFF;
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 14px;
+      margin-bottom: 14px;
+      font-size: 12px;
+      box-shadow: 0 1px 3px rgba(0, 0, 0, 0.04);
+    }
+
+    .diff-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin-bottom: 10px;
+    }
+
+    .diff-path {
+      display: inline-block;
+      font-weight: 700;
+      color: #000000;
+      background: #F1F5F9;
+      border: 1px solid #CBD5E1;
+      border-radius: 4px;
+      padding: 3px 10px;
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 12px;
+      word-break: break-all;
+    }
+
+    .diff-comparison {
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+      margin: 8px 0;
+    }
+
+    .diff-box {
+      border-radius: 6px;
+      padding: 8px 12px;
+      border: 1px solid;
+    }
+
+    .diff-box.diff-old {
+      background: #FEF2F2;
+      border-color: #FECACA;
+      border-left: 4px solid #DC2626;
+    }
+
+    .diff-box.diff-new {
+      background: #F0FDF4;
+      border-color: #BBF7D0;
+      border-left: 4px solid #16A34A;
+    }
+
+    .diff-box-label {
+      font-size: 10.5px;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+      margin-bottom: 4px;
+      display: flex;
+      align-items: center;
+      gap: 5px;
+    }
+
+    .diff-box.diff-old .diff-box-label {
+      color: #DC2626;
+    }
+
+    .diff-box.diff-new .diff-box-label {
+      color: #16A34A;
+    }
+
+    .diff-symbol {
+      font-weight: 900;
+      font-size: 13px;
+    }
+
+    .diff-content {
+      margin: 0;
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 11.5px;
+      line-height: 1.55;
+      color: #000000;
+      white-space: pre-wrap;
+      word-break: break-word;
+      overflow-wrap: anywhere;
+      max-height: 220px;
+      overflow-y: auto;
+      scrollbar-width: thin;
+    }
+
+    .diff-reason {
+      font-size: 11.5px;
+      color: #000000;
+      background: #F8FAFC;
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      padding: 8px 12px;
+      margin-top: 10px;
+      line-height: 1.5;
+    }
+
+    /* Gate conditions list */
+    .gate-condition-row {
+      display: flex;
+      align-items: flex-start;
+      gap: 8px;
+      padding: 7px 0;
+      border-bottom: 1px solid #F1F5F9;
+      font-size: 12px;
+    }
+
+    .gate-condition-row:last-child {
+      border-bottom: none;
+    }
+
+    .cond-icon {
+      font-weight: 700;
+      font-size: 13px;
+      line-height: 1;
+    }
+
+    .cond-icon.pass {
+      color: #059669;
+    }
+
+    .cond-icon.fail {
+      color: #DC2626;
+    }
+
+    /* Modal */
+    .modal-backdrop {
+      display: none;
+      position: fixed;
+      top: 0;
+      left: 0;
+      right: 0;
+      bottom: 0;
+      background: rgba(15, 23, 42, 0.45);
+      backdrop-filter: blur(3px);
+      z-index: 100;
+      justify-content: center;
+      align-items: center;
+    }
+
+    .modal-backdrop.open {
+      display: flex;
+    }
+
+    .modal-card {
+      background: #FFFFFF;
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      width: 600px;
+      max-width: 90vw;
+      padding: 24px;
+      display: flex;
+      flex-direction: column;
+      gap: 16px;
+      box-shadow: 0 10px 25px -5px rgba(0, 0, 0, 0.1), 0 8px 10px -6px rgba(0, 0, 0, 0.1);
+      color: var(--text);
+    }
+
+    textarea {
+      width: 100%;
+      height: 180px;
+      background: #F8FAFC;
+      border: 1px solid var(--border);
+      color: var(--text);
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 12px;
+      padding: 10px;
+      border-radius: 6px;
+      resize: vertical;
+    }
+  </style>
 </head>
+
 <body>
 
-<header>
-  <div class="header-left">
-    <span class="brand-badge">PITCHPROX</span>
-    <div>
-      <h1>ConversationState Replay Console</h1>
-      <div class="header-sub">Phase 9 Durable Inspection Tool · State Before → Evidence → Changes → State After</div>
-    </div>
-  </div>
-
-  <div class="control-bar">
-    <input type="text" id="reportSearchInput" placeholder="Filter calls..." style="width: 170px;" title="Filter reports by SID, gate status, or source">
-    <select id="reportSelect" title="Select a stored call report" style="max-width: 320px;">
-      <option value="">-- Load Stored Call Report --</option>
-    </select>
-    <button class="btn-primary" id="btnLoadReport">Load Replay</button>
-    <button class="btn-ghost" id="btnShareLink" title="Copy incident URL with exact turn">Share Link</button>
-    <button class="btn-ghost" id="btnOpenJsonModal" title="Inspect complete state JSON trees">{} JSON</button>
-    <button class="btn-ghost" id="btnOpenSimModal">Simulate</button>
-  </div>
-</header>
-
-<!-- Top KPI Ribbon -->
-<div class="kpi-ribbon" id="kpiRibbon">
-  <div class="kpi-item">
-    <span class="kpi-label">Call SID</span>
-    <span class="kpi-value mono" id="kpiCallSid">No Call Loaded</span>
-  </div>
-  <div class="kpi-item">
-    <span class="kpi-label">Conversion Gate</span>
-    <span class="kpi-value" id="kpiGate"><span class="badge badge-muted">—</span></span>
-  </div>
-  <div class="kpi-item">
-    <span class="kpi-label">Push Strength</span>
-    <span class="kpi-value" id="kpiPush"><span class="badge badge-muted">—</span></span>
-  </div>
-  <div class="kpi-item">
-    <span class="kpi-label">Momentum</span>
-    <span class="kpi-value mono" id="kpiMomentum">—</span>
-  </div>
-  <div class="kpi-item">
-    <span class="kpi-label" title="Gate-Aware & Blocker-Capped Composite Readiness (0–100)">Composite Readiness</span>
-    <span class="kpi-value mono" id="kpiReadiness">—</span>
-  </div>
-  <div class="kpi-item">
-    <span class="kpi-label">State Version</span>
-    <span class="kpi-value mono" id="kpiVersion">V0</span>
-  </div>
-  <div class="kpi-item">
-    <span class="kpi-label">Active Objections</span>
-    <span class="kpi-value mono" id="kpiObjections">0</span>
-  </div>
-</div>
-
-<div class="main-container">
-  <!-- Horizontal Turn Timeline Scrubber -->
-  <div class="timeline-bar" id="timelineBar">
-    <div style="padding: 16px; color: var(--text-dim);">Load a call report above to scrub through turns.</div>
-  </div>
-
-  <!-- 4-Column Synchronized Inspection Panel -->
-  <div class="columns-grid">
-
-    <!-- Column 1: State Before (V_t-1) -->
-    <div class="column-panel">
-      <div class="column-header">
-        <span class="column-title">1. State Before (V<sub>t-1</sub>)</span>
-        <span class="badge badge-muted" id="col1Version">V—</span>
-      </div>
-      <div class="column-body" id="col1Body">
-        <div style="color: var(--text-dim); text-align: center; margin-top: 40px;">Select a turn from the timeline.</div>
+  <header>
+    <div class="header-left">
+      <!-- <span class="brand-badge">PITCHPROX</span> -->
+      <div>
+        <h1>ConversationState Replay Console</h1>
+        <div class="header-sub">Phase 9 Durable Inspection Tool · State Before → Evidence → Changes → State After</div>
       </div>
     </div>
 
-    <!-- Column 2: New Evidence (Turn t) -->
-    <div class="column-panel">
-      <div class="column-header">
-        <span class="column-title">2. Turn Evidence & Gating</span>
-        <span class="badge badge-muted" id="col2Speaker">—</span>
-      </div>
-      <div class="column-body" id="col2Body">
-        <div style="color: var(--text-dim); text-align: center; margin-top: 40px;">Select a turn from the timeline.</div>
-      </div>
+    <div class="control-bar">
+      <input type="text" id="reportSearchInput" placeholder="Filter calls..." style="width: 170px;"
+        title="Filter reports by SID, gate status, or source">
+      <select id="reportSelect" title="Select a stored call report" style="max-width: 320px;">
+        <option value="">-- Load Stored Call Report --</option>
+      </select>
+      <button class="btn-primary" id="btnLoadReport">Load Replay</button>
+      <button class="btn-ghost" id="btnOpenJsonModal" title="Inspect complete state JSON trees">{} JSON</button>
+      <button class="btn-ghost" id="btnOpenSimModal">Simulate</button>
     </div>
+  </header>
 
-    <!-- Column 3: State Changes & Reasons -->
-    <div class="column-panel">
-      <div class="column-header">
-        <span class="column-title">3. Changes & Audit Trail</span>
-        <span class="badge badge-muted" id="col3Count">0 changes</span>
-      </div>
-      <div class="column-body" id="col3Body">
-        <div style="color: var(--text-dim); text-align: center; margin-top: 40px;">Select a turn from the timeline.</div>
-      </div>
+  <!-- Top KPI Ribbon -->
+  <div class="kpi-ribbon" id="kpiRibbon">
+    <div class="kpi-item">
+      <span class="kpi-label">Call SID</span>
+      <span class="kpi-value mono" id="kpiCallSid">No Call Loaded</span>
     </div>
-
-    <!-- Column 4: State After (V_t) -->
-    <div class="column-panel">
-      <div class="column-header">
-        <span class="column-title">4. State After (V<sub>t</sub>)</span>
-        <span class="badge badge-muted" id="col4Version">V—</span>
-      </div>
-      <div class="column-body" id="col4Body">
-        <div style="color: var(--text-dim); text-align: center; margin-top: 40px;">Select a turn from the timeline.</div>
-      </div>
+    <div class="kpi-item">
+      <span class="kpi-label">Conversion Gate</span>
+      <span class="kpi-value" id="kpiGate"><span class="badge badge-muted">—</span></span>
     </div>
-
+    <div class="kpi-item">
+      <span class="kpi-label">Push Strength</span>
+      <span class="kpi-value" id="kpiPush"><span class="badge badge-muted">—</span></span>
+    </div>
+    <div class="kpi-item">
+      <span class="kpi-label">Momentum</span>
+      <span class="kpi-value mono" id="kpiMomentum">—</span>
+    </div>
+    <div class="kpi-item">
+      <span class="kpi-label" title="Gate-Aware & Blocker-Capped Composite Readiness (0–100)">Composite Readiness</span>
+      <span class="kpi-value mono" id="kpiReadiness">—</span>
+    </div>
+    <div class="kpi-item">
+      <span class="kpi-label">State Version</span>
+      <span class="kpi-value mono" id="kpiVersion">V0</span>
+    </div>
+    <div class="kpi-item">
+      <span class="kpi-label">Active Objections</span>
+      <span class="kpi-value mono" id="kpiObjections">0</span>
+    </div>
   </div>
-</div>
 
-<!-- Modal: Simulate Script -->
-<div class="modal-backdrop" id="simModal">
-  <div class="modal-card">
-    <div style="display: flex; justify-content: space-between; align-items: center;">
-      <h3 style="margin: 0;">Simulate Dialogue Script</h3>
-      <button class="btn-ghost" onclick="document.getElementById('simModal').classList.remove('open')">✕</button>
+  <div class="main-container">
+    <!-- Horizontal Turn Timeline Scrubber -->
+    <div class="timeline-bar" id="timelineBar">
+      <div style="padding: 16px; color: var(--text-dim);">Load a call report above to scrub through turns.</div>
     </div>
-    <div style="font-size: 12px; color: var(--text-muted);">
-      Paste a JSON array of turns to run end-to-end through ConversationStateManager:
+
+    <!-- 4-Column Synchronized Inspection Panel -->
+    <div class="columns-grid">
+
+      <!-- Column 1: State Before (V_t-1) -->
+      <div class="column-panel">
+        <div class="column-header">
+          <span class="column-title">1. State Before (V<sub>t-1</sub>)</span>
+          <span class="badge badge-muted" id="col1Version">V—</span>
+        </div>
+        <div class="column-body" id="col1Body">
+          <div style="color: var(--text-dim); text-align: center; margin-top: 40px;">Select a turn from the timeline.
+          </div>
+        </div>
+      </div>
+
+      <!-- Column 2: New Evidence (Turn t) -->
+      <div class="column-panel">
+        <div class="column-header">
+          <span class="column-title">2. Turn Evidence & Gating</span>
+          <span class="badge badge-muted" id="col2Speaker">—</span>
+        </div>
+        <div class="column-body" id="col2Body">
+          <div style="color: var(--text-dim); text-align: center; margin-top: 40px;">Select a turn from the timeline.
+          </div>
+        </div>
+      </div>
+
+      <!-- Column 3: State Changes & Reasons -->
+      <div class="column-panel">
+        <div class="column-header">
+          <span class="column-title">3. Changes & Audit Trail</span>
+          <span class="badge badge-muted" id="col3Count">0 changes</span>
+        </div>
+        <div class="column-body" id="col3Body">
+          <div style="color: var(--text-dim); text-align: center; margin-top: 40px;">Select a turn from the timeline.
+          </div>
+        </div>
+      </div>
+
+      <!-- Column 4: State After (V_t) -->
+      <div class="column-panel">
+        <div class="column-header">
+          <span class="column-title">4. State After (V<sub>t</sub>)</span>
+          <span class="badge badge-muted" id="col4Version">V—</span>
+        </div>
+        <div class="column-body" id="col4Body">
+          <div style="color: var(--text-dim); text-align: center; margin-top: 40px;">Select a turn from the timeline.
+          </div>
+        </div>
+      </div>
+
     </div>
-    <textarea id="simScriptText" placeholder='[
+  </div>
+
+  <!-- Modal: Simulate Script -->
+  <div class="modal-backdrop" id="simModal">
+    <div class="modal-card">
+      <div style="display: flex; justify-content: space-between; align-items: center;">
+        <h3 style="margin: 0;">Simulate Dialogue Script</h3>
+        <button class="btn-ghost" onclick="document.getElementById('simModal').classList.remove('open')" style="font-size: 18px; line-height: 1;">&times;</button>
+      </div>
+      <div style="font-size: 12px; color: var(--text-muted);">
+        Paste a JSON array of turns to run end-to-end through ConversationStateManager:
+      </div>
+      <textarea id="simScriptText" placeholder='[
   {"turn_id": 1, "speaker_id": "client", "text": "Hi, who is this?"},
   {"turn_id": 2, "speaker_id": "salesperson", "text": "Hi Daniel, I noticed your home was listed previously..."},
   {"turn_id": 3, "speaker_id": "client", "text": "Yeah, that sounds nice. Sure, maybe sometime."}
 ]'></textarea>
-    <div style="display: flex; justify-content: flex-end; gap: 8px;">
-      <button class="btn-ghost" onclick="document.getElementById('simModal').classList.remove('open')">Cancel</button>
-      <button class="btn-primary" id="btnRunSimScript">Run Simulation</button>
+      <div style="display: flex; justify-content: flex-end; gap: 8px;">
+        <button class="btn-ghost" onclick="document.getElementById('simModal').classList.remove('open')">Cancel</button>
+        <button class="btn-primary" id="btnRunSimScript">Run Simulation</button>
+      </div>
     </div>
   </div>
-</div>
 
-<!-- Modal: Inspect Raw State JSON -->
-<div class="modal-backdrop" id="jsonModal">
-  <div class="modal-card" style="max-width: 850px; width: 90%;">
-    <div style="display: flex; justify-content: space-between; align-items: center;">
-      <h3 style="margin: 0;" id="jsonModalTitle">Inspect Turn State (Raw JSON)</h3>
-      <button class="btn-ghost" onclick="document.getElementById('jsonModal').classList.remove('open')">✕</button>
-    </div>
-    <div style="display: flex; gap: 8px; margin-top: 10px;">
-      <button class="btn-ghost json-tab active" id="tabJsonAfter" onclick="switchJsonTab('after')">State After (V<sub>t</sub>)</button>
-      <button class="btn-ghost json-tab" id="tabJsonBefore" onclick="switchJsonTab('before')">State Before (V<sub>t-1</sub>)</button>
-      <button class="btn-ghost json-tab" id="tabJsonChanges" onclick="switchJsonTab('changes')">Changes Diff</button>
-      <button class="btn-ghost json-tab" id="tabJsonEvidence" onclick="switchJsonTab('evidence')">Evidence Bundle</button>
-    </div>
-    <pre id="rawJsonViewer" style="background: var(--bg); border: 1px solid var(--border); border-radius: 6px; padding: 12px; max-height: 480px; overflow: auto; font-size: 11.5px; margin-top: 10px; color: #38BDF8;" class="mono"></pre>
-    <div style="display: flex; justify-content: space-between; align-items: center; margin-top: 8px;">
-      <span id="copyToast" style="font-size: 12px; color: var(--prospect); opacity: 0; transition: opacity 0.3s;">Copied to clipboard!</span>
-      <button class="btn-primary" onclick="copyCurrentJson()">Copy JSON</button>
+  <!-- Modal: Inspect Raw State JSON -->
+  <div class="modal-backdrop" id="jsonModal">
+    <div class="modal-card" style="max-width: 850px; width: 90%;">
+      <div style="display: flex; justify-content: space-between; align-items: center;">
+        <h3 style="margin: 0;" id="jsonModalTitle">Inspect Turn State (Raw JSON)</h3>
+        <button class="btn-ghost" onclick="document.getElementById('jsonModal').classList.remove('open')" style="font-size: 18px; line-height: 1;">&times;</button>
+      </div>
+      <div style="display: flex; gap: 8px; margin-top: 10px;">
+        <button class="btn-ghost json-tab active" id="tabJsonAfter" onclick="switchJsonTab('after')">State After
+          (V<sub>t</sub>)</button>
+        <button class="btn-ghost json-tab" id="tabJsonBefore" onclick="switchJsonTab('before')">State Before
+          (V<sub>t-1</sub>)</button>
+        <button class="btn-ghost json-tab" id="tabJsonChanges" onclick="switchJsonTab('changes')">Changes Diff</button>
+        <button class="btn-ghost json-tab" id="tabJsonEvidence" onclick="switchJsonTab('evidence')">Evidence
+          Bundle</button>
+      </div>
+      <pre id="rawJsonViewer"
+        style="background: #F8FAFC; border: 1px solid var(--border); border-radius: 6px; padding: 12px; max-height: 480px; overflow: auto; font-size: 11.5px; margin-top: 10px; color: #000000;"
+        class="mono"></pre>
+      <div style="display: flex; justify-content: space-between; align-items: center; margin-top: 8px;">
+        <span id="copyToast"
+          style="font-size: 12px; color: var(--prospect); opacity: 0; transition: opacity 0.3s;">Copied to
+          clipboard!</span>
+        <button class="btn-primary" onclick="copyCurrentJson()">Copy JSON</button>
+      </div>
     </div>
   </div>
-</div>
 
-<script>
-  let currentReport = null;
-  let activeTurnIndex = 0;
-  let allReports = [];
-  let activeJsonTab = 'after';
+  <script>
+    let currentReport = null;
+    let activeTurnIndex = 0;
+    let allReports = [];
+    let activeJsonTab = 'after';
 
-  function showCopyToast(msg = 'Copied to clipboard!') {
-    const toast = document.getElementById('copyToast');
-    toast.textContent = msg;
-    toast.style.opacity = '1';
-    setTimeout(() => { toast.style.opacity = '0'; }, 2200);
-  }
-
-  // Client Requirement: UI Presentation layer maps internal "unresolved" to human-readable "active"
-  const OBJECTION_DISPLAY_LABELS = {
-    'unresolved': 'active',
-    'clarified': 'clarified',
-    'partially_resolved': 'partially resolved',
-    'resolved': 'resolved',
-    'reactivated': 'reactivated',
-    'boundary': 'boundary',
-    'superseded': 'superseded'
-  };
-
-  function getObjectionBadgeClass(state) {
-    if (state === 'resolved') return 'badge-open';
-    if (state === 'superseded') return 'badge-muted';
-    if (state === 'partially_resolved' || state === 'clarified') return 'badge-push';
-    return 'badge-closed';
-  }
-
-  function populateReportSelect(filterText = '') {
-    const select = document.getElementById('reportSelect');
-    const term = filterText.toLowerCase().trim();
-    select.innerHTML = '<option value="">-- Load Stored Call Report --</option>';
-
-    const filtered = allReports.filter(item => {
-      if (!term) return true;
-      const haystack = `${item.call_sid} ${item.source} ${item.gate_status} ${item.push_strength}`.toLowerCase();
-      return haystack.includes(term);
-    });
-
-    filtered.forEach(item => {
-      const opt = document.createElement('option');
-      opt.value = item.call_sid;
-      const tag = item.is_synthetic ? '[SYNTHETIC] ' : (item.source === 'recording_replay' ? '[RECORDING] ' : '[LIVE] ');
-      const runs = item.run_count > 1 ? ` (Run #${item.run_count})` : '';
-      const stateBadge = item.has_state_replay === false ? ' [Audio Only - Click to Replay]' : ` (${item.total_turns} turns, Gate: ${item.gate_status})`;
-      opt.textContent = `${tag}${item.call_sid}${stateBadge}${runs}`;
-      select.appendChild(opt);
-    });
-  }
-
-  // Fetch available reports on load
-  async function loadReportList() {
-    try {
-      const res = await fetch('/api/conversation-state/reports');
-      if (!res.ok) return;
-      allReports = await res.json();
-      populateReportSelect();
-
-      // Deep linking from query params
-      const urlParams = new URLSearchParams(window.location.search);
-      const targetSid = urlParams.get('call_sid');
-      const targetTurn = urlParams.get('turn');
-
-      if (targetSid) {
-        const select = document.getElementById('reportSelect');
-        select.value = targetSid;
-        if (targetTurn) {
-          activeTurnIndex = Math.max(0, parseInt(targetTurn, 10) - 1);
-        }
-        fetchAndRenderReport(targetSid, activeTurnIndex);
-      } else if (allReports.length > 0) {
-        const select = document.getElementById('reportSelect');
-        select.selectedIndex = 1;
-        fetchAndRenderReport(allReports[0].call_sid, 0);
-      }
-    } catch (e) {
-      console.warn('Could not list reports:', e);
+    function showCopyToast(msg = 'Copied to clipboard!') {
+      const toast = document.getElementById('copyToast');
+      toast.textContent = msg;
+      toast.style.opacity = '1';
+      setTimeout(() => { toast.style.opacity = '0'; }, 2200);
     }
-  }
 
-  async function fetchAndRenderReport(callSid, turnIndexToSelect = 0) {
-    if (!callSid) return;
-    try {
-      const res = await fetch(`/api/conversation-state/replay/${encodeURIComponent(callSid)}`);
-      if (!res.ok) {
-        alert('Could not load replay for ' + callSid);
+    // Client Requirement: UI Presentation layer maps internal "unresolved" to human-readable "active"
+    const OBJECTION_DISPLAY_LABELS = {
+      'unresolved': 'active',
+      'clarified': 'clarified',
+      'partially_resolved': 'partially resolved',
+      'resolved': 'resolved',
+      'reactivated': 'reactivated',
+      'boundary': 'boundary',
+      'superseded': 'superseded'
+    };
+
+    function getObjectionBadgeClass(state) {
+      if (state === 'resolved') return 'badge-open';
+      if (state === 'superseded') return 'badge-muted';
+      if (state === 'partially_resolved' || state === 'clarified') return 'badge-push';
+      return 'badge-closed';
+    }
+
+    function populateReportSelect(filterText = '') {
+      const select = document.getElementById('reportSelect');
+      const term = filterText.toLowerCase().trim();
+      select.innerHTML = '<option value="">-- Load Stored Call Report --</option>';
+
+      const filtered = allReports.filter(item => {
+        if (!term) return true;
+        const haystack = `${item.call_sid} ${item.source} ${item.gate_status} ${item.push_strength}`.toLowerCase();
+        return haystack.includes(term);
+      });
+
+      filtered.forEach(item => {
+        const opt = document.createElement('option');
+        opt.value = item.call_sid;
+        const tag = item.is_synthetic ? '[SYNTHETIC] ' : (item.source === 'recording_replay' ? '[RECORDING] ' : '[LIVE] ');
+        const runs = item.run_count > 1 ? ` (Run #${item.run_count})` : '';
+        const stateBadge = item.has_state_replay === false ? ' [Audio Only - Click to Replay]' : ` (${item.total_turns} turns, Gate: ${item.gate_status})`;
+        opt.textContent = `${tag}${item.call_sid}${stateBadge}${runs}`;
+        select.appendChild(opt);
+      });
+    }
+
+    // Fetch available reports on load
+    async function loadReportList() {
+      try {
+        const res = await fetch('/api/conversation-state/reports');
+        if (!res.ok) return;
+        allReports = await res.json();
+        populateReportSelect();
+
+        // Deep linking from query params
+        const urlParams = new URLSearchParams(window.location.search);
+        const targetSid = urlParams.get('call_sid');
+        const targetTurn = urlParams.get('turn');
+
+        if (targetSid) {
+          const select = document.getElementById('reportSelect');
+          select.value = targetSid;
+          if (targetTurn) {
+            activeTurnIndex = Math.max(0, parseInt(targetTurn, 10) - 1);
+          }
+          fetchAndRenderReport(targetSid, activeTurnIndex);
+        } else if (allReports.length > 0) {
+          const select = document.getElementById('reportSelect');
+          select.selectedIndex = 1;
+          fetchAndRenderReport(allReports[0].call_sid, 0);
+        }
+      } catch (e) {
+        console.warn('Could not list reports:', e);
+      }
+    }
+
+    async function fetchAndRenderReport(callSid, turnIndexToSelect = 0) {
+      if (!callSid) return;
+      try {
+        const res = await fetch(`/api/conversation-state/replay/${encodeURIComponent(callSid)}`);
+        if (!res.ok) {
+          alert('Could not load replay for ' + callSid);
+          return;
+        }
+        currentReport = await res.json();
+        activeTurnIndex = Math.min(turnIndexToSelect, Math.max(0, (currentReport.timeline || []).length - 1));
+        renderReplay();
+      } catch (e) {
+        alert('Error loading report: ' + e);
+      }
+    }
+
+    function renderReplay() {
+      if (!currentReport || !currentReport.timeline || currentReport.timeline.length === 0) {
         return;
       }
-      currentReport = await res.json();
-      activeTurnIndex = Math.min(turnIndexToSelect, Math.max(0, (currentReport.timeline || []).length - 1));
-      renderReplay();
-    } catch (e) {
-      alert('Error loading report: ' + e);
-    }
-  }
 
-  function renderReplay() {
-    if (!currentReport || !currentReport.timeline || currentReport.timeline.length === 0) {
-      return;
-    }
+      // Sync deep link query params
+      const url = new URL(window.location);
+      url.searchParams.set('call_sid', currentReport.call_sid);
+      url.searchParams.set('turn', activeTurnIndex + 1);
+      window.history.replaceState(null, '', url);
 
-    // Sync deep link query params
-    const url = new URL(window.location);
-    url.searchParams.set('call_sid', currentReport.call_sid);
-    url.searchParams.set('turn', activeTurnIndex + 1);
-    window.history.replaceState(null, '', url);
+      // Top ribbon
+      const finalState = currentReport.final_state || {};
+      const conv = currentReport.conversion_summary || {};
 
-    // Top ribbon
-    const finalState = currentReport.final_state || {};
-    const conv = currentReport.conversion_summary || {};
-    
-    // Call SID + Source Badge + Run Count
-    const isSynthetic = (currentReport.source === 'synthetic_simulation') || (currentReport.call_sid && currentReport.call_sid.startsWith('sim_'));
-    const sourceBadge = isSynthetic
-      ? '<span class="badge" style="background: rgba(139, 92, 246, 0.2); color: #C084FC; border: 1px solid rgba(139, 92, 246, 0.4); font-size: 11px; margin-left: 6px;">SYNTHETIC SIMULATION</span>'
-      : (currentReport.source === 'recording_replay'
-        ? '<span class="badge" style="background: rgba(59, 130, 246, 0.2); color: #60A5FA; border: 1px solid rgba(59, 130, 246, 0.4); font-size: 11px; margin-left: 6px;">RECORDED AUDIO REPLAY</span>'
-        : '<span class="badge" style="background: rgba(16, 185, 129, 0.2); color: #34D399; border: 1px solid rgba(16, 185, 129, 0.4); font-size: 11px; margin-left: 6px;">LIVE CALL</span>');
-    const runBadge = (currentReport.run_count && currentReport.run_count > 1)
-      ? `<span class="badge" style="background: rgba(245, 158, 11, 0.2); color: #FBBF24; border: 1px solid rgba(245, 158, 11, 0.4); font-size: 11px; margin-left: 6px;">Run #${currentReport.run_count}</span>`
-      : '';
+      // Call SID + Source Badge + Run Count
+      const isSynthetic = (currentReport.source === 'synthetic_simulation') || (currentReport.call_sid && currentReport.call_sid.startsWith('sim_'));
+      const sourceBadge = isSynthetic
+        ? '<span class="badge" style="background: #F5F3FF; color: #6D28D9; border: 1px solid #DDD6FE; font-size: 11px; margin-left: 6px;">SYNTHETIC SIMULATION</span>'
+        : (currentReport.source === 'recording_replay'
+          ? '<span class="badge" style="background: #EFF6FF; color: #1D4ED8; border: 1px solid #BFDBFE; font-size: 11px; margin-left: 6px;">RECORDED AUDIO REPLAY</span>'
+          : '<span class="badge" style="background: #ECFDF5; color: #047857; border: 1px solid #A7F3D0; font-size: 11px; margin-left: 6px;">LIVE CALL</span>');
+      const runBadge = (currentReport.run_count && currentReport.run_count > 1)
+        ? `<span class="badge" style="background: #FFFBEB; color: #B45309; border: 1px solid #FDE68A; font-size: 11px; margin-left: 6px;">Run #${currentReport.run_count}</span>`
+        : '';
 
-    document.getElementById('kpiCallSid').innerHTML = `${currentReport.call_sid || '—'} ${sourceBadge} ${runBadge}`;
-    
-    // Gate badge
-    const gateOpen = conv.gate_is_open;
-    document.getElementById('kpiGate').innerHTML = gateOpen
-      ? '<span class="badge badge-open">OPEN (Ready to Close)</span>'
-      : '<span class="badge badge-closed">CLOSED (' + (conv.failed_conditions ? conv.failed_conditions.length : 0) + ' blocking)</span>';
+      document.getElementById('kpiCallSid').innerHTML = `${currentReport.call_sid || '—'} ${sourceBadge} ${runBadge}`;
 
-    // Push badge
-    document.getElementById('kpiPush').innerHTML = `<span class="badge badge-push">${conv.push_strength || '—'}</span>`;
-    
-    // Momentum
-    const momScore = conv.momentum_score !== undefined ? conv.momentum_score.toFixed(0) : '—';
-    const momTrend = conv.momentum_trend || 'stable';
-    document.getElementById('kpiMomentum').textContent = `${momScore}% (${momTrend})`;
+      // Gate badge
+      const gateOpen = conv.gate_is_open;
+      document.getElementById('kpiGate').innerHTML = gateOpen
+        ? '<span class="badge badge-open">OPEN (Ready to Close)</span>'
+        : '<span class="badge badge-closed">CLOSED (' + (conv.failed_conditions ? conv.failed_conditions.length : 0) + ' blocking)</span>';
 
-    // Readiness
-    const readScore = conv.readiness_score !== undefined ? conv.readiness_score.toFixed(0) : '—';
-    const blockerCount = conv.active_blockers ? conv.active_blockers.length : 0;
-    document.getElementById('kpiReadiness').textContent = `${readScore}% ${blockerCount > 0 ? '[Blockers: ' + blockerCount + ']' : ''}`;
+      // Push badge
+      document.getElementById('kpiPush').innerHTML = `<span class="badge badge-push">${conv.push_strength || '—'}</span>`;
 
-    document.getElementById('kpiVersion').textContent = `V${finalState.state_version || 0}`;
-    const activeObjs = (finalState.objections || []).filter(o => o.lifecycle_state !== 'resolved' && o.lifecycle_state !== 'superseded');
-    document.getElementById('kpiObjections').textContent = activeObjs.length;
+      // Momentum
+      const momScore = conv.momentum_score !== undefined ? conv.momentum_score.toFixed(0) : '—';
+      const momTrend = conv.momentum_trend || 'stable';
+      document.getElementById('kpiMomentum').textContent = `${momScore}% (${momTrend})`;
 
-    // Timeline bar
-    const bar = document.getElementById('timelineBar');
-    bar.innerHTML = '';
-    currentReport.timeline.forEach((step, idx) => {
-      const card = document.createElement('div');
-      card.className = `timeline-card ${idx === activeTurnIndex ? 'active' : ''}`;
-      
-      const spBadge = step.speaker_id === 'salesperson' 
-        ? '<span class="badge badge-agent">Agent</span>'
-        : '<span class="badge badge-prospect">Prospect</span>';
+      // Readiness
+      const readScore = conv.readiness_score !== undefined ? conv.readiness_score.toFixed(0) : '—';
+      const blockerCount = conv.active_blockers ? conv.active_blockers.length : 0;
+      document.getElementById('kpiReadiness').textContent = `${readScore}% ${blockerCount > 0 ? '[Blockers: ' + blockerCount + ']' : ''}`;
 
-      const isMat = step.materiality && step.materiality.is_material;
-      const matBadge = isMat
-        ? `<span class="badge badge-material">Mat: [${step.materiality.affected_targets.join(',')}]</span>`
-        : '<span class="badge badge-muted">Filler</span>';
+      document.getElementById('kpiVersion').textContent = `V${finalState.state_version || 0}`;
+      const activeObjs = (finalState.objections || []).filter(o => o.lifecycle_state !== 'resolved' && o.lifecycle_state !== 'superseded');
+      document.getElementById('kpiObjections').textContent = activeObjs.length;
 
-      const stepGateOpen = step.state_after.conversion_gate && step.state_after.conversion_gate.is_open;
-      const gateBadge = stepGateOpen 
-        ? '<span class="badge badge-open" style="font-size:10px">Gate Open</span>' 
-        : '<span class="badge badge-closed" style="font-size:10px">Gate Closed</span>';
+      // Timeline bar
+      const bar = document.getElementById('timelineBar');
+      bar.innerHTML = '';
+      currentReport.timeline.forEach((step, idx) => {
+        const card = document.createElement('div');
+        card.className = `timeline-card ${idx === activeTurnIndex ? 'active' : ''}`;
 
-      // Scrubber Telemetry Dots: count only active objections (exclude resolved and superseded)
-      let telemetryDots = '';
-      const hasActiveObjections = (step.state_after.objections || []).some(o => o.lifecycle_state !== 'resolved' && o.lifecycle_state !== 'superseded');
-      const hasBoundary = (step.evidence_bundle && step.evidence_bundle.boundary_score >= 0.5);
-      const hasConv = (step.state_after.conversion_event && step.state_after.conversion_event.status === 'confirmed');
+        const spBadge = step.speaker_id === 'salesperson'
+          ? '<span class="badge badge-agent">Agent</span>'
+          : '<span class="badge badge-prospect">Prospect</span>';
 
-      if (hasActiveObjections) telemetryDots += '<span class="badge badge-closed" style="font-size:9px; padding:1px 4px;" title="Active Objection">OBJ</span> ';
-      if (hasBoundary) telemetryDots += '<span class="badge badge-closed" style="font-size:9px; padding:1px 4px; background:rgba(239,68,68,0.25); color:#F87171;" title="Boundary Reached">BND</span> ';
-      if (hasConv || stepGateOpen) telemetryDots += '<span class="badge badge-open" style="font-size:9px; padding:1px 4px;" title="Conversion Confirmed / Gate Open">GATE</span> ';
+        const isMat = step.materiality && step.materiality.is_material;
+        const matBadge = isMat
+          ? `<span class="badge badge-material">Mat: [${step.materiality.affected_targets.join(',')}]</span>`
+          : '<span class="badge badge-muted">Filler</span>';
 
-      card.innerHTML = `
+        const stepGateOpen = step.state_after.conversion_gate && step.state_after.conversion_gate.is_open;
+        const gateBadge = stepGateOpen
+          ? '<span class="badge badge-open" style="font-size:10px">Gate Open</span>'
+          : '<span class="badge badge-closed" style="font-size:10px">Gate Closed</span>';
+
+        // Scrubber Telemetry Dots: count only active objections (exclude resolved and superseded)
+        let telemetryDots = '';
+        const hasActiveObjections = (step.state_after.objections || []).some(o => o.lifecycle_state !== 'resolved' && o.lifecycle_state !== 'superseded');
+        const hasBoundary = (step.evidence_bundle && step.evidence_bundle.boundary_score >= 0.5);
+        const hasConv = (step.state_after.conversion_event && step.state_after.conversion_event.status === 'confirmed');
+
+        if (hasActiveObjections) telemetryDots += '<span class="badge badge-closed" style="font-size:9px; padding:1px 4px;" title="Active Objection">OBJ</span> ';
+        if (hasBoundary) telemetryDots += '<span class="badge badge-closed" style="font-size:9px; padding:1px 4px; background:#FEF2F2; color:#DC2626; border:1px solid #FECACA;" title="Boundary Reached">BND</span> ';
+        if (hasConv || stepGateOpen) telemetryDots += '<span class="badge badge-open" style="font-size:9px; padding:1px 4px;" title="Conversion Confirmed / Gate Open">GATE</span> ';
+
+        card.innerHTML = `
         <div class="turn-header">
           <strong>Turn ${step.turn_id}</strong>
           <div>${telemetryDots}${spBadge}</div>
@@ -804,30 +969,30 @@
           ${gateBadge}
         </div>
       `;
-      card.onclick = () => {
-        activeTurnIndex = idx;
-        renderReplay();
-      };
-      bar.appendChild(card);
-    });
+        card.onclick = () => {
+          activeTurnIndex = idx;
+          renderReplay();
+        };
+        bar.appendChild(card);
+      });
 
-    renderSelectedTurn(currentReport.timeline[activeTurnIndex]);
-    updateJsonModalContent();
-  }
+      renderSelectedTurn(currentReport.timeline[activeTurnIndex]);
+      updateJsonModalContent();
+    }
 
-  function renderSelectedTurn(step) {
-    if (!step) return;
+    function renderSelectedTurn(step) {
+      if (!step) return;
 
-    // ==========================================
-    // COLUMN 1: STATE BEFORE (V_t-1)
-    // ==========================================
-    const sBefore = step.state_before;
-    document.getElementById('col1Version').textContent = sBefore ? `V${sBefore.state_version}` : 'V0 (Bootstrap)';
-    const col1 = document.getElementById('col1Body');
-    if (!sBefore) {
-      col1.innerHTML = `<div class="card-unit" style="color: var(--text-dim); text-align: center;">Call Initialization · Baseline State</div>`;
-    } else {
-      col1.innerHTML = `
+      // ==========================================
+      // COLUMN 1: STATE BEFORE (V_t-1)
+      // ==========================================
+      const sBefore = step.state_before;
+      document.getElementById('col1Version').textContent = sBefore ? `V${sBefore.state_version}` : 'V0 (Bootstrap)';
+      const col1 = document.getElementById('col1Body');
+      if (!sBefore) {
+        col1.innerHTML = `<div class="card-unit" style="color: var(--text-dim); text-align: center;">Call Initialization · Baseline State</div>`;
+      } else {
+        col1.innerHTML = `
         <div class="card-unit">
           <div class="card-unit-title">Raw Behavioral Dimensions (V${sBefore.state_version})</div>
           ${renderDimensionBar('Trust', sBefore.dimensions.trust, '#3B82F6')}
@@ -844,7 +1009,7 @@
           ${(sBefore.objections || []).map(o => `
             <div style="margin-bottom:6px;font-size:12px;display:flex;justify-content:space-between;align-items:center;">
               <div>
-                <span class="mono" style="color:#60A5FA">${o.canonical_category}</span>
+                <span class="mono" style="color:#000000;font-weight:600;">${escapeHtml(o.canonical_category)}</span>
                 ${o.superseded_by_objection_id ? `<span style="font-size:10px;color:var(--text-dim);margin-left:4px;" title="Superseded by ${o.superseded_by_objection_id}">↳ superseded</span>` : ''}
               </div>
               <span class="badge ${getObjectionBadgeClass(o.lifecycle_state)}">${OBJECTION_DISPLAY_LABELS[o.lifecycle_state] || o.lifecycle_state} (x${o.recurrence_count})</span>
@@ -857,170 +1022,180 @@
           ${(sBefore.facts || []).length === 0 ? '<div style="color:var(--text-dim);font-size:12px">None recorded</div>' : ''}
           ${(sBefore.facts || []).map(f => `
             <div style="margin-bottom:6px;font-size:11.5px">
-              <strong style="color:var(--accent)">${f.fact_key}:</strong> ${f.fact_value}
+              <strong style="color:#000000;">${escapeHtml(f.fact_key)}:</strong> <span style="color:#000000;">${escapeHtml(f.fact_value)}</span>
             </div>
           `).join('')}
         </div>
       `;
-    }
+      }
 
-    // ==========================================
-    // COLUMN 2: NEW EVIDENCE (Turn t)
-    // ==========================================
-    const ev = step.evidence_bundle || {};
-    const mat = step.materiality || {};
-    document.getElementById('col2Speaker').innerHTML = step.speaker_id === 'salesperson' 
-      ? '<span class="badge badge-agent">Agent Turn</span>'
-      : '<span class="badge badge-prospect">Prospect Turn</span>';
+      // ==========================================
+      // COLUMN 2: NEW EVIDENCE (Turn t)
+      // ==========================================
+      const ev = step.evidence_bundle || {};
+      const mat = step.materiality || {};
+      document.getElementById('col2Speaker').innerHTML = step.speaker_id === 'salesperson'
+        ? '<span class="badge badge-agent">Agent Turn</span>'
+        : '<span class="badge badge-prospect">Prospect Turn</span>';
 
-    const col2 = document.getElementById('col2Body');
-    col2.innerHTML = `
+      const col2 = document.getElementById('col2Body');
+      col2.innerHTML = `
       <div class="card-unit">
         <div class="card-unit-title">Utterance (Timestamp: ${step.timestamp_ms}ms)</div>
-        <div style="font-size: 13.5px; line-height: 1.6; font-style: italic; color: #FFFFFF; margin-bottom: 8px;">
-          "${step.text}"
+        <div style="font-size: 13.5px; line-height: 1.6; font-style: italic; color: #000000; margin-bottom: 8px;">
+          "${escapeHtml(step.text)}"
         </div>
-        ${ev.salesperson_strategy_tag ? `<div style="font-size:11.5px"><strong style="color:#60A5FA">Strategy:</strong> <span class="mono">${ev.salesperson_strategy_tag}</span></div>` : ''}
-        ${ev.recurrence_id ? `<div style="font-size:11.5px"><strong style="color:#F59E0B">Recurrence ID:</strong> <span class="mono">${ev.recurrence_id}</span></div>` : ''}
+        ${ev.salesperson_strategy_tag ? `<div style="font-size:11.5px; margin-top:4px;"><strong style="color:#000000;">Strategy:</strong> <span class="mono" style="color:#000000;">${escapeHtml(ev.salesperson_strategy_tag)}</span></div>` : ''}
+        ${ev.recurrence_id ? `<div style="font-size:11.5px; margin-top:4px;"><strong style="color:#000000;">Recurrence ID:</strong> <span class="mono" style="color:#000000;">${escapeHtml(ev.recurrence_id)}</span></div>` : ''}
       </div>
 
       <div class="card-unit">
         <div class="card-unit-title">Semantic & Behavioral Features</div>
-        <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;font-size:12px;">
-          <div>Specificity: <strong class="mono">${ev.specificity_score !== undefined ? ev.specificity_score.toFixed(2) : '—'}</strong></div>
-          <div>Agreement: <strong class="mono">${ev.agreement_score !== undefined ? ev.agreement_score.toFixed(2) : '—'}</strong></div>
-          <div>Future Lang: <strong class="mono">${ev.future_language_score !== undefined ? ev.future_language_score.toFixed(2) : '—'}</strong></div>
-          <div>Boundary: <strong class="mono" style="${ev.boundary_score > 0.5 ? 'color:#EF4444' : ''}">${ev.boundary_score !== undefined ? ev.boundary_score.toFixed(2) : '0.00'}</strong></div>
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;font-size:12px;color:#000000;">
+          <div>Specificity: <strong class="mono" style="color:#000000;">${ev.specificity_score !== undefined ? ev.specificity_score.toFixed(2) : '—'}</strong></div>
+          <div>Agreement: <strong class="mono" style="color:#000000;">${ev.agreement_score !== undefined ? ev.agreement_score.toFixed(2) : '—'}</strong></div>
+          <div>Future Lang: <strong class="mono" style="color:#000000;">${ev.future_language_score !== undefined ? ev.future_language_score.toFixed(2) : '—'}</strong></div>
+          <div>Boundary: <strong class="mono" style="${ev.boundary_score > 0.5 ? 'color:#DC2626' : 'color:#000000'}">${ev.boundary_score !== undefined ? ev.boundary_score.toFixed(2) : '0.00'}</strong></div>
         </div>
       </div>
 
-      <div class="card-unit" style="border-left: 3px solid var(--purple);">
-        <div class="card-unit-title" style="color: #C084FC;">Materiality Filter (Gatekeeper)</div>
-        <div style="display:flex;align-items:center;gap:6px;margin-bottom:6px;">
-          Status: <strong>${mat.is_material ? 'MATERIAL' : 'NON-MATERIAL'}</strong>
+      <div class="card-unit" style="border: 1px solid #E9D5FF; border-left: 4px solid var(--purple); background: #FAF5FF;">
+        <div class="card-unit-title" style="color: #000000;">Materiality Filter (Gatekeeper)</div>
+        <div style="display:flex;align-items:center;gap:6px;margin-bottom:6px;color:#000000;">
+          Status: <strong style="color:#000000;">${mat.is_material ? 'MATERIAL' : 'NON-MATERIAL'}</strong>
           <span class="badge ${mat.is_material ? 'badge-material' : 'badge-muted'}">
             Targets: [${(mat.affected_targets || []).join(', ') || 'None'}]
           </span>
         </div>
-        <div style="font-size: 11.5px; color: var(--text-muted); line-height: 1.5;">
-          ${mat.reasoning || 'No explanation provided.'}
+        <div style="font-size: 11.5px; color: #000000; line-height: 1.5;">
+          ${escapeHtml(mat.reasoning || 'No explanation provided.')}
         </div>
       </div>
     `;
 
-    // ==========================================
-    // COLUMN 3: STATE CHANGES & AUDIT TRAIL
-    // ==========================================
-    const changes = step.state_changes || [];
-    document.getElementById('col3Count').textContent = `${changes.length} change(s)`;
-    const col3 = document.getElementById('col3Body');
-    if (changes.length === 0) {
-      col3.innerHTML = `
-        <div class="card-unit" style="text-align: center; color: var(--text-dim); padding: 32px 14px;">
-          <div style="font-size: 20px; margin-bottom: 8px;">🛡️</div>
-          <strong>No State Fields Mutated</strong>
-          <div style="font-size: 11.5px; margin-top: 6px;">
+      // ==========================================
+      // COLUMN 3: STATE CHANGES & AUDIT TRAIL
+      // ==========================================
+      const changes = step.state_changes || [];
+      document.getElementById('col3Count').textContent = `${changes.length} change(s)`;
+      const col3 = document.getElementById('col3Body');
+      if (changes.length === 0) {
+        col3.innerHTML = `
+        <div class="card-unit" style="text-align: center; color: #000000; padding: 32px 14px;">
+          <strong style="color: #000000;">No State Fields Mutated</strong>
+          <div style="font-size: 11.5px; margin-top: 6px; color: #334155;">
             Materiality filter or stable signals preserved dimension stability (Client Principle #3).
           </div>
         </div>
       `;
-    } else {
-      col3.innerHTML = changes.map(ch => `
+      } else {
+        col3.innerHTML = changes.map((ch, idx) => `
         <div class="diff-item">
-          <div class="diff-path">${ch.field_path}</div>
-          <div class="diff-line diff-old">- ${formatDiffVal(ch.old_value)}</div>
-          <div class="diff-line diff-new">+ ${formatDiffVal(ch.new_value)}</div>
+          <div class="diff-header">
+            <span class="diff-path">${escapeHtml(ch.field_path)}</span>
+            <span style="font-size:11px; color:#475569; font-weight:600;">Change #${idx + 1}</span>
+          </div>
+          <div class="diff-comparison">
+            <div class="diff-box diff-old">
+              <div class="diff-box-label"><span class="diff-symbol">-</span> PREVIOUS VALUE</div>
+              <pre class="diff-content mono">${formatDiffVal(ch.old_value)}</pre>
+            </div>
+            <div class="diff-box diff-new">
+              <div class="diff-box-label"><span class="diff-symbol">+</span> UPDATED VALUE</div>
+              <pre class="diff-content mono">${formatDiffVal(ch.new_value)}</pre>
+            </div>
+          </div>
           <div class="diff-reason">
-            <strong>Reason:</strong> ${ch.reason || 'State update triggered by upstream evidence.'}
+            <strong style="color:#000000;">Audit Rationale:</strong>
+            <div style="margin-top: 3px; color:#000000;">${escapeHtml(ch.reason || 'State update triggered by upstream evidence.')}</div>
           </div>
         </div>
       `).join('');
-    }
+      }
 
-    // ==========================================
-    // COLUMN 4: STATE AFTER (V_t)
-    // ==========================================
-    const sAfter = step.state_after || {};
-    document.getElementById('col4Version').textContent = `V${sAfter.state_version || 0}`;
-    const gate = sAfter.conversion_gate || {};
-    const push = sAfter.push_strength || {};
-    const convEvt = sAfter.conversion_event;
+      // ==========================================
+      // COLUMN 4: STATE AFTER (V_t)
+      // ==========================================
+      const sAfter = step.state_after || {};
+      document.getElementById('col4Version').textContent = `V${sAfter.state_version || 0}`;
+      const gate = sAfter.conversion_gate || {};
+      const push = sAfter.push_strength || {};
+      const convEvt = sAfter.conversion_event;
 
-    const col4 = document.getElementById('col4Body');
-    col4.innerHTML = `
+      const col4 = document.getElementById('col4Body');
+      col4.innerHTML = `
       <!-- Conversion Gate & Push Strength -->
       ${gate && gate.conditions && gate.conditions.length > 0 ? `
-        <div class="card-unit" style="border: 1px solid ${gate.is_open ? 'var(--prospect-border)' : 'var(--danger-border)'}; background: ${gate.is_open ? 'rgba(16, 185, 129, 0.05)' : 'rgba(239, 68, 68, 0.05)'};">
+        <div class="card-unit" style="border: 1px solid ${gate.is_open ? 'var(--prospect-border)' : 'var(--danger-border)'}; background: ${gate.is_open ? '#F0FDF4' : '#FEF2F2'};">
           <div class="card-unit-title">
-            <span>Meeting / Conversion Gate</span>
+            <span style="color:#000000; font-weight:700;">Meeting / Conversion Gate</span>
             <span class="badge ${gate.is_open ? 'badge-open' : 'badge-closed'}">${gate.is_open ? 'OPEN' : 'CLOSED'}</span>
           </div>
 
           <div style="margin: 10px 0;">
-            <div style="font-size: 11px; text-transform: uppercase; color: var(--text-dim); font-weight: 700;">Push Strength Recommendation</div>
+            <div style="font-size: 11px; text-transform: uppercase; color: #334155; font-weight: 700;">Push Strength Recommendation</div>
             <div style="display:flex;align-items:center;gap:8px;margin-top:4px;">
               <span class="badge badge-push" style="font-size:13px;padding:3px 10px;">${push.state || '—'}</span>
             </div>
-            <div style="font-size: 12px; margin-top: 6px; color: var(--text);">
-              <strong>Action:</strong> ${push.recommended_action || '—'}
+            <div style="font-size: 12px; margin-top: 6px; color: #000000;">
+              <strong style="color:#000000;">Action:</strong> <span style="color:#000000;">${escapeHtml(push.recommended_action || '—')}</span>
             </div>
-            <div style="font-size: 11.5px; color: var(--text-muted); margin-top: 4px;">
-              <strong>Rationale:</strong> ${push.rationale || '—'}
+            <div style="font-size: 11.5px; color: #1E293B; margin-top: 4px;">
+              <strong style="color:#000000;">Rationale:</strong> <span style="color:#1E293B;">${escapeHtml(push.rationale || '—')}</span>
             </div>
           </div>
 
           <!-- 7 Conditions List -->
           <div style="margin-top: 12px; border-top: 1px solid var(--border); padding-top: 8px;">
-            <div style="font-size: 11px; font-weight: 700; color: var(--text-dim); text-transform: uppercase; margin-bottom: 6px;">7 Simultaneous Conditions</div>
+            <div style="font-size: 11px; font-weight: 700; color: #000000; text-transform: uppercase; margin-bottom: 6px;">7 Simultaneous Conditions</div>
             ${(gate.conditions || []).map(c => `
               <div class="gate-condition-row">
-                <span class="cond-icon ${c.met ? 'pass' : 'fail'}">${c.met ? '✓' : '✗'}</span>
+                <span class="badge ${c.met ? 'badge-open' : 'badge-closed'}" style="font-size:10px;padding:2px 6px;margin-right:6px;min-width:46px;text-align:center;">${c.met ? 'MET' : 'FAILED'}</span>
                 <div style="flex:1">
                   <div style="display:flex;justify-content:space-between">
-                    <strong style="color:${c.met ? 'var(--text)' : '#F87171'}">${c.condition_name}</strong>
-                    <span class="mono" style="font-size:11px">${formatCondValue(c.score_or_value)}</span>
+                    <strong style="color:#000000;">${escapeHtml(c.condition_name)}</strong>
+                    <span class="mono" style="font-size:11px; color:#000000;">${formatCondValue(c.score_or_value)}</span>
                   </div>
-                  <div style="font-size:11px;color:var(--text-muted)">${c.reason}</div>
+                  <div style="font-size:11px; color:#334155;">${escapeHtml(c.reason)}</div>
                 </div>
               </div>
             `).join('')}
           </div>
         </div>
       ` : `
-        <div class="card-unit" style="border: 1px dashed var(--border); text-align: center; padding: 18px 12px; color: var(--text-dim);">
-          <div style="font-size: 16px; margin-bottom: 4px;">⏳</div>
-          <strong style="color: var(--text-muted); font-size: 12.5px;">Meeting / Conversion Gate: Pending</strong>
-          <div style="font-size: 11px; margin-top: 4px;">Gate evaluation initializes once the prospect engages with conversational evidence.</div>
+        <div class="card-unit" style="border: 1px dashed var(--border); text-align: center; padding: 18px 12px; color: #334155;">
+          <strong style="color: #000000; font-size: 12.5px;">Meeting / Conversion Gate: Pending</strong>
+          <div style="font-size: 11px; margin-top: 4px; color: #334155;">Gate evaluation initializes once the prospect engages with conversational evidence.</div>
         </div>
       `}
 
       <!-- Composite Readiness Breakdown (Sprint 5) -->
       ${sAfter.readiness ? `
-        <div class="card-unit" style="border-left: 3px solid #F59E0B;">
+        <div class="card-unit" style="border: 1px solid #FDE68A; border-left: 4px solid #D97706; background: #FFFFFF;">
           <div class="card-unit-title" style="display:flex; justify-content:space-between; align-items:center;">
-            <span style="color:#F59E0B;">Composite Readiness (Sprint 5)</span>
-            <span class="mono" style="font-size:14px; font-weight:700; color:#F59E0B;">${sAfter.readiness.readiness_score !== undefined ? sAfter.readiness.readiness_score.toFixed(1) : '—'}%</span>
+            <span style="color:#000000; font-weight:700;">Composite Readiness (Sprint 5)</span>
+            <span class="mono" style="font-size:14px; font-weight:700; color:#000000;">${sAfter.readiness.readiness_score !== undefined ? sAfter.readiness.readiness_score.toFixed(1) : '—'}%</span>
           </div>
           ${sAfter.readiness.active_blocker_caps && sAfter.readiness.active_blocker_caps.length > 0 ? `
-            <div style="background: rgba(239, 68, 68, 0.15); border: 1px solid rgba(239, 68, 68, 0.3); border-radius: 4px; padding: 6px 8px; margin: 8px 0; font-size: 11px;">
-              <div style="color: #F87171; font-weight: 600;">🔒 Blocker Cap Applied (Capped from ${sAfter.readiness.uncapped_score !== undefined ? sAfter.readiness.uncapped_score.toFixed(1) : '—'}%)</div>
-              <div style="color: var(--text-dim); margin-top: 2px;">${sAfter.readiness.capped_reason || sAfter.readiness.active_blocker_caps.join(', ')}</div>
+            <div style="background: #FEF2F2; border: 1px solid #FECACA; border-radius: 4px; padding: 6px 8px; margin: 8px 0; font-size: 11px;">
+              <div style="color: #DC2626; font-weight: 700;">Blocker Cap Applied (Capped from ${sAfter.readiness.uncapped_score !== undefined ? sAfter.readiness.uncapped_score.toFixed(1) : '—'}%)</div>
+              <div style="color: #000000; margin-top: 2px;">${escapeHtml(sAfter.readiness.capped_reason || sAfter.readiness.active_blocker_caps.join(', '))}</div>
             </div>
           ` : `
-            <div style="font-size: 11px; color: var(--text-dim); margin: 4px 0 8px 0;">No active blocker caps applied (Score = Uncapped).</div>
+            <div style="font-size: 11px; color: #334155; margin: 4px 0 8px 0;">No active blocker caps applied (Score = Uncapped).</div>
           `}
           <div style="display:grid; grid-template-columns: 1fr 1fr; gap: 6px; font-size: 11.5px; margin-top: 6px;">
-            <div style="background: var(--bg); padding: 5px 8px; border-radius: 4px; border: 1px solid var(--border);">
-              <span style="color:var(--text-dim);">Emotional:</span> <strong class="mono" style="float:right;">${sAfter.readiness.emotional_readiness !== undefined ? sAfter.readiness.emotional_readiness.toFixed(0) : '—'}%</strong>
+            <div style="background: #F8FAFC; padding: 5px 8px; border-radius: 4px; border: 1px solid var(--border);">
+              <span style="color:#000000;">Emotional:</span> <strong class="mono" style="float:right; color:#000000;">${sAfter.readiness.emotional_readiness !== undefined ? sAfter.readiness.emotional_readiness.toFixed(0) : '—'}%</strong>
             </div>
-            <div style="background: var(--bg); padding: 5px 8px; border-radius: 4px; border: 1px solid var(--border);">
-              <span style="color:var(--text-dim);">Logical:</span> <strong class="mono" style="float:right;">${sAfter.readiness.logical_readiness !== undefined ? sAfter.readiness.logical_readiness.toFixed(0) : '—'}%</strong>
+            <div style="background: #F8FAFC; padding: 5px 8px; border-radius: 4px; border: 1px solid var(--border);">
+              <span style="color:#000000;">Logical:</span> <strong class="mono" style="float:right; color:#000000;">${sAfter.readiness.logical_readiness !== undefined ? sAfter.readiness.logical_readiness.toFixed(0) : '—'}%</strong>
             </div>
-            <div style="background: var(--bg); padding: 5px 8px; border-radius: 4px; border: 1px solid var(--border);">
-              <span style="color:var(--text-dim);">Logistical:</span> <strong class="mono" style="float:right;">${sAfter.readiness.logistical_readiness !== undefined ? sAfter.readiness.logistical_readiness.toFixed(0) : '—'}%</strong>
+            <div style="background: #F8FAFC; padding: 5px 8px; border-radius: 4px; border: 1px solid var(--border);">
+              <span style="color:#000000;">Logistical:</span> <strong class="mono" style="float:right; color:#000000;">${sAfter.readiness.logistical_readiness !== undefined ? sAfter.readiness.logistical_readiness.toFixed(0) : '—'}%</strong>
             </div>
-            <div style="background: var(--bg); padding: 5px 8px; border-radius: 4px; border: 1px solid var(--border);">
-              <span style="color:var(--text-dim);">Decision:</span> <strong class="mono" style="float:right;">${sAfter.readiness.decision_readiness !== undefined ? sAfter.readiness.decision_readiness.toFixed(0) : '—'}%</strong>
+            <div style="background: #F8FAFC; padding: 5px 8px; border-radius: 4px; border: 1px solid var(--border);">
+              <span style="color:#000000;">Decision:</span> <strong class="mono" style="float:right; color:#000000;">${sAfter.readiness.decision_readiness !== undefined ? sAfter.readiness.decision_readiness.toFixed(0) : '—'}%</strong>
             </div>
           </div>
         </div>
@@ -1028,17 +1203,17 @@
 
       <!-- Conversion Event Card if present -->
       ${convEvt ? `
-        <div class="card-unit" style="border: 1px solid var(--prospect-border);">
+        <div class="card-unit" style="border: 1px solid var(--prospect-border); background: #FFFFFF;">
           <div class="card-unit-title">
-            <span>Conversion Event</span>
+            <span style="color:#000000; font-weight:700;">Conversion Event</span>
             <span class="badge badge-open">${convEvt.status}</span>
           </div>
-          <div style="font-size:12px;line-height:1.6">
-            <div>Type: <strong class="mono">${convEvt.conversion_type}</strong></div>
-            <div>Time/Slot: <strong>${convEvt.start_at || 'Unscheduled'}</strong></div>
-            <div>Format: <strong>${convEvt.location_or_format || 'In-Person'}</strong></div>
-            <div>Confirmation Conf: <strong class="mono">${(convEvt.confirmation_confidence * 100).toFixed(0)}%</strong></div>
-            <div>Followup is Conversion: <strong>${convEvt.followup_is_conversion}</strong></div>
+          <div style="font-size:12px;line-height:1.6;color:#000000;">
+            <div>Type: <strong class="mono" style="color:#000000;">${escapeHtml(convEvt.conversion_type)}</strong></div>
+            <div>Time/Slot: <strong style="color:#000000;">${escapeHtml(convEvt.start_at || 'Unscheduled')}</strong></div>
+            <div>Format: <strong style="color:#000000;">${escapeHtml(convEvt.location_or_format || 'In-Person')}</strong></div>
+            <div>Confirmation Conf: <strong class="mono" style="color:#000000;">${(convEvt.confirmation_confidence * 100).toFixed(0)}%</strong></div>
+            <div>Followup is Conversion: <strong style="color:#000000;">${convEvt.followup_is_conversion}</strong></div>
           </div>
         </div>
       ` : ''}
@@ -1050,7 +1225,7 @@
         ${(sAfter.objections || []).map(o => `
           <div style="margin-bottom:6px;font-size:12px;display:flex;justify-content:space-between;align-items:center;">
             <div>
-              <span class="mono" style="color:#60A5FA">${o.canonical_category}</span>
+              <span class="mono" style="color:#000000;font-weight:600;">${escapeHtml(o.canonical_category)}</span>
               ${o.superseded_by_objection_id ? `<span style="font-size:10px;color:var(--text-dim);margin-left:4px;" title="Superseded by ${o.superseded_by_objection_id}">↳ superseded</span>` : ''}
             </div>
             <span class="badge ${getObjectionBadgeClass(o.lifecycle_state)}">${OBJECTION_DISPLAY_LABELS[o.lifecycle_state] || o.lifecycle_state} (x${o.recurrence_count})</span>
@@ -1064,7 +1239,7 @@
         ${(sAfter.facts || []).length === 0 ? '<div style="color:var(--text-dim);font-size:12px">None recorded</div>' : ''}
         ${(sAfter.facts || []).map(f => `
           <div style="margin-bottom:6px;font-size:11.5px">
-            <strong style="color:var(--accent)">${f.fact_key}:</strong> ${f.fact_value}
+            <strong style="color:#000000;">${escapeHtml(f.fact_key)}:</strong> <span style="color:#000000;">${escapeHtml(f.fact_value)}</span>
           </div>
         `).join('')}
       </div>
@@ -1080,12 +1255,12 @@
         ${renderDimensionBar('Raw Readiness', sAfter.dimensions.readiness, '#F59E0B', 'Uncapped Behavioral Signal Engine prior (0.00–1.00)')}
       </div>
     `;
-  }
+    }
 
-  function renderDimensionBar(label, val, color, tooltip = '') {
-    const v = val !== undefined && val !== null ? val : 0.5;
-    const pct = Math.max(0, Math.min(100, Math.round(v * 100)));
-    return `
+    function renderDimensionBar(label, val, color, tooltip = '') {
+      const v = val !== undefined && val !== null ? val : 0.5;
+      const pct = Math.max(0, Math.min(100, Math.round(v * 100)));
+      return `
       <div class="dim-row" ${tooltip ? `title="${tooltip}"` : ''}>
         <span class="dim-label">${label}</span>
         <div class="dim-bar-wrapper">
@@ -1094,151 +1269,152 @@
         <span class="dim-val">${v.toFixed(2)}</span>
       </div>
     `;
-  }
-
-  function formatDiffVal(val) {
-    if (val === null || val === undefined) return 'null';
-    if (typeof val === 'object') {
-      return JSON.stringify(val);
     }
-    return String(val);
-  }
 
-  function formatCondValue(val) {
-    if (val === null || val === undefined) return '';
-    if (typeof val === 'object') {
-      if (val.trust !== undefined && val.tension !== undefined) {
-        return `Tr: ${Number(val.trust).toFixed(2)}, Ten: ${Number(val.tension).toFixed(2)}`;
+    function escapeHtml(str) {
+      if (str === null || str === undefined) return '';
+      return String(str)
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;')
+        .replace(/'/g, '&#039;');
+    }
+
+    function formatDiffVal(val) {
+      if (val === null || val === undefined) return '<span style="color:#64748B;font-style:italic;">null</span>';
+      if (typeof val === 'object') {
+        return escapeHtml(JSON.stringify(val, null, 2));
       }
-      return JSON.stringify(val);
-    }
-    if (typeof val === 'number') {
-      return Number.isInteger(val) ? val.toString() : val.toFixed(2);
-    }
-    return String(val);
-  }
-
-  // JSON Inspector Modal Logic
-  function updateJsonModalContent() {
-    if (!currentReport || !currentReport.timeline || !currentReport.timeline[activeTurnIndex]) return;
-    const step = currentReport.timeline[activeTurnIndex];
-    document.getElementById('jsonModalTitle').textContent = `Inspect Turn ${step.turn_id} (${step.speaker_id}) · State JSON`;
-
-    let dataToDisplay = null;
-    if (activeJsonTab === 'after') {
-      dataToDisplay = step.state_after;
-    } else if (activeJsonTab === 'before') {
-      dataToDisplay = step.state_before;
-    } else if (activeJsonTab === 'changes') {
-      dataToDisplay = {
-        materiality: step.materiality,
-        state_changes: step.state_changes,
-      };
-    } else if (activeJsonTab === 'evidence') {
-      dataToDisplay = step.evidence_bundle;
+      return escapeHtml(String(val));
     }
 
-    document.getElementById('rawJsonViewer').textContent = JSON.stringify(dataToDisplay, null, 2);
-  }
-
-  function switchJsonTab(tab) {
-    activeJsonTab = tab;
-    ['after', 'before', 'changes', 'evidence'].forEach(t => {
-      const btn = document.getElementById('tabJson' + t.charAt(0).toUpperCase() + t.slice(1));
-      if (btn) {
-        if (t === tab) btn.classList.add('active');
-        else btn.classList.remove('active');
+    function formatCondValue(val) {
+      if (val === null || val === undefined) return '';
+      if (typeof val === 'object') {
+        if (val.trust !== undefined && val.tension !== undefined) {
+          return `Tr: ${Number(val.trust).toFixed(2)}, Ten: ${Number(val.tension).toFixed(2)}`;
+        }
+        return JSON.stringify(val);
       }
-    });
-    updateJsonModalContent();
-  }
-
-  function copyCurrentJson() {
-    const text = document.getElementById('rawJsonViewer').textContent;
-    navigator.clipboard.writeText(text).then(() => {
-      showCopyToast('JSON copied to clipboard!');
-    });
-  }
-
-  // Event Listeners
-  document.getElementById('reportSearchInput').oninput = (e) => {
-    populateReportSelect(e.target.value);
-  };
-
-  document.getElementById('btnLoadReport').onclick = () => {
-    const select = document.getElementById('reportSelect');
-    if (select.value) {
-      activeTurnIndex = 0;
-      fetchAndRenderReport(select.value);
+      if (typeof val === 'number') {
+        return Number.isInteger(val) ? val.toString() : val.toFixed(2);
+      }
+      return String(val);
     }
-  };
 
-  document.getElementById('btnShareLink').onclick = () => {
-    if (!currentReport) return;
-    const url = new URL(window.location);
-    url.searchParams.set('call_sid', currentReport.call_sid);
-    url.searchParams.set('turn', activeTurnIndex + 1);
-    navigator.clipboard.writeText(url.href).then(() => {
-      showCopyToast('Incident URL copied!');
-    });
-  };
+    // JSON Inspector Modal Logic
+    function updateJsonModalContent() {
+      if (!currentReport || !currentReport.timeline || !currentReport.timeline[activeTurnIndex]) return;
+      const step = currentReport.timeline[activeTurnIndex];
+      document.getElementById('jsonModalTitle').textContent = `Inspect Turn ${step.turn_id} (${step.speaker_id}) · State JSON`;
 
-  document.getElementById('btnOpenJsonModal').onclick = () => {
-    updateJsonModalContent();
-    document.getElementById('jsonModal').classList.add('open');
-  };
+      let dataToDisplay = null;
+      if (activeJsonTab === 'after') {
+        dataToDisplay = step.state_after;
+      } else if (activeJsonTab === 'before') {
+        dataToDisplay = step.state_before;
+      } else if (activeJsonTab === 'changes') {
+        dataToDisplay = {
+          materiality: step.materiality,
+          state_changes: step.state_changes,
+        };
+      } else if (activeJsonTab === 'evidence') {
+        dataToDisplay = step.evidence_bundle;
+      }
 
-  document.getElementById('btnOpenSimModal').onclick = () => {
-    document.getElementById('simModal').classList.add('open');
-  };
+      document.getElementById('rawJsonViewer').textContent = JSON.stringify(dataToDisplay, null, 2);
+    }
 
-  document.getElementById('btnRunSimScript').onclick = async () => {
-    const raw = document.getElementById('simScriptText').value.trim();
-    if (!raw) return;
-    try {
-      const turns = JSON.parse(raw);
-      const res = await fetch('/api/conversation-state/replay-dialogue', {
-        method: 'POST',
-        headers: {'Content-Type': 'application/json'},
-        body: JSON.stringify({call_sid: 'sim_' + Date.now().toString(36), turns: turns})
+    function switchJsonTab(tab) {
+      activeJsonTab = tab;
+      ['after', 'before', 'changes', 'evidence'].forEach(t => {
+        const btn = document.getElementById('tabJson' + t.charAt(0).toUpperCase() + t.slice(1));
+        if (btn) {
+          if (t === tab) btn.classList.add('active');
+          else btn.classList.remove('active');
+        }
       });
-      if (!res.ok) {
-        alert('Simulation failed: ' + (await res.text()));
-        return;
-      }
-      currentReport = await res.json();
-      document.getElementById('simModal').classList.remove('open');
-      activeTurnIndex = 0;
-      renderReplay();
-      loadReportList();
-    } catch (e) {
-      alert('Invalid JSON dialogue: ' + e);
+      updateJsonModalContent();
     }
-  };
 
-  // Keyboard Shortcuts (Arrow Left/Right to scrub turns, Escape to close modals)
-  window.addEventListener('keydown', (e) => {
-    if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA') return;
-    if (!currentReport || !currentReport.timeline || currentReport.timeline.length === 0) return;
-    if (e.key === 'ArrowLeft') {
-      if (activeTurnIndex > 0) {
-        activeTurnIndex--;
-        renderReplay();
-      }
-    } else if (e.key === 'ArrowRight') {
-      if (activeTurnIndex < currentReport.timeline.length - 1) {
-        activeTurnIndex++;
-        renderReplay();
-      }
-    } else if (e.key === 'Escape') {
-      document.getElementById('simModal').classList.remove('open');
-      document.getElementById('jsonModal').classList.remove('open');
+    function copyCurrentJson() {
+      const text = document.getElementById('rawJsonViewer').textContent;
+      navigator.clipboard.writeText(text).then(() => {
+        showCopyToast('JSON copied to clipboard!');
+      });
     }
-  });
 
-  // Init
-  loadReportList();
-</script>
+    // Event Listeners
+    document.getElementById('reportSearchInput').oninput = (e) => {
+      populateReportSelect(e.target.value);
+    };
+
+    document.getElementById('btnLoadReport').onclick = () => {
+      const select = document.getElementById('reportSelect');
+      if (select.value) {
+        activeTurnIndex = 0;
+        fetchAndRenderReport(select.value);
+      }
+    };
+
+    document.getElementById('btnOpenJsonModal').onclick = () => {
+      updateJsonModalContent();
+      document.getElementById('jsonModal').classList.add('open');
+    };
+
+    document.getElementById('btnOpenSimModal').onclick = () => {
+      document.getElementById('simModal').classList.add('open');
+    };
+
+    document.getElementById('btnRunSimScript').onclick = async () => {
+      const raw = document.getElementById('simScriptText').value.trim();
+      if (!raw) return;
+      try {
+        const turns = JSON.parse(raw);
+        const res = await fetch('/api/conversation-state/replay-dialogue', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ call_sid: 'sim_' + Date.now().toString(36), turns: turns })
+        });
+        if (!res.ok) {
+          alert('Simulation failed: ' + (await res.text()));
+          return;
+        }
+        currentReport = await res.json();
+        document.getElementById('simModal').classList.remove('open');
+        activeTurnIndex = 0;
+        renderReplay();
+        loadReportList();
+      } catch (e) {
+        alert('Invalid JSON dialogue: ' + e);
+      }
+    };
+
+    // Keyboard Shortcuts (Arrow Left/Right to scrub turns, Escape to close modals)
+    window.addEventListener('keydown', (e) => {
+      if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA') return;
+      if (!currentReport || !currentReport.timeline || currentReport.timeline.length === 0) return;
+      if (e.key === 'ArrowLeft') {
+        if (activeTurnIndex > 0) {
+          activeTurnIndex--;
+          renderReplay();
+        }
+      } else if (e.key === 'ArrowRight') {
+        if (activeTurnIndex < currentReport.timeline.length - 1) {
+          activeTurnIndex++;
+          renderReplay();
+        }
+      } else if (e.key === 'Escape') {
+        document.getElementById('simModal').classList.remove('open');
+        document.getElementById('jsonModal').classList.remove('open');
+      }
+    });
+
+    // Init
+    loadReportList();
+  </script>
 
 </body>
+
 </html>
