@@ -392,7 +392,15 @@ class MeetingConversionGateEngine:
         has_logistical_blocker = bool(
             current_state.readiness and ("logistical_deficit" in current_state.readiness.active_blocker_caps)
         )
-        has_contact_restriction = comp.contact_preference in ("channel_restriction", "timing_restriction")
+        # Check for hard channel prohibitions vs soft preferences (Issue #7)
+        has_hard_channel_restriction = any(
+            p.boundary_strength == "hard_restriction" and not p.allowed
+            for p in getattr(comp, "contact_preferences", [])
+        )
+        has_contact_restriction = (
+            has_hard_channel_restriction
+            or comp.contact_preference in ("channel_restriction", "timing_restriction")
+        )
         has_access_constraints = bool(current_state.decision_structure.access_constraints)
 
         log_ok = (

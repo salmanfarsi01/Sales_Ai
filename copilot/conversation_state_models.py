@@ -214,12 +214,30 @@ class DimensionScores(BaseModel):
     pacing_confidence: float = Field(0.7, ge=0.0, le=1.0)
 
 
+class ContactPreference(BaseModel):
+    """Client Feedback Issue #7: Structured soft or channel-specific contact preference."""
+    channel: Literal["sms", "call", "email"]
+    allowed: bool = True
+    cadence: Optional[Literal["reduced", "specific_times", "no_preference"]] = None
+    prohibited_behavior: Optional[str] = None  # e.g. "daily texting"
+    boundary_strength: Literal["preference", "hard_restriction"] = "preference"
+    source_turn_id: int
+    confidence: float = 1.0
+
+
 class ContactComplianceState(BaseModel):
+    """Client Feedback Issue #7: Contact compliance separating hard legal/stop boundaries from soft preferences."""
     hard_boundary_active: bool = False
     hard_boundary_reason: Optional[str] = None
+    hard_boundary_channels: List[str] = Field(default_factory=list)
+    contact_preferences: List[ContactPreference] = Field(default_factory=list)
+    # Backward compatibility scalar fields
     contact_preference: Literal["none", "reduced_frequency", "channel_restriction", "timing_restriction"] = "none"
     contact_preference_details: Optional[str] = None
     contact_preference_confidence: float = Field(0.0, ge=0.0, le=1.0)
+
+
+ContactCompliance = ContactComplianceState
 
 
 class StateChangeRecord(BaseModel):

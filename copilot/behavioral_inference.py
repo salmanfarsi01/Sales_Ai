@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import time
 import uuid
+import re
 from abc import ABC, abstractmethod
 from typing import Any, Dict, List, Literal, Optional
 
@@ -95,12 +96,13 @@ class InferenceScoringConfig(BaseModel):
     engagement_steady_inquiry_boost: float = Field(0.10, description="Boost for steady inquiry rate (question rate >= 0.5/min)")
     engagement_specificity_boost: float = Field(0.15, description="Boost for high detail/fact specificity (score >= 0.50)")
 
-    # Trust calibration weights
-    trust_base_score: float = Field(0.60, description="Professional rapport baseline assuming provisional good faith")
+    # Trust calibration weights (Decoupled: pattern-over-time rather than isolated agreement)
+    trust_base_score: float = Field(0.50, description="Professional rapport baseline assuming provisional good faith")
     trust_boundary_penalty: float = Field(0.45, description="Heavy trust penalty when stop-contact or representation boundary is hit")
-    trust_positive_echo_boost: float = Field(0.20, description="Trust reinforcement when prospect adopts rep's strategic terminology")
+    trust_positive_echo_boost: float = Field(0.15, description="Trust reinforcement when prospect adopts rep's strategic terminology")
     trust_unresolved_objection_penalty: float = Field(0.20, description="Erosion of trust when core objection recurs unresolved")
-    trust_substantive_agreement_boost: float = Field(0.15, description="Trust boost from substantive agreement on value propositions")
+    trust_substantive_agreement_boost: float = Field(0.0, description="Decoupled: Agreement content does not directly boost trust")
+    trust_sensitive_disclosure_boost: float = Field(0.15, description="Multi-turn trust boost when prospect discloses sensitive constraints or vulnerability")
     trust_sustained_disclosure_boost: float = Field(0.10, description="Boost for sustained disclosure depth (turn length >= 12 words)")
     trust_constrained_response_penalty: float = Field(0.10, description="Penalty for constrained monosyllabic responses (turn length <= 3 words)")
 
@@ -349,7 +351,7 @@ class DownstreamInferenceEngine:
             drivers=eng_drivers,
         )
 
-        # 4. Trust Calculation (Primary: last_60_90s & full_call)
+        # 4. Trust Calculation (Primary: last_60_90s & full_call - Trend over time)
         trust_evidence = [w_60s, w_full]
         trust_conf = min(w.evidence_confidence for w in trust_evidence)
         trust_drivers: List[str] = []
@@ -370,17 +372,35 @@ class DownstreamInferenceEngine:
             elif sem_trust.recurrence_type in ("same_objection_repeated", "concern_after_failed_reframe"):
                 trust_score -= self.config.trust_unresolved_objection_penalty
                 trust_drivers.append(f"Unresolved objection recurrence ({sem_trust.recurrence_type})")
-            if sem_trust.agreement_score >= 0.70:
-                trust_score += self.config.trust_substantive_agreement_boost
-                trust_drivers.append("Substantive alignment on strategic points")
 
+        # Multi-turn sustained disclosure depth across recent dialogue
         t_len = w_60s.timing_features.turn_length_words
-        if t_len >= 12:
+        if t_len >= 12 and len(frames) >= 2:
             trust_score += self.config.trust_sustained_disclosure_boost
-            trust_drivers.append(f"Sustained disclosure depth ({t_len} words/turn)")
-        elif t_len <= 3:
+            trust_drivers.append(f"Sustained multi-turn disclosure depth ({t_len} words/turn)")
+        elif t_len <= 3 and len(frames) >= 2:
             trust_score -= self.config.trust_constrained_response_penalty
             trust_drivers.append(f"Constrained monosyllabic responses ({t_len} words/turn)")
+
+        # Multi-turn sensitive constraint disclosure:
+        # Looks for vulnerable disclosures across call history:
+        # - Family / spouse decision structure
+        # - Financial constraints / mortgage payoff / net proceeds
+        # - Prior agent failures / bad past experiences
+        sensitive_markers = [
+            r"\b(?:(?:my\s+)?(?:wife|husband|spouse|partner|family)|we)\b.*?\b(?:decide|decision|consult|check|talk|speak|sign|approve|part\s+of|loop|involved|input|agree|permission|handles?|clears?|proceed)\b",
+            r"\b(?:decide|decision|consult|check|talk|speak|sign|approve|discuss)\b.*?\b(?:(?:my\s+)?(?:husband|wife|spouse|partner|family))\b",
+            r"\b(?:mortgage|net|payoff|afford|budget|debt|financial)\b",
+            r"\b(?:last\s+(?:agent|time)|prior\s+agent|what\s+we\s+got|got\s+burned)\b",
+        ]
+        all_text_snippets = []
+        for w in (w_curr, w_10s, w_30s, w_60s, w_full):
+            if w and hasattr(w.timing_features, "last_phrase") and w.timing_features.last_phrase:
+                all_text_snippets.append(w.timing_features.last_phrase.lower())
+        combined_history_text = " ".join(all_text_snippets)
+        if any(re.search(p, combined_history_text) for p in sensitive_markers) and len(frames) >= 2:
+            trust_score += self.config.trust_sensitive_disclosure_boost
+            trust_drivers.append("Client disclosed sensitive constraint or private decision structure")
 
         if trust_conf < 0.95:
             lim_t = min(trust_evidence, key=lambda w: w.evidence_confidence)

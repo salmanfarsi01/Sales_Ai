@@ -12,6 +12,7 @@ from .conversation_state_models import (
     DecisionStakeholder,
     DimensionScores,
     ContactComplianceState,
+    ContactPreference,
     PushStrengthRecommendation,
     StateChangeRecord,
     ConversionEventStatus,
@@ -20,6 +21,7 @@ from .conversation_state_models import (
     DealDispositionRecord,
     ObjectionLifecycleState,
 )
+from .behavioral_semantic import extract_structured_contact_preference, HARD_BOUNDARY_PATTERNS
 from .conversation_facts import PersistentFactsManager
 from .conversation_objections import ObjectionLifecycleEngine, DECISION_TO_STAY_PATTERNS
 from .conversation_supersession import TruthSupersessionDetector
@@ -170,14 +172,56 @@ class ConversationStateManager:
 
         # 2. Update Contact/Compliance State (Gated by Materiality)
         if "contact_compliance" in materiality.affected_targets:
-            hard_boundary = bundle.boundary_score >= 0.85
-            boundary_reason = "Triggered by upstream compliance boundary detection" if hard_boundary else None
+            text_lower = bundle.utterance_text.lower().strip()
+            is_hard_turn = (
+                bundle.boundary_score >= 0.85
+                or bundle.recurrence_type == "boundary_repeated"
+                or any(re.search(p, text_lower) for p in HARD_BOUNDARY_PATTERNS)
+            )
+            hard_active = self.current_state.contact_compliance.hard_boundary_active or is_hard_turn
+            hard_reason = self.current_state.contact_compliance.hard_boundary_reason
+            if is_hard_turn:
+                hard_reason = f"Triggered by upstream compliance boundary detection (score={bundle.boundary_score:.2f})"
+
+            # Track prohibited channels
+            channels = list(self.current_state.contact_compliance.hard_boundary_channels)
+            if is_hard_turn:
+                if any(w in text_lower for w in ["call", "calling", "phone", "number"]):
+                    if "call" not in channels:
+                        channels.append("call")
+                if any(w in text_lower for w in ["text", "sms", "message"]):
+                    if "sms" not in channels:
+                        channels.append("sms")
+                if any(w in text_lower for w in ["email"]):
+                    if "email" not in channels:
+                        channels.append("email")
+                if not channels or any(w in text_lower for w in ["contact", "reach out", "harass", "leave me alone", "dnc", "list"]):
+                    for ch in ["call", "sms", "email"]:
+                        if ch not in channels:
+                            channels.append(ch)
+
+            # Update contact preferences list (distinct from hard boundary!)
+            prefs = list(self.current_state.contact_compliance.contact_preferences)
+            new_pref = extract_structured_contact_preference(
+                text=bundle.utterance_text,
+                source_turn_id=bundle.turn_id,
+                confidence=bundle.contact_preference_confidence or 0.90,
+            )
+            if new_pref:
+                existing_idx = next((i for i, p in enumerate(prefs) if p.channel == new_pref.channel), None)
+                if existing_idx is not None:
+                    prefs[existing_idx] = new_pref
+                else:
+                    prefs.append(new_pref)
+
             new_compliance = ContactComplianceState(
-                hard_boundary_active=hard_boundary,
-                hard_boundary_reason=boundary_reason,
-                contact_preference=bundle.contact_preference,
-                contact_preference_details=bundle.contact_preference_details,
-                contact_preference_confidence=bundle.contact_preference_confidence,
+                hard_boundary_active=hard_active,
+                hard_boundary_reason=hard_reason,
+                hard_boundary_channels=channels,
+                contact_preferences=prefs,
+                contact_preference=bundle.contact_preference if bundle.contact_preference != "none" else self.current_state.contact_compliance.contact_preference,
+                contact_preference_details=bundle.contact_preference_details or self.current_state.contact_compliance.contact_preference_details,
+                contact_preference_confidence=bundle.contact_preference_confidence or self.current_state.contact_compliance.contact_preference_confidence,
             )
             if new_compliance != self.current_state.contact_compliance:
                 next_version += 1
@@ -190,7 +234,7 @@ class ConversationStateManager:
                         new_value=new_compliance.model_dump(),
                         triggering_turn_id=bundle.turn_id,
                         evidence_ids=bundle.contributing_evidence_ids,
-                        reason=f"Updated compliance state (boundary={hard_boundary}, pref={bundle.contact_preference}).",
+                        reason=f"Updated compliance state (hard_boundary={hard_active}, pref={bundle.contact_preference}, prefs_count={len(prefs)}).",
                         timestamp_ms=bundle.timestamp_ms,
                     )
                 )

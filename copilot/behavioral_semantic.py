@@ -104,6 +104,9 @@ STOP_CONTACT_PATTERNS = [
     r"\bdnc\s+list\b",
 ]
 
+# Client Feedback Issue #7: Direct aliases for shared taxonomy
+HARD_BOUNDARY_PATTERNS = STOP_CONTACT_PATTERNS
+
 # Separate pattern dictionary for soft communication cadence and channel preferences.
 # Distinct from STOP_CONTACT_PATTERNS to guarantee soft preferences never trigger hard compliance overrides.
 SOFT_CONTACT_PREFERENCE_PATTERNS: Dict[str, List[str]] = {
@@ -116,7 +119,7 @@ SOFT_CONTACT_PREFERENCE_PATTERNS: Dict[str, List[str]] = {
         r"\b(?:that['’]?s|it['’]?s)\s+too\s+many\s+(calls|texts|messages)\b",
         r"\btoo\s+many\s+(calls|texts|messages)\s+(?:from\s+you|already)\b",
         r"\b(?:call|calling|text|texting|reach\s+out|reaching\s+out|message|messaging|contact)\s+(?:me\s+|us\s+)?(?:just\s+)?not\s+every\s+day\b",
-        r"\b(?:call|calling|text|texting|reach\s+out|contact|checking\s+in|updates?)\s+(?:me\s+|us\s+)?once\s+a\s+(week|month)\s+is\s+(enough|fine|plenty)\b",
+        r"\b(?:call|calling|text|texting|reach\s+out|contact|checking\s+in|updates?)\s+(?:me\s+|us\s+)?(?:occasionally|once\s+in\s+a\s+while|once\s+a\s+(?:week|month))\s+is\s+(?:enough|fine|okay|plenty)\b",
         r"\bonce\s+a\s+(week|month)\s+is\s+(enough|fine|plenty)\s+(?:for\s+(?:calls|texts|updates|me)|to\s+(?:call|text|check\s+in|touch\s+base))\b",
         r"\bno\s+need\s+to\s+(call|text|message|reach\s+out)\s+(?:me\s+|us\s+)?(every\s+day|so\s+often|daily)\b",
     ],
@@ -243,6 +246,62 @@ STOPWORDS = {
     "much", "more", "most", "some", "any", "all", "very", "even", "actually", "mean",
     "think", "know", "something", "someone", "everything", "anything", "thing", "things",
 }
+
+SOFT_PREFERENCE_PATTERNS = SOFT_CONTACT_PREFERENCE_PATTERNS
+
+
+def extract_structured_contact_preference(
+    text: str,
+    source_turn_id: int = 0,
+    confidence: float = 0.90,
+) -> Optional[Any]:
+    """Client Feedback Issue #7: Extracts a structured ContactPreference object from prospect utterance."""
+    from .conversation_state_models import ContactPreference
+
+    cleaned = text.strip().lower()
+
+    # 1. Determine channel
+    channel: Literal["sms", "call", "email"] = "call"
+    if any(w in cleaned for w in ["text", "texting", "sms", "message", "messaging"]):
+        channel = "sms"
+    elif any(w in cleaned for w in ["email"]):
+        channel = "email"
+    elif any(w in cleaned for w in ["call", "calling", "phone"]):
+        channel = "call"
+
+    # 2. Determine cadence and prohibited behavior
+    cadence: Optional[Literal["reduced", "specific_times", "no_preference"]] = "reduced"
+    prohibited_behavior: Optional[str] = None
+    allowed = True
+    strength: Literal["preference", "hard_restriction"] = "preference"
+
+    # Check reduced frequency patterns
+    if any(re.search(p, cleaned) for p in SOFT_CONTACT_PREFERENCE_PATTERNS["reduced_frequency"]):
+        cadence = "reduced"
+        prohibited_behavior = "daily texting" if channel == "sms" else "daily calling"
+    elif any(re.search(p, cleaned) for p in SOFT_CONTACT_PREFERENCE_PATTERNS["channel_restriction"]):
+        cadence = "no_preference"
+        if "email" in cleaned and ("instead" in cleaned or "rather" in cleaned or "prefer" in cleaned):
+            channel = "sms" if "text" in cleaned else "call"
+            allowed = False
+            prohibited_behavior = f"{channel} contact without email"
+        else:
+            prohibited_behavior = f"unsolicited {channel} contact"
+    elif any(re.search(p, cleaned) for p in SOFT_CONTACT_PREFERENCE_PATTERNS["timing_restriction"]):
+        cadence = "specific_times"
+        prohibited_behavior = "contact outside specified hours"
+    else:
+        return None
+
+    return ContactPreference(
+        channel=channel,
+        allowed=allowed,
+        cadence=cadence,
+        prohibited_behavior=prohibited_behavior,
+        boundary_strength=strength,
+        source_turn_id=source_turn_id,
+        confidence=confidence,
+    )
 
 
 class SemanticFeatureEngine:

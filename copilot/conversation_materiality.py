@@ -10,6 +10,7 @@ from pydantic import BaseModel, Field
 from .conversation_state_contract import BehavioralSignalInputBundle
 from .conversation_state_models import ConversationStateSnapshot
 from .conversation_objections import CANONICAL_OBJECTION_PATTERNS, DECISION_TO_STAY_PATTERNS
+from .behavioral_semantic import HARD_BOUNDARY_PATTERNS, SOFT_PREFERENCE_PATTERNS
 
 LOGGER = logging.getLogger("copilot.conversation_materiality")
 
@@ -265,7 +266,7 @@ class MaterialityFilter:
             r"\bunsubscribe\b",
             r"\blose\s+my\s+number\b",
         ]
-        has_boundary_words = any(re.search(p, text_lower) for p in boundary_markers)
+        has_boundary_words = any(re.search(p, text_lower) for p in boundary_markers) or any(re.search(p, text_lower) for p in HARD_BOUNDARY_PATTERNS)
         # Protective gate buffer: triggers at 0.70 so downstream engines can evaluate at 0.80/0.85
         has_boundary_score = bundle.boundary_score >= 0.70
 
@@ -276,7 +277,7 @@ class MaterialityFilter:
             r"\bclinic\s+hours\b",
             r"\bprefer\s+(?:text|email|call)\b",
         ]
-        has_pref_words = any(re.search(p, text_lower) for p in pref_markers) or bundle.contact_preference != "none"
+        has_pref_words = any(re.search(p, text_lower) for p in pref_markers) or any(re.search(p, text_lower) for p in SOFT_PREFERENCE_PATTERNS) or bundle.contact_preference != "none"
 
         if has_boundary_words or has_boundary_score or has_pref_words:
             targets.add("contact_compliance")

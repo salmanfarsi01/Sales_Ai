@@ -33,6 +33,7 @@ class TimingFeatureSnapshot(BaseModel):
     question_count_60s: int = Field(0, ge=0)
     question_rate_per_min: float = Field(0.0, ge=0.0)
     timing_confidence: float = Field(1.0, ge=0.0, le=1.0)
+    last_phrase: Optional[str] = None
 
 
 class DeterministicTimingEngine:
@@ -251,4 +252,5 @@ class DeterministicTimingEngine:
             question_count_60s=question_count_window,
             question_rate_per_min=question_rate_per_min,
             timing_confidence=timing_confidence,
+            last_phrase=current_utt.text,
         )
