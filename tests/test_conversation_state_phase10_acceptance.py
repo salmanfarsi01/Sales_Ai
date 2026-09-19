@@ -582,7 +582,7 @@ class TestConversationStatePhase10Acceptance:
         """Spec Test D: Repeated commission objection stays unresolved despite
         a polite 'okay'. Conversion gate must stay closed.
         """
-        manager = ConversationStateManager(call_sid="CA_p10_spec_test_d")
+        manager = ConversationStateManager(call_sid="CA_p10_spec_test_d", conversion_target="signed_listing_agreement")
 
         # Turn 1: Objection raised
         t1 = _create_turn_bundle(

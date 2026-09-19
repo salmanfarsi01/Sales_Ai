@@ -6,6 +6,7 @@ import logging
 from typing import Any, Dict, List, Literal, Optional
 
 from .conversation_scoring_config import ConversationScoringConfig, DEFAULT_CONVERSATION_SCORING_CONFIG
+from .conversation_conversion_config import ConversionBlockingConfig, DEFAULT_CONVERSION_BLOCKING_CONFIG
 from .conversation_state_contract import BehavioralSignalInputBundle
 from .conversation_state_models import (
     ConversationStateSnapshot,
@@ -23,26 +24,127 @@ LOGGER = logging.getLogger("copilot.conversation_conversion")
 
 class MeetingConversionGateEngine:
     """Phase 7: Evaluates the 7-condition Meeting/Conversion Gate, Push Strength state machine,
-
-    and Conversion Event Object tracking.
+    and Conversion Event Object tracking. Supports target-specific objection filtering and
+    deterministic explicit commitment overrides.
     """
 
-    def __init__(self, config: Optional[ConversationScoringConfig] = None):
+    def __init__(
+        self,
+        config: Optional[ConversationScoringConfig] = None,
+        blocking_config: Optional[ConversionBlockingConfig] = None,
+    ):
         self.config = config or DEFAULT_CONVERSATION_SCORING_CONFIG
+        self.blocking_config = blocking_config or DEFAULT_CONVERSION_BLOCKING_CONFIG
+
+    def detect_explicit_commitment(
+        self,
+        bundle: BehavioralSignalInputBundle,
+        current_state: ConversationStateSnapshot,
+        prior_bundle: Optional[BehavioralSignalInputBundle] = None,
+    ) -> tuple[bool, Optional[str]]:
+        """Detects whether prospect made an explicit, unambiguous commitment to a specific slot or proposal."""
+        if bundle.speaker_id != "client":
+            return False, None
+
+        text_lower = bundle.utterance_text.lower()
+
+        # Check for explicit negation or hypothetical framing
+        negation_patterns = [
+            r"\b(?:doesn't|does\s+not|won't|will\s+not|can't|cannot|couldn't|could\s+not)\s+(?:work|make\s+it|do\s+it)\b",
+            r"\b(?:not|never)\s+(?:works?|feasible|possible|available|good)\b",
+            r"\b(?:not\s+free|unavailable|busy)\b",
+            r"\b(?:hard|tough|impossible)\s+to\s+make\b",
+        ]
+        hypothetical_patterns = [
+            r"\bhypothetical(?:ly)?\b",
+            r"\blet's\s+say\b",
+            r"\bwhat\s+if\b",
+            r"\bsuppose\b",
+            r"\bjust\s+pretend\b",
+            r"\bmaybe\b",
+            r"\bif\s+i\s+(?:could|can|were)\b",
+            r"\bunlikely\b",
+            r"\bdoubt\s+(?:it|i\s+can)\b",
+        ]
+        if any(re.search(pat, text_lower) for pat in negation_patterns) or any(re.search(pat, text_lower) for pat in hypothetical_patterns):
+            return False, None
+
+        # Day & time indicators
+        time_day_match = re.search(
+            r"\b(monday|tuesday|wednesday|thursday|friday|saturday|sunday|tomorrow)\b.*?\b(?:at\s+)?(\d{1,2}(?::\d{2})?\s*(?:am|pm)?|one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve)\b",
+            text_lower,
+        )
+
+        confirm_keywords = [
+            r"\b(?:that\s+works|works\s+for\s+me|this\s+works|thursday\s+works|friday\s+works|it\s+works)\b",
+            r"\b(?:sounds\s+good|sounds\s+fair|perfect|let's\s+do\s+it|deal|fine\s+with\s+me|see\s+you\s+then|i'll\s+be\s+there)\b",
+            r"\b(?:i\s+could\s+do|i\s+can\s+do|let's\s+meet|we\s+can\s+meet|come\s+by|stop\s+by)\b",
+            r"\b(?:sure\s+let's\s+meet|sure\s+come\s+by)\b",
+            r"(?<!doesn't\s)(?<!does\snot\s)(?<!won't\s)(?<!not\s)\bworks\b",
+            r"\b(yes|yeah|sure|definitely|absolutely)\b",
+        ]
+        has_confirm_keyword = any(re.search(pat, text_lower) for pat in confirm_keywords)
+
+        # Case A: Explicit day/time and affirmative stance in current utterance
+        if time_day_match and (has_confirm_keyword or bundle.agreement_score >= 0.50):
+            return True, time_day_match.group(0).strip().title()
+
+        # Case B: Salesperson proposed a day/time in prior turn, and prospect explicitly accepted
+        if prior_bundle and prior_bundle.speaker_id == "salesperson":
+            prior_lower = prior_bundle.utterance_text.lower()
+            prop_match = re.search(
+                r"\b(monday|tuesday|wednesday|thursday|friday|saturday|sunday|tomorrow)\b.*?\b(?:at\s+)?(\d{1,2}(?::\d{2})?\s*(?:am|pm)?|one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve)\b",
+                prior_lower,
+            )
+            is_affirmative = (
+                bundle.agreement_score >= 0.60
+                or any(re.search(rf"\b{aff}\b", text_lower) for aff in ["yeah", "yes", "definitely", "sure", "absolutely", "works", "that works", "perfect", "sounds good", "sounds fair"])
+            )
+            if prop_match and is_affirmative:
+                return True, prop_match.group(0).strip().title()
+
+        # Case C: Confirmed meeting time fact already active and affirmed
+        confirmed_fact = next((f for f in current_state.facts if f.fact_key == "confirmed_meeting_time" and f.status == "active"), None)
+        if confirmed_fact and (bundle.agreement_score >= 0.60 or has_confirm_keyword):
+            return True, str(confirmed_fact.fact_value)
+
+        # Case D: Concrete timing keywords + high composite commitment scores
+        has_temporal = any(re.search(pat, text_lower) for pat in [
+            r"\b(morning|afternoon|evening|noon|calendar|schedule|appointment|meet|meeting|walkthrough)\b",
+            r"\b(next\s+week|this\s+week|weekend)\b",
+        ])
+        if (
+            has_temporal
+            and bundle.agreement_score >= 0.65
+            and bundle.specificity_score >= 0.60
+            and bundle.future_language_score >= 0.60
+        ):
+            return True, bundle.utterance_text.strip()
+
+        return False, None
 
     def evaluate_gate(
         self,
         bundle: BehavioralSignalInputBundle,
         current_state: ConversationStateSnapshot,
+        conversion_target: str = "appointment",
+        prior_bundle: Optional[BehavioralSignalInputBundle] = None,
     ) -> MeetingConversionGate:
         """Evaluates all 7 meeting gate conditions simultaneously.
 
         The gate is OPEN if and only if all 7 conditions are met.
         If any condition fails, the gate remains CLOSED with full explainability.
+        Evaluates objections relative to conversion_target blocking rules, and applies
+        explicit human statement overrides when unambiguous commitments are observed.
         """
         cfg = self.config
         dims = current_state.dimensions
         conditions: List[GateConditionResult] = []
+
+        # Detect explicit commitment override
+        has_explicit_commit, commit_slot = self.detect_explicit_commitment(
+            bundle, current_state, prior_bundle
+        )
 
         # ---------------------------------------------------------------------
         # Condition 1: Trust Not Collapsing
@@ -73,7 +175,12 @@ class MeetingConversionGateEngine:
         # ---------------------------------------------------------------------
         eng_val = dims.engagement
         eng_ok = eng_val >= cfg.gate_min_engagement
-        if not eng_ok:
+        is_overridden2 = False
+        if has_explicit_commit and not eng_ok:
+            eng_ok = True
+            is_overridden2 = True
+            reason2 = f"[EXPLICIT COMMITMENT OVERRIDE: '{commit_slot or bundle.utterance_text}'] Engagement active on specific commitment"
+        elif not eng_ok:
             reason2 = f"Engagement score ({eng_val:.2f}) is below on-topic threshold ({cfg.gate_min_engagement:.2f})"
         else:
             reason2 = f"Engagement active and on-topic ({eng_val:.2f} >= {cfg.gate_min_engagement:.2f})"
@@ -85,22 +192,39 @@ class MeetingConversionGateEngine:
                 score_or_value=eng_val,
                 threshold=cfg.gate_min_engagement,
                 reason=reason2,
+                is_overridden=is_overridden2,
             )
         )
 
         # ---------------------------------------------------------------------
-        # Condition 3: Objection State (All raised objections resolved or partial)
+        # Condition 3: Objection State (Target-aware blocking category filter)
         # ---------------------------------------------------------------------
+        target_blocking_cats = self.blocking_config.blocking_categories.get(
+            conversion_target,
+            ["boundary"],
+        )
         unresolved_objs = [
             o for o in current_state.objections
             if o.lifecycle_state in ("unresolved", "reactivated", "boundary")
         ]
-        obj_ok = len(unresolved_objs) == 0
+        target_blocking_unresolved = [
+            o for o in unresolved_objs
+            if o.canonical_category in target_blocking_cats
+        ]
+        non_blocking_unresolved = [
+            o for o in unresolved_objs
+            if o.canonical_category not in target_blocking_cats
+        ]
+
+        obj_ok = len(target_blocking_unresolved) == 0
         if not obj_ok:
-            categories = [o.canonical_category for o in unresolved_objs]
-            reason3 = f"Active unresolved objection(s) present: {', '.join(categories)}"
+            categories = [o.canonical_category for o in target_blocking_unresolved]
+            reason3 = f"Active unresolved objection(s) blocking '{conversion_target}': {', '.join(categories)}"
         else:
-            if current_state.objections:
+            if non_blocking_unresolved:
+                nb_cats = [o.canonical_category for o in non_blocking_unresolved]
+                reason3 = f"No blocking objections for '{conversion_target}' (non-blocking active: {', '.join(nb_cats)})"
+            elif current_state.objections:
                 reason3 = f"All {len(current_state.objections)} raised objection(s) are resolved, partially resolved, or superseded"
             else:
                 reason3 = "No active objections raised (clean slate)"
@@ -109,7 +233,7 @@ class MeetingConversionGateEngine:
             GateConditionResult(
                 condition_name="objections_resolved_or_partial",
                 met=obj_ok,
-                score_or_value=len(unresolved_objs),
+                score_or_value=len(target_blocking_unresolved),
                 threshold=0,
                 reason=reason3,
             )
@@ -141,7 +265,13 @@ class MeetingConversionGateEngine:
             (val_score >= cfg.gate_min_value_recognition)
             or (agreement_factor >= 0.50 and logical_r >= 50.0)
         )
-        if not val_ok:
+
+        is_overridden4 = False
+        if has_explicit_commit and not has_decision_to_stay:
+            val_ok = True
+            is_overridden4 = True
+            reason4 = f"[OVERRIDE: Explicit commitment detected: '{commit_slot or bundle.utterance_text}' outranks inferred readiness] Clear value justification established"
+        elif not val_ok:
             if has_decision_to_stay:
                 reason4 = "Prospect explicitly decided to stay and not sell; transaction value proposition is void"
             elif is_vague_filler:
@@ -158,6 +288,7 @@ class MeetingConversionGateEngine:
                 score_or_value=val_score,
                 threshold=cfg.gate_min_value_recognition,
                 reason=reason4,
+                is_overridden=is_overridden4,
             )
         )
 
@@ -206,14 +337,27 @@ class MeetingConversionGateEngine:
             and not has_access_constraints
             and not comp.hard_boundary_active
         )
-        if not log_ok:
+
+        is_overridden6 = False
+        if (
+            has_explicit_commit
+            and not comp.hard_boundary_active
+            and not has_contact_restriction
+            and not has_access_constraints
+        ):
+            if not log_ok or log_r < cfg.gate_min_logistical_readiness or has_logistical_blocker:
+                log_ok = True
+                is_overridden6 = True
+                reason6 = f"[OVERRIDE: Explicit commitment detected: '{commit_slot or bundle.utterance_text}' outranks inferred logistical score] Logistical feasibility confirmed"
+
+        if not log_ok and not is_overridden6:
             if has_contact_restriction:
                 reason6 = f"Active contact/scheduling restriction ({comp.contact_preference}) impedes meeting logistics"
             elif has_access_constraints:
                 reason6 = f"Access constraints ({', '.join(current_state.decision_structure.access_constraints)}) require resolution"
             else:
                 reason6 = f"Logistical readiness deficit ({log_r:.1f} < {cfg.gate_min_logistical_readiness:.1f})"
-        else:
+        elif not is_overridden6:
             reason6 = f"Logistical feasibility confirmed ({log_r:.1f} >= {cfg.gate_min_logistical_readiness:.1f})"
 
         conditions.append(
@@ -223,6 +367,7 @@ class MeetingConversionGateEngine:
                 score_or_value=log_r,
                 threshold=cfg.gate_min_logistical_readiness,
                 reason=reason6,
+                is_overridden=is_overridden6,
             )
         )
 
@@ -258,10 +403,13 @@ class MeetingConversionGateEngine:
         return MeetingConversionGate(
             is_open=is_open,
             status="open" if is_open else "closed",
+            conversion_target=conversion_target,
             conditions=conditions,
             failed_conditions=failed_conditions,
             blocking_reasons=blocking_reasons,
             confidence=effective_conf,
+            explicit_commitment_detected=has_explicit_commit,
+            commitment_slot=commit_slot,
         )
 
     def evaluate_push_strength(
@@ -269,12 +417,14 @@ class MeetingConversionGateEngine:
         bundle: BehavioralSignalInputBundle,
         current_state: ConversationStateSnapshot,
         gate: MeetingConversionGate,
+        conversion_target: Optional[str] = None,
     ) -> PushStrengthRecommendation:
         """Determines the appropriate operational push strength and strategic approach."""
         cfg = self.config
         dims = current_state.dimensions
         comp = current_state.contact_compliance
         conf = gate.confidence
+        target = conversion_target or getattr(gate, "conversion_target", "appointment") or "appointment"
 
         # 1. Hard Boundary State: Immediate graceful exit
         has_boundary_obj = any(o.lifecycle_state == "boundary" for o in current_state.objections)
@@ -309,22 +459,31 @@ class MeetingConversionGateEngine:
                 confidence=conf,
             )
 
-        # 3. Moderate Trust + Unresolved Objection: Resolve then ask
-        unresolved_objs = [
+        # 3. Moderate Trust + Unresolved Target-Blocking Objection: Resolve then ask
+        target_blocking_cats = self.blocking_config.blocking_categories.get(target, ["boundary"])
+        unresolved_blocking_objs = [
             o for o in current_state.objections
             if o.lifecycle_state in ("unresolved", "reactivated")
+            and o.canonical_category in target_blocking_cats
         ]
-        if unresolved_objs:
-            lead_obj = unresolved_objs[0]
+        if unresolved_blocking_objs:
+            lead_obj = unresolved_blocking_objs[0]
             return PushStrengthRecommendation(
                 state="resolve_then_ask",
-                rationale=f"Active objection '{lead_obj.canonical_category}' is unresolved. Asking for a meeting before reframing will be perceived as dismissive.",
+                rationale=f"Active objection '{lead_obj.canonical_category}' blocks '{target}'. Asking for commitment before reframing will be perceived as dismissive.",
                 recommended_action=f"Acknowledge and resolve the {lead_obj.canonical_category} concern before proposing next steps.",
                 confidence=conf,
             )
 
-        # 4. Gate Open + High Trust: Direct ask / Confirm & Respect
-        if gate.is_open and dims.trust >= cfg.direct_ask_min_trust:
+        # 4. Gate Open: Direct ask / Confirm & Respect
+        if gate.is_open and (dims.trust >= cfg.direct_ask_min_trust or gate.explicit_commitment_detected):
+            if gate.explicit_commitment_detected and gate.commitment_slot:
+                return PushStrengthRecommendation(
+                    state="direct_ask",
+                    rationale=f"Meeting gate is open: Prospect provided explicit concrete commitment ('{gate.commitment_slot}'). Confirm slot directly.",
+                    recommended_action=f"Confirm the appointment at {gate.commitment_slot} and thank the prospect.",
+                    confidence=conf,
+                )
             if comp.contact_preference == "reduced_frequency":
                 return PushStrengthRecommendation(
                     state="direct_ask",
@@ -338,6 +497,7 @@ class MeetingConversionGateEngine:
                 recommended_action="Propose a specific walkthrough or meeting date, time, and format directly.",
                 confidence=conf,
             )
+
 
         # 5. Agreeable-but-Vague: Two-window choice
         # Prospect is polite/agreeable but specificity is low or non-committal

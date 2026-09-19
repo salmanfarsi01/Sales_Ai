@@ -1129,8 +1129,18 @@
         <div class="card-unit" style="border: 1px solid ${gate.is_open ? 'var(--prospect-border)' : 'var(--danger-border)'}; background: ${gate.is_open ? '#F0FDF4' : '#FEF2F2'};">
           <div class="card-unit-title">
             <span style="color:#000000; font-weight:700;">Meeting / Conversion Gate</span>
-            <span class="badge ${gate.is_open ? 'badge-open' : 'badge-closed'}">${gate.is_open ? 'OPEN' : 'CLOSED'}</span>
+            <div style="display:flex; align-items:center; gap:6px;">
+              <span class="badge" style="background:#F1F5F9; color:#0F172A; border:1px solid #CBD5E1; font-size:11px;">Target: ${escapeHtml(gate.conversion_target || 'appointment')}</span>
+              <span class="badge ${gate.is_open ? 'badge-open' : 'badge-closed'}">${gate.is_open ? 'OPEN' : 'CLOSED'}</span>
+            </div>
           </div>
+
+          ${gate.explicit_commitment_detected ? `
+            <div style="background:#FFFFFF; border:1px solid #86EFAC; border-radius:6px; padding:6px 10px; margin: 8px 0; font-size:11.5px; color:#14532D; display:flex; align-items:center; justify-content:space-between;">
+              <span><strong>Explicit Commitment:</strong> "${escapeHtml(gate.commitment_slot || 'Direct Agreement')}"</span>
+              <span class="badge badge-open" style="font-size:10px;">STATEMENT OVERRIDE</span>
+            </div>
+          ` : ''}
 
           <div style="margin: 10px 0;">
             <div style="font-size: 11px; text-transform: uppercase; color: #334155; font-weight: 700;">Push Strength Recommendation</div>
@@ -1150,7 +1160,10 @@
             <div style="font-size: 11px; font-weight: 700; color: #000000; text-transform: uppercase; margin-bottom: 6px;">7 Simultaneous Conditions</div>
             ${(gate.conditions || []).map(c => `
               <div class="gate-condition-row">
-                <span class="badge ${c.met ? 'badge-open' : 'badge-closed'}" style="font-size:10px;padding:2px 6px;margin-right:6px;min-width:46px;text-align:center;">${c.met ? 'MET' : 'FAILED'}</span>
+                <div style="display:flex; align-items:center; gap:4px; margin-right:6px;">
+                  <span class="badge ${c.met ? 'badge-open' : 'badge-closed'}" style="font-size:10px;padding:2px 6px;min-width:46px;text-align:center;">${c.met ? 'MET' : 'FAILED'}</span>
+                  ${c.is_overridden ? '<span class="badge" style="background:#ECFDF5; color:#047857; border:1px solid #A7F3D0; font-size:9px; padding:1px 4px;">OVERRIDE</span>' : ''}
+                </div>
                 <div style="flex:1">
                   <div style="display:flex;justify-content:space-between">
                     <strong style="color:#000000;">${escapeHtml(c.condition_name)}</strong>

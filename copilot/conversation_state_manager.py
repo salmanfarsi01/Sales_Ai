@@ -21,6 +21,7 @@ from .conversation_supersession import TruthSupersessionDetector
 from .conversation_materiality import MaterialityFilter, ABSENT_DECISION_MAKER_PATTERNS
 from .conversation_scoring import ConversationScoringEngine
 from .conversation_scoring_config import ConversationScoringConfig
+from .conversation_conversion_config import ConversionBlockingConfig
 from .conversation_conversion import MeetingConversionGateEngine
 
 LOGGER = logging.getLogger("copilot.conversation_state_manager")
@@ -39,15 +40,21 @@ class ConversationStateManager:
         call_sid: str,
         initial_snapshot: Optional[ConversationStateSnapshot] = None,
         scoring_config: Optional[ConversationScoringConfig] = None,
+        blocking_config: Optional[ConversionBlockingConfig] = None,
+        conversion_target: str = "appointment",
     ):
         self.call_sid = call_sid
+        self.conversion_target = conversion_target
         self.current_state = initial_snapshot or ConversationStateSnapshot(call_sid=call_sid)
         self.facts_manager = PersistentFactsManager(initial_facts=self.current_state.facts)
         self.objections_engine = ObjectionLifecycleEngine(initial_objections=self.current_state.objections)
         self.supersession_detector = TruthSupersessionDetector()
         self.materiality_filter = MaterialityFilter()
         self.scoring_engine = ConversationScoringEngine(config=scoring_config)
-        self.conversion_engine = MeetingConversionGateEngine(config=scoring_config)
+        self.conversion_engine = MeetingConversionGateEngine(
+            config=scoring_config,
+            blocking_config=blocking_config,
+        )
         self.prior_bundle: Optional[BehavioralSignalInputBundle] = None
         self.has_prospect_spoken: bool = False
 
@@ -56,8 +63,11 @@ class ConversationStateManager:
         bundle: BehavioralSignalInputBundle,
         decision_updates: Optional[Dict[str, Any]] = None,
         fact_updates: Optional[List[Dict[str, Any]]] = None,
+        conversion_target: Optional[str] = None,
     ) -> ConversationStateSnapshot:
         """Applies a verified Behavioral Signal Engine turn bundle to update the conversation truth."""
+        if conversion_target is not None:
+            self.conversion_target = conversion_target
         if bundle.speaker_id == "client":
             self.has_prospect_spoken = True
         # Stale-write protection (Client Principle #9)
@@ -189,6 +199,12 @@ class ConversationStateManager:
 
         # 4. Evaluate Objection Lifecycle (Gated by Materiality)
         if "objections" in materiality.affected_targets:
+            # Sync any out-of-band added objections into the lifecycle engine
+            engine_ids = {o.objection_id for o in self.objections_engine._objections}
+            for o in self.current_state.objections:
+                if o.objection_id not in engine_ids:
+                    self.objections_engine._objections.append(o)
+
             updated_objs, obj_changes, next_version = self.objections_engine.evaluate_turn(
                 bundle=bundle,
                 current_version=next_version,
@@ -286,15 +302,31 @@ class ConversationStateManager:
             )
             conv_res = None
         else:
-            gate_res = self.conversion_engine.evaluate_gate(bundle, self.current_state)
-            push_res = self.conversion_engine.evaluate_push_strength(bundle, self.current_state, gate_res)
+            gate_res = self.conversion_engine.evaluate_gate(
+                bundle,
+                self.current_state,
+                conversion_target=self.conversion_target,
+                prior_bundle=self.prior_bundle,
+            )
+            push_res = self.conversion_engine.evaluate_push_strength(
+                bundle,
+                self.current_state,
+                gate_res,
+                conversion_target=self.conversion_target,
+            )
             conv_res = self.conversion_engine.evaluate_conversion_event(
                 bundle, self.current_state, gate_res, previous_event=prev_conv
             )
 
         # Explainability tracking for conversion state changes
-        if gate_res is not None and (prev_gate is None or prev_gate.is_open != gate_res.is_open):
+        if gate_res is not None and (
+            prev_gate is None
+            or prev_gate.is_open != gate_res.is_open
+            or prev_gate.conversion_target != gate_res.conversion_target
+            or (gate_res.explicit_commitment_detected and not prev_gate.explicit_commitment_detected)
+        ):
             next_version += 1
+            override_note = " (explicit commitment override applied)" if gate_res.explicit_commitment_detected else ""
             changes.append(
                 StateChangeRecord(
                     state_version_before=next_version - 1,
@@ -304,7 +336,7 @@ class ConversationStateManager:
                     new_value=gate_res.model_dump(),
                     triggering_turn_id=bundle.turn_id,
                     evidence_ids=bundle.contributing_evidence_ids,
-                    reason=f"Meeting gate transitioned to {'OPEN' if gate_res.is_open else 'CLOSED'}. Failed conditions: {gate_res.failed_conditions or 'None'}.",
+                    reason=f"Meeting gate [{gate_res.conversion_target}] transitioned to {'OPEN' if gate_res.is_open else 'CLOSED'}{override_note}. Failed conditions: {gate_res.failed_conditions or 'None'}.",
                     confidence=gate_res.confidence,
                     timestamp_ms=bundle.timestamp_ms,
                 )

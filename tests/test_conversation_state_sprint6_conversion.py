@@ -72,9 +72,9 @@ class TestConversationStateSprint6NearMissAndGate:
     strictly keeps the Meeting/Conversion Gate CLOSED for each of the 7 conditions.
     """
 
-    def _setup_baseline_passing_manager(self, call_sid: str) -> ConversationStateManager:
+    def _setup_baseline_passing_manager(self, call_sid: str, target: str = "appointment") -> ConversationStateManager:
         """Sets up a state manager where all 7 gate conditions would pass."""
-        manager = ConversationStateManager(call_sid=call_sid)
+        manager = ConversationStateManager(call_sid=call_sid, conversion_target=target)
         # Turn 1: Establish baseline facts and decision structure
         t1 = _create_turn_bundle(
             turn_id=1,
@@ -161,7 +161,7 @@ class TestConversationStateSprint6NearMissAndGate:
 
         Asserts gate remains CLOSED with 'objections_resolved_or_partial' as the failing condition.
         """
-        manager = self._setup_baseline_passing_manager("CA_near_miss_3")
+        manager = self._setup_baseline_passing_manager("CA_near_miss_3", target="signed_listing_agreement")
         # Add an active unresolved objection
         manager.current_state.objections.append(
             ObjectionRecord(
@@ -343,8 +343,8 @@ class TestConversationStateSprint6PushStrengthAndAcceptance:
         snap2 = manager_low_trust.process_turn_bundle(t_tense)
         assert snap2.push_strength.state == "protect_and_shorten"
 
-        # 3. resolve_then_ask (moderate trust + active objection)
-        manager_obj = ConversationStateManager(call_sid="CA_resolve_obj")
+        # 3. resolve_then_ask (moderate trust + active objection blocking signed_listing_agreement)
+        manager_obj = ConversationStateManager(call_sid="CA_resolve_obj", conversion_target="signed_listing_agreement")
         manager_obj.current_state.objections.append(
             ObjectionRecord(
                 canonical_category="commission_fee",
@@ -467,7 +467,7 @@ class TestConversationStateSprint6PushStrengthAndAcceptance:
         - Meeting gate is closed (objections_resolved_or_partial fails).
         - Push strength is 'resolve_then_ask'.
         """
-        manager = ConversationStateManager(call_sid="CA_spec_repeat_objection")
+        manager = ConversationStateManager(call_sid="CA_spec_repeat_objection", conversion_target="signed_listing_agreement")
 
         # Turn 1: Prospect raises commission objection
         t1 = _create_turn_bundle(

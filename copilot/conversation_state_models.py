@@ -175,16 +175,20 @@ class GateConditionResult(BaseModel):
     score_or_value: Any = None
     threshold: Any = None
     reason: str
+    is_overridden: bool = Field(default=False, description="True if condition passed via explicit human statement override")
 
 
 class MeetingConversionGate(BaseModel):
     """Boolean safety gate with explainable condition census (Phase 7)."""
     is_open: bool = Field(False, description="True if and only if all 7 conditions are satisfied simultaneously")
     status: Literal["open", "closed"] = "closed"
+    conversion_target: str = Field("appointment", description="Active conversion ask (e.g. appointment, signed_listing_agreement, permission_to_follow_up)")
     conditions: List[GateConditionResult] = Field(default_factory=list)
     failed_conditions: List[str] = Field(default_factory=list)
     blocking_reasons: List[str] = Field(default_factory=list)
     confidence: float = Field(1.0, ge=0.0, le=1.0)
+    explicit_commitment_detected: bool = Field(default=False, description="True if prospect provided a direct, concrete commitment")
+    commitment_slot: Optional[str] = Field(None, description="Extracted concrete commitment slot (e.g. Thursday at 4)")
 
 
 class PushStrengthRecommendation(BaseModel):
