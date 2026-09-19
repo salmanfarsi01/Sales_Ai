@@ -12,6 +12,9 @@ from .conversation_state_models import (
     PersistentFactCategory,
     DecisionStructure,
     ConversionEventObject,
+    ObjectionRecord,
+    DealDispositionRecord,
+    DealDispositionType,
 )
 
 LOGGER = logging.getLogger("copilot.conversation_supersession")
@@ -494,3 +497,175 @@ class TruthSupersessionDetector:
             relation_confidence=1.0,
             confidence=1.0,
         )
+
+    def evaluate_objection_supersession(
+        self,
+        candidate_text: str,
+        active_objection: ObjectionRecord,
+    ) -> SupersessionDecision:
+        """Evaluates whether candidate_text supersedes or reverses an active ObjectionRecord.
+        Requires genuine semantic evidence (REVERSES or UPDATES). Unrelated concerns return UNCHANGED.
+        """
+        text_lower = candidate_text.lower().strip()
+        cat = active_objection.canonical_category
+
+        # 1. Commission / Fee Objection Reversal
+        if cat == "commission_fee":
+            fee_reversal_patterns = [
+                r"\b(?:don't|do\s+not|not)\s+(?:care|worried|concerned)\s+about\s+(?:the\s+)?(?:fee|commission|percentage|6%|5%)\b",
+                r"\b(?:commission|fee)\s+(?:is\s+fine|isn't\s+an\s+issue|doesn't\s+matter|is\s+fair|is\s+okay)\b",
+                r"\b(?:fine|okay|happy)\s+with\s+(?:the\s+)?(?:commission|fee|rate)\b",
+                r"\bnever\s+mind\s+about\s+(?:the\s+)?(?:fee|commission)\b",
+            ]
+            if any(re.search(p, text_lower) for p in fee_reversal_patterns):
+                return SupersessionDecision(
+                    has_supersession=True,
+                    target_fact_id=active_objection.objection_id,
+                    target_fact_key="objection",
+                    relation="REVERSES",
+                    old_truth_summary=active_objection.latest_statement,
+                    new_truth_value="Commission fee concern withdrawn / resolved by prospect",
+                    reasoning=f"Prospect explicitly reversed/withdrew earlier concern about {cat}.",
+                    relation_confidence=0.95,
+                    confidence=0.95,
+                )
+
+        # 2. Market Timing & General Hesitation Reversal or Root Cause Clarification
+        elif cat in ("market_timing", "general_hesitation"):
+            root_cause_patterns = [
+                r"\b(?:the\s+real\s+(?:reason|issue|problem|concern)\s+is)\b",
+                r"\b(?:actually\s+(?:the\s+issue\s+is|what\s+matters\s+is|what's\s+holding\s+me\s+back))\b",
+            ]
+            if any(re.search(p, text_lower) for p in root_cause_patterns):
+                return SupersessionDecision(
+                    has_supersession=True,
+                    target_fact_id=active_objection.objection_id,
+                    target_fact_key="objection",
+                    relation="UPDATES",
+                    old_truth_summary=active_objection.latest_statement,
+                    new_truth_value=candidate_text.strip(),
+                    reasoning=f"General hesitation superseded by concrete root issue: '{candidate_text.strip()}'.",
+                    relation_confidence=0.95,
+                    confidence=0.95,
+                )
+
+            timing_reversal_patterns = [
+                r"\bready\s+to\s+(?:sell|move\s+forward|list|go)\s+now\b",
+                r"\bnot\s+worried\s+about\s+(?:timing|the\s+market|rates)\b",
+                r"\bdon't\s+want\s+to\s+wait\s+anymore\b",
+                r"\bchanged\s+my\s+mind,\s+let's\s+(?:sell|list|do\s+it)\b",
+            ]
+            if any(re.search(p, text_lower) for p in timing_reversal_patterns):
+                return SupersessionDecision(
+                    has_supersession=True,
+                    target_fact_id=active_objection.objection_id,
+                    target_fact_key="objection",
+                    relation="REVERSES",
+                    old_truth_summary=active_objection.latest_statement,
+                    new_truth_value="Market timing / hesitation concern withdrawn",
+                    reasoning=f"Prospect explicitly reversed timing hesitation: '{candidate_text.strip()}'.",
+                    relation_confidence=0.95,
+                    confidence=0.95,
+                )
+
+        # 3. Broker Representation Reversal
+        elif cat == "broker_representation":
+            broker_reversal_patterns = [
+                r"\bnot\s+working\s+with\s+that\s+agent\s+anymore\b",
+                r"\bended\s+(?:my|our)\s+(?:contract|agreement)\b",
+                r"\bfree\s+to\s+(?:hire|work\s+with)\s+(?:you|someone\s+else)\b",
+            ]
+            if any(re.search(p, text_lower) for p in broker_reversal_patterns):
+                return SupersessionDecision(
+                    has_supersession=True,
+                    target_fact_id=active_objection.objection_id,
+                    target_fact_key="objection",
+                    relation="REVERSES",
+                    old_truth_summary=active_objection.latest_statement,
+                    new_truth_value="Broker representation constraint resolved",
+                    reasoning=f"Prospect confirmed prior agent relationship ended.",
+                    relation_confidence=0.95,
+                    confidence=0.95,
+                )
+
+        # Default: Unrelated concerns do NOT supersede each other!
+        return SupersessionDecision(
+            has_supersession=False,
+            target_fact_id=active_objection.objection_id,
+            target_fact_key="objection",
+            relation="UNCHANGED",
+            reasoning=f"Candidate utterance does not supersede or reverse objection '{cat}'. Both remain independent.",
+            relation_confidence=1.0,
+            confidence=1.0,
+        )
+
+    def evaluate_deal_disposition(
+        self,
+        candidate_text: str,
+        current_disposition: Optional[DealDispositionRecord],
+        turn_id: int,
+        timestamp_ms: int,
+    ) -> Optional[DealDispositionRecord]:
+        """Evaluates deal-level disposition transitions (e.g. actively_selling -> declined -> reconsidering)."""
+        text_lower = candidate_text.lower().strip()
+        from .conversation_objections import DECISION_TO_STAY_PATTERNS
+
+        is_declined = any(re.search(p, text_lower) for p in DECISION_TO_STAY_PATTERNS)
+        if is_declined:
+            if current_disposition is None or current_disposition.disposition != DealDispositionType.DECLINED:
+                new_disp = DealDispositionRecord(
+                    disposition=DealDispositionType.DECLINED,
+                    confidence=0.95,
+                    source_turn_id=turn_id,
+                    timestamp_ms=timestamp_ms,
+                    rationale=f"Prospect decided not to sell / decided to stay: '{candidate_text.strip()}'",
+                )
+                if current_disposition:
+                    current_disposition.superseded_by_id = new_disp.disposition_id
+                    current_disposition.superseded_at_turn_id = turn_id
+                return new_disp
+            return current_disposition
+
+        # Check for Reconsidering / Reversal of Decline
+        reconsider_patterns = [
+            r"\b(?:would|'d)\s+still\s+move\s+if\s+([^\.]+)",
+            r"\bmove\s+if\s+([^\.]+)",
+            r"\bopen\s+to\s+(?:selling|moving)\s+if\s+([^\.]+)",
+            r"\bif\s+i\s+believed\s+there\s+was\s+a\s+better\s+strategy\b",
+            r"\bmight\s+consider\s+selling\b",
+        ]
+        is_reconsidering = any(re.search(p, text_lower) for p in reconsider_patterns)
+        if is_reconsidering:
+            if current_disposition and current_disposition.disposition == DealDispositionType.DECLINED:
+                new_disp = DealDispositionRecord(
+                    disposition=DealDispositionType.RECONSIDERING,
+                    confidence=0.90,
+                    source_turn_id=turn_id,
+                    timestamp_ms=timestamp_ms,
+                    rationale=f"Prospect conditionally reconsidering sale: '{candidate_text.strip()}'",
+                )
+                current_disposition.superseded_by_id = new_disp.disposition_id
+                current_disposition.superseded_at_turn_id = turn_id
+                return new_disp
+
+        # Check for Explicit Reversal of Decline back to Active Selling
+        reversal_patterns = [
+            r"\b(?:we(?:'re|\s+are)\s+(?:ready|definitely\s+going|putting\s+it)\s+to\s+sell)\b",
+            r"\bchanged\s+(?:our|my)\s+mind.*?\bsell\b",
+            r"\bdecided\s+to\s+sell\b",
+        ]
+        is_reversed = any(re.search(p, text_lower) for p in reversal_patterns)
+        if is_reversed:
+            if current_disposition and current_disposition.disposition in (DealDispositionType.DECLINED, DealDispositionType.RECONSIDERING):
+                new_disp = DealDispositionRecord(
+                    disposition=DealDispositionType.REVERSED_DECLINE,
+                    confidence=0.90,
+                    source_turn_id=turn_id,
+                    timestamp_ms=timestamp_ms,
+                    rationale=f"Prospect reversed decision not to sell: '{candidate_text.strip()}'",
+                )
+                current_disposition.superseded_by_id = new_disp.disposition_id
+                current_disposition.superseded_at_turn_id = turn_id
+                return new_disp
+
+        return None

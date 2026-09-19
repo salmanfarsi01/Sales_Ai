@@ -18,6 +18,7 @@ from .conversation_state_models import (
     ConversionStatus,
     ConversionEventStatus,
     ConversionEventObject,
+    DealDispositionType,
 )
 
 def detect_explicit_reversal_in_text(text: str) -> tuple[bool, Optional[str]]:
@@ -262,7 +263,7 @@ class MeetingConversionGateEngine:
         )
         unresolved_objs = [
             o for o in current_state.objections
-            if o.lifecycle_state in ("unresolved", "reactivated", "boundary")
+            if o.lifecycle_state in ("active", "unresolved", "reactivated", "boundary", "clarified")
         ]
         target_blocking_unresolved = [
             o for o in unresolved_objs
@@ -310,12 +311,19 @@ class MeetingConversionGateEngine:
         # without concrete goal/timeline facts does NOT establish a clear value reason.
         is_vague_filler = (bundle.specificity_score <= cfg.two_window_choice_max_specificity) and not has_goal_facts
 
-        has_decision_to_stay = any(
-            o.lifecycle_state == "superseded" and o.superseded_by_objection_id == "decision_to_stay"
-            for o in current_state.objections
-        ) or any(
-            f.fact_key == "decision_to_stay" and f.status == "active"
-            for f in current_state.facts
+        has_declined_disp = (
+            current_state.deal_disposition is not None
+            and getattr(current_state.deal_disposition, "disposition", None) in ("declined", DealDispositionType.DECLINED)
+        )
+        has_reopened_disp = (
+            current_state.deal_disposition is not None
+            and getattr(current_state.deal_disposition, "disposition", None) in ("reconsidering", "reversed_decline", DealDispositionType.RECONSIDERING, DealDispositionType.REVERSED_DECLINE)
+        )
+        has_decision_to_stay = has_declined_disp or (
+            not has_reopened_disp and (
+                any(o.lifecycle_state == "superseded" and o.superseded_by_objection_id == "decision_to_stay" for o in current_state.objections)
+                or any(f.fact_key == "decision_to_stay" and f.status == "active" for f in current_state.facts)
+            )
         )
 
         val_ok = not has_decision_to_stay and not is_vague_filler and (
@@ -485,12 +493,19 @@ class MeetingConversionGateEngine:
 
         # 1. Hard Boundary State: Immediate graceful exit
         has_boundary_obj = any(o.lifecycle_state == "boundary" for o in current_state.objections)
-        has_decision_to_stay = any(
-            o.lifecycle_state == "superseded" and o.superseded_by_objection_id == "decision_to_stay"
-            for o in current_state.objections
-        ) or any(
-            f.fact_key == "decision_to_stay" and f.status == "active"
-            for f in current_state.facts
+        has_declined_disp = (
+            current_state.deal_disposition is not None
+            and getattr(current_state.deal_disposition, "disposition", None) in ("declined", DealDispositionType.DECLINED)
+        )
+        has_reopened_disp = (
+            current_state.deal_disposition is not None
+            and getattr(current_state.deal_disposition, "disposition", None) in ("reconsidering", "reversed_decline", DealDispositionType.RECONSIDERING, DealDispositionType.REVERSED_DECLINE)
+        )
+        has_decision_to_stay = has_declined_disp or (
+            not has_reopened_disp and (
+                any(o.lifecycle_state == "superseded" and o.superseded_by_objection_id == "decision_to_stay" for o in current_state.objections)
+                or any(f.fact_key == "decision_to_stay" and f.status == "active" for f in current_state.facts)
+            )
         )
         if comp.hard_boundary_active or has_boundary_obj or bundle.boundary_score >= 0.85:
             return PushStrengthRecommendation(
@@ -504,6 +519,18 @@ class MeetingConversionGateEngine:
                 state="respect_record_exit",
                 rationale="Prospect explicitly decided to stay and not sell. Persuasion and conversion asks are prohibited.",
                 recommended_action="Respect prospect decision to stay, record status in CRM, and terminate call gracefully.",
+                confidence=conf,
+            )
+
+        # 1b. Deal Disposition: Reconsidering conditionality check (distinct operational state)
+        if (
+            current_state.deal_disposition is not None
+            and getattr(current_state.deal_disposition, "disposition", None) in ("reconsidering", DealDispositionType.RECONSIDERING)
+        ):
+            return PushStrengthRecommendation(
+                state="explore_conditional_terms",
+                rationale="Prospect is conditionally reconsidering sale ('reconsidering'). Pushing for immediate closing commitment before exploring their criteria triggers defensive reactance.",
+                recommended_action="Acknowledge conditional openness, explore specific strategic or financial criteria (e.g. required strategy, net proceeds, or timing), and avoid premature closing asks until alignment is established.",
                 confidence=conf,
             )
 

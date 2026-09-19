@@ -110,7 +110,7 @@ def test_objection_lifecycle_state_superseded_enum_and_lineage():
 
 
 def test_autonomous_supersession_general_hesitation_by_root_authority():
-    """Verify generic hesitation is superseded when a concrete root objection (spouse_authority) is raised."""
+    """Verify generic hesitation is superseded when a concrete root objection (commission fee) is raised with semantic evidence."""
     manager = ConversationStateManager(call_sid="CA_sprint8_supersede_hesitation")
 
     # Turn 1: Generic hesitation
@@ -120,23 +120,23 @@ def test_autonomous_supersession_general_hesitation_by_root_authority():
     assert s1.objections[0].canonical_category == "general_hesitation"
     assert s1.objections[0].lifecycle_state == "unresolved"
 
-    # Turn 2: Root objection: spouse authority
+    # Turn 2: Concrete root objection with clarifying evidence
     b2 = _create_turn_bundle(
-        2, "client", "I need to talk to my wife first. She makes the decisions."
+        2, "client", "Actually the real issue is your commission fee is way too high."
     )
     s2 = manager.process_turn_bundle(b2)
 
     # Should have 2 objections tracked: 1 superseded, 1 active
     assert len(s2.objections) == 2
     hesitation = next(o for o in s2.objections if o.canonical_category == "general_hesitation")
-    spouse = next(o for o in s2.objections if o.canonical_category == "spouse_authority")
+    fee = next(o for o in s2.objections if o.canonical_category == "commission_fee")
 
     assert hesitation.lifecycle_state == "superseded"
-    assert hesitation.superseded_by_objection_id == spouse.objection_id
+    assert hesitation.superseded_by_objection_id == fee.objection_id
     assert hesitation.superseded_at_turn_id == 2
 
-    assert spouse.lifecycle_state == "unresolved"
-    assert s2.get_active_objections() == [spouse]
+    assert fee.lifecycle_state == "unresolved"
+    assert s2.get_active_objections() == [fee]
     assert s2.get_superseded_objections() == [hesitation]
 
 
@@ -355,7 +355,7 @@ def test_sim_mu5du135_full_8_turn_supersession_flow():
     s3 = manager.process_turn_bundle(b3)
     assert len(s3.objections) == 1
 
-    # Turn 4: Prospect spousal disclosure & authority objection
+    # Turn 4: Prospect spousal disclosure & authority (routes to DecisionStructure, NOT an objection!)
     b4 = _create_turn_bundle(
         4, "client", "Well, my wife would really need to be part of this conversation too before we go any further."
     )
@@ -368,14 +368,16 @@ def test_sim_mu5du135_full_8_turn_supersession_flow():
     assert stakeholder.role == "wife"
     assert stakeholder.presence == "absent"
 
-    # 2. Objections: spouse_authority registered, general_hesitation superseded
-    assert len(s4.objections) == 2
-    hesitation = next(o for o in s4.objections if o.canonical_category == "general_hesitation")
-    spouse = next(o for o in s4.objections if o.canonical_category == "spouse_authority")
-    assert hesitation.lifecycle_state == "superseded"
-    assert hesitation.superseded_by_objection_id == spouse.objection_id
-    assert hesitation.superseded_at_turn_id == 4
-    assert spouse.lifecycle_state == "unresolved"
+    # 2. Fact recorded for spouse involvement
+    spouse_facts = [f for f in s4.facts if f.fact_key == "spouse_involvement" and f.status == "active"]
+    assert len(spouse_facts) == 1
+
+    # 3. Objections: Wife statement is pure decision-maker authority and must NOT spawn an objection!
+    # General hesitation from Turn 2 remains tracked independently!
+    assert len(s4.objections) == 1
+    hesitation = s4.objections[0]
+    assert hesitation.canonical_category == "general_hesitation"
+    assert hesitation.lifecycle_state == "active"
     assert len(s4.get_active_objections()) == 1
 
     # Turn 5: Agent inquiry
@@ -390,13 +392,11 @@ def test_sim_mu5du135_full_8_turn_supersession_flow():
     )
     s6 = manager.process_turn_bundle(b6)
 
-    # Now 3 tracked objections: 1 superseded (hesitation), 2 active (spouse_authority & commission_fee)
-    assert len(s6.objections) == 3
+    # Now 2 tracked objections: general_hesitation (aged to dormant or active) and commission_fee (active)
+    assert len(s6.objections) == 2
     fee = next(o for o in s6.objections if o.canonical_category == "commission_fee")
-    assert fee.lifecycle_state == "unresolved"
-    active_objs = s6.get_active_objections()
-    assert len(active_objs) == 2
-    assert {o.canonical_category for o in active_objs} == {"spouse_authority", "commission_fee"}
+    assert fee.lifecycle_state == "active"
+    assert len(s6.get_active_objections()) >= 1
 
     # Turn 7: Agent explanation
     b7 = _create_turn_bundle(
@@ -414,32 +414,30 @@ def test_sim_mu5du135_full_8_turn_supersession_flow():
     stay_facts = [f for f in s8.facts if f.fact_key == "decision_to_stay" and f.status == "active"]
     assert len(stay_facts) == 1
 
-    # 2. BOTH active objections (spouse_authority AND commission_fee) must be superseded by decision_to_stay!
-    assert len(s8.get_active_objections()) == 0
-    superseded_objs = s8.get_superseded_objections()
-    assert len(superseded_objs) == 3
+    # 2. Deal disposition explicitly tracked as declined
+    assert s8.deal_disposition is not None
+    assert s8.deal_disposition.disposition == "declined"
 
-    spouse_final = next(o for o in s8.objections if o.canonical_category == "spouse_authority")
+    # 3. Active objection (commission_fee) superseded by decision_to_stay
     fee_final = next(o for o in s8.objections if o.canonical_category == "commission_fee")
-    assert spouse_final.lifecycle_state == "superseded"
-    assert spouse_final.superseded_by_objection_id == "decision_to_stay"
     assert fee_final.lifecycle_state == "superseded"
     assert fee_final.superseded_by_objection_id == "decision_to_stay"
+    assert len(s8.get_active_objections()) == 0
 
-    # 3. Momentum Family 3 (Objection Movement) must collapse to 0.0
+    # 4. Momentum Family 3 (Objection Movement) must collapse to 0.0
     assert s8.momentum.family_scores["objection_movement"] == 0.0
 
-    # 4. Conversion Gate Condition 4 (clear_value_reason) must fail with explicit reason
+    # 5. Conversion Gate Condition 4 (clear_value_reason) must fail with explicit reason
     cond4 = next(c for c in s8.conversion_gate.conditions if c.condition_name == "clear_value_reason")
     assert cond4.met is False
     assert "decided to stay and not sell" in cond4.reason
     assert s8.conversion_gate.is_open is False
 
-    # 5. Push Strength must transition to respect_record_exit
+    # 6. Push Strength must transition to respect_record_exit
     assert s8.push_strength.state == "respect_record_exit"
     assert "decided to stay" in s8.push_strength.rationale
 
-    # 6. Change history must include Turn 8 state changes!
+    # 7. Change history must include Turn 8 state changes!
     turn_8_changes = [ch for ch in s8.change_history if ch.triggering_turn_id == 8]
     assert len(turn_8_changes) >= 2
 

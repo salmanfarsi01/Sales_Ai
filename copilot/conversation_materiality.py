@@ -16,13 +16,15 @@ LOGGER = logging.getLogger("copilot.conversation_materiality")
 ABSENT_DECISION_MAKER_PATTERNS: List[str] = [
     r"\b(?:he['’]?s|she['’]?s|they['’]?re)\s+not\s+going\s+to\s+make\s+a\s+decision\b",
     r"\b(?:won['’]?t|will\s+not|can['’]?t|cannot)\s+make\s+a\s+decision\s+unless\b",
-    r"\b(?:my\s+)?(?:husband|wife|spouse|partner|boss|attorney|lawyer)\s+(?:is\s+not\s+here|is\s+out\s+of\s+town|handles?\s+all\s+(?:the\s+)?decisions?|makes?\s+all\s+(?:the\s+)?decisions?)\b",
+    r"\b(?:my\s+)?(?:business\s+)?(?:husband|wife|spouse|partner|boss|attorney|lawyer)\s+(?:is\s+not\s+here|is\s+out\s+of\s+town|handles?\s+all\s+(?:the\s+)?(?:financial\s+)?decisions?|makes?\s+all\s+(?:the\s+)?(?:financial\s+)?decisions?)\b",
     r"\b(?:husband|wife|spouse|partner)\s+is\s+not\s+here\b",
-    r"\bwe\s+decide\s+everything\s+together\b",
-    r"\b(?:consult|check|talk|speak)\s+with\s+(?:my\s+)?(?:husband|wife|spouse|partner)\s+(?:first|before)\b",
+    r"\b(?:(?:my\s+)?(?:husband|wife|spouse|partner)|we)\b.*?\b(?:decide|make\s+(?:a\s+)?decision)\s+(?:everything\s+)?together\b",
+    r"\b(?:consult|check|talk|speak)\s+with\s+(?:my\s+)?(?:husband|wife|spouse|partner|boss|attorney|lawyer)\b",
+    r"\b(?:need|have)\s+to\s+(?:speak|talk|consult|check)\s+with\s+(?:my\s+)?(?:husband|wife|spouse|partner)\b",
     r"\b(?:my\s+)?(?:husband|wife|spouse|partner)\b.*?\b(?:part\s+of\s+(?:this|the)\s+conversation|involved|loop(?:ed)?\s+in|present|here)\b",
     r"\b(?:my\s+)?(?:husband|wife|spouse|partner)\b.*?\b(?:needs?|would\s+(?:really\s+)?need|has\s+to|must)\b.*?\b(?:conversation|decision|call|talk|meeting|input|present|here|further)\b",
     r"\b(?:my\s+)?(?:husband|wife|spouse|partner)\b.*?\bbefore\s+(?:we|i)\s+(?:go\s+any\s+further|make\s+a\s+decision|proceed|move\s+forward)\b",
+    r"\b(?:our|my)\s+(?:attorney|lawyer)\s+(?:must|needs?\s+to)\s+review\b",
 ]
 
 MaterialityTarget = Literal[
@@ -157,7 +159,7 @@ class MaterialityFilter:
             forced_reasons.append("Deterministic Override: explicit fact updates supplied.")
         # 5. Absent Decision-Maker & External Authority Overrides (Spec Test E / Client Principle #6)
         if bundle.speaker_id == "client" and any(re.search(pat, bundle.utterance_text.lower()) for pat in ABSENT_DECISION_MAKER_PATTERNS):
-            forced_targets.update(["decision_structure", "objections", "facts"])
+            forced_targets.update(["decision_structure", "facts"])
             forced_reasons.append("Deterministic Override: client disclosure indicates absent/external decision-maker authority (Spec Test E).")
 
         # 5b. Decision to Stay / Cancel Sale Supersession Overrides
@@ -178,6 +180,19 @@ class MaterialityFilter:
         if bundle.speaker_id == "client" and any(re.search(p, bundle.utterance_text.lower()) for p in reversal_markers):
             forced_targets.update(["facts", "dimensions"])
             forced_reasons.append("Deterministic Override: client explicit conversion reversal / cancellation.")
+
+        # 5d. Objection Reversal / Withdrawal Overrides
+        objection_reversal_markers = [
+            r"\b(?:don't|do\s+not|not)\s+(?:care|worried|concerned)\s+about\s+(?:the\s+)?(?:fee|commission|percentage|rate)\b",
+            r"\b(?:commission|fee)\s+(?:is\s+fine|isn't\s+an\s+issue|doesn't\s+matter|is\s+fair|is\s+okay)\b",
+            r"\b(?:fine|okay|happy)\s+with\s+(?:the\s+)?(?:commission|fee|rate)\b",
+            r"\bnever\s+mind\s+about\s+(?:the\s+)?(?:fee|commission)\b",
+            r"\bready\s+to\s+(?:sell|move\s+forward|list|go)\s+now\b",
+            r"\bnot\s+worried\s+about\s+(?:timing|the\s+market|rates)\b",
+        ]
+        if bundle.speaker_id == "client" and any(re.search(p, bundle.utterance_text.lower()) for p in objection_reversal_markers):
+            forced_targets.update(["objections", "dimensions"])
+            forced_reasons.append("Deterministic Override: client explicit objection reversal / withdrawal.")
 
         # 6. Behavioral & Acoustic Shifts (Client Principle #3: Dimension Stability & Materiality Gating)
         # Protect dimension sync: If upstream inference in bundle meaningfully diverges
@@ -362,7 +377,15 @@ class MaterialityFilter:
         has_active_objections = bool(
             current_state
             and any(
-                o.lifecycle_state in ("unresolved", "clarified", "partially_resolved")
+                o.lifecycle_state in ("unresolved", "clarified", "partially_resolved", "active", "partially_addressed")
+                for o in current_state.objections
+            )
+        )
+        has_dormancy_aging_due = bool(
+            current_state
+            and any(
+                o.lifecycle_state in ("active", "partially_addressed", "unresolved", "clarified", "partially_resolved", "reactivated")
+                and (bundle.turn_id - o.last_updated_turn_id) >= 2
                 for o in current_state.objections
             )
         )
@@ -393,6 +416,7 @@ class MaterialityFilter:
             or has_agent_clarification
             or has_boundary_score
             or has_boundary_words
+            or has_dormancy_aging_due
             or (has_active_objections and (bundle.agreement_score > 0.35 or bundle.salesperson_strategy_tag))
         ):
             targets.add("objections")

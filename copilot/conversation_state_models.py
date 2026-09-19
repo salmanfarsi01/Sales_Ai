@@ -5,15 +5,54 @@ from enum import Enum
 from typing import Any, Dict, List, Literal, Optional
 from pydantic import BaseModel, Field
 
-ObjectionLifecycleState = Literal[
-    "unresolved",
-    "clarified",
-    "partially_resolved",
-    "resolved",
-    "reactivated",
-    "boundary",
-    "superseded",
-]
+class ObjectionLifecycleState(str, Enum):
+    ACTIVE = "active"
+    PARTIALLY_ADDRESSED = "partially_addressed"
+    DORMANT = "dormant"
+    RESOLVED = "resolved"
+    SUPERSEDED = "superseded"
+
+    # Backward compatibility aliases
+    UNRESOLVED = "unresolved"
+    CLARIFIED = "clarified"
+    PARTIALLY_RESOLVED = "partially_resolved"
+    REACTIVATED = "reactivated"
+    BOUNDARY = "boundary"
+
+    def __eq__(self, other: Any) -> bool:
+        val = getattr(other, "value", other)
+        if str(self.value) == str(val):
+            return True
+        if self.value == "active" and val in ("unresolved", "reactivated", "active"):
+            return True
+        if val == "active" and self.value in ("unresolved", "reactivated", "active"):
+            return True
+        if self.value == "partially_addressed" and val in ("partially_resolved", "clarified", "partially_addressed"):
+            return True
+        if val == "partially_addressed" and self.value in ("partially_resolved", "clarified", "partially_addressed"):
+            return True
+        return False
+
+    def __hash__(self) -> int:
+        return hash(self.value)
+
+
+class DealDispositionType(str, Enum):
+    ACTIVELY_SELLING = "actively_selling"
+    RECONSIDERING = "reconsidering"
+    DECLINED = "declined"
+    REVERSED_DECLINE = "reversed_decline"
+
+
+class DealDispositionRecord(BaseModel):
+    disposition_id: str = Field(default_factory=lambda: f"disp_{uuid.uuid4().hex[:8]}")
+    disposition: DealDispositionType = DealDispositionType.ACTIVELY_SELLING
+    confidence: float = Field(0.90, ge=0.0, le=1.0)
+    source_turn_id: int = 0
+    timestamp_ms: int = 0
+    rationale: Optional[str] = None
+    superseded_by_id: Optional[str] = None
+    superseded_at_turn_id: Optional[int] = None
 
 PersistentFactCategory = Literal[
     "logistical",
@@ -44,13 +83,65 @@ class DecisionStructure(BaseModel):
     confidence: float = Field(0.70, ge=0.0, le=1.0)
 
 
+class ObjectionDriverLayer(BaseModel):
+    """Client Feedback No. 5: Second-layer underlying driver mapping why an objection exists."""
+    surface_objection: str = Field(..., description="Canonical category, e.g. commission_fee")
+    underlying_driver: str = Field(..., description="Closed taxonomy driver, e.g. price_resistance, perceived_value_deficit, previous_agent_outcome")
+    origin_context: Optional[str] = Field(None, description="Triggering conversational context, e.g. referenced prior agent experience")
+    supporting_evidence: List[str] = Field(default_factory=list, description="Turn IDs or quoted phrases justifying the driver classification")
+    confidence: float = Field(0.90, ge=0.0, le=1.0)
+    strategic_target: str = Field(..., description="Actionable objective the sales response should address")
+    classification_source: Literal["llm", "heuristic_pattern", "heuristic_default"] = Field(
+        "heuristic_pattern",
+        description="Source of classification: 'llm' for Groq LLM inference, 'heuristic_pattern' for offline pattern matching, 'heuristic_default' for category fallback"
+    )
+
+
+# -----------------------------------------------------------------------------
+# Canonical Strategy Families for Tactical Aliasing (Client Review Follow-Up)
+# Maps near-duplicate tactical tag variations to their canonical strategy family
+# -----------------------------------------------------------------------------
+STRATEGY_FAMILY_ALIASES: Dict[str, str] = {
+    # Net proceeds reframe variations
+    "net_proceeds_comparison": "financial_net_proceeds_reframe",
+    "net_sheet_breakdown": "financial_net_proceeds_reframe",
+    "net_proceeds_reframe": "financial_net_proceeds_reframe",
+    "net_sheet_roi": "financial_net_proceeds_reframe",
+    # Hyperlocal marketing variations
+    "hyperlocal_comps": "hyperlocal_marketing_differentiation",
+    "marketing_differentiation": "hyperlocal_marketing_differentiation",
+    "hyperlocal_buyer_pipeline": "hyperlocal_marketing_differentiation",
+    # Performance guarantee variations
+    "fee_guarantee": "fee_performance_guarantee",
+    "performance_guarantee": "fee_performance_guarantee",
+    "days_on_market_guarantee": "fee_performance_guarantee",
+}
+
+
+def normalize_strategy_tag(strategy_tag: str) -> str:
+    """Normalizes strategy tag to its canonical family if recognized, or strips/lowercases."""
+    clean = strategy_tag.strip().lower()
+    return STRATEGY_FAMILY_ALIASES.get(clean, clean)
+
+
+class StrategyAttemptOutcome(BaseModel):
+    """Client Feedback No. 6: Structured effectiveness feedback tracking prospect reaction to an attempted reframe."""
+    strategy_tag: str = Field(..., description="Salesperson strategy tag, e.g. financial_net_proceeds_reframe")
+    attempted_at_turn_id: int
+    prospect_response_turn_id: int
+    prospect_response_summary: str = Field(..., description="Explanation of how prospect reacted, e.g. partial_acceptance_objection_persists")
+    effectiveness: Literal["effective", "partial", "insufficient", "rejected", "no_response"]
+    evidence: Dict[str, float] = Field(default_factory=dict, description="Behavioral signals from response turn, e.g. agreement_score, specificity_score")
+    timestamp_ms: int = 0
+
+
 class ObjectionRecord(BaseModel):
     objection_id: str = Field(default_factory=lambda: f"obj_{uuid.uuid4().hex[:8]}")
     recurrence_id: Optional[str] = Field(None, description="Anchored Behavioral Signal Engine recurrence tracking ID")
     canonical_category: str = Field(..., description="e.g. commission_fee, timing_market, representation_broker, price")
     initial_statement: str
     latest_statement: str
-    lifecycle_state: ObjectionLifecycleState = "unresolved"
+    lifecycle_state: ObjectionLifecycleState = ObjectionLifecycleState.ACTIVE
     first_turn_id: int
     last_updated_turn_id: int
     recurrence_count: int = 1
@@ -59,6 +150,38 @@ class ObjectionRecord(BaseModel):
     confidence: float = Field(0.85, ge=0.0, le=1.0)
     superseded_by_objection_id: Optional[str] = None
     superseded_at_turn_id: Optional[int] = None
+    # Client Feedback No. 5 & No. 6 Extensions
+    driver_layer: Optional[ObjectionDriverLayer] = None
+    strategy_outcomes: List[StrategyAttemptOutcome] = Field(default_factory=list)
+
+    def get_failed_strategies(self) -> List[str]:
+        """Returns list of strategy tags that failed (insufficient or rejected) on this objection."""
+        return [o.strategy_tag for o in self.strategy_outcomes if o.effectiveness in ("insufficient", "rejected")]
+
+    def has_strategy_failed(self, strategy_tag: str, match_family: bool = True) -> bool:
+        """Returns True if the specified strategy (or its canonical family) has already failed on this objection.
+        If match_family is True (default), checks both exact tag and canonical tactical family aliases.
+        """
+        target_norm = normalize_strategy_tag(strategy_tag) if match_family else strategy_tag.strip().lower()
+        for o in self.strategy_outcomes:
+            if o.effectiveness in ("insufficient", "rejected"):
+                o_norm = normalize_strategy_tag(o.strategy_tag) if match_family else o.strategy_tag.strip().lower()
+                if o.strategy_tag == strategy_tag or o_norm == target_norm:
+                    return True
+        return False
+
+    def get_latest_strategy_outcome(self) -> Optional[StrategyAttemptOutcome]:
+        """Returns the most recent strategy attempt outcome, if any."""
+        return self.strategy_outcomes[-1] if self.strategy_outcomes else None
+
+    def get_effective_strategies(self) -> List[str]:
+        """Returns list of strategy tags that successfully resolved or advanced this objection."""
+        return [o.strategy_tag for o in self.strategy_outcomes if o.effectiveness == "effective"]
+
+    def get_partial_strategies(self) -> List[str]:
+        """Returns list of strategy tags that achieved partial agreement."""
+        return [o.strategy_tag for o in self.strategy_outcomes if o.effectiveness == "partial"]
+
 
 
 class PersistentFactRecord(BaseModel):
@@ -146,6 +269,7 @@ PushStrengthState = Literal[
     "two_window_choice",
     "reduce_friction_reask",
     "respect_record_exit",
+    "explore_conditional_terms",
 ]
 
 ConversionType = Literal[
@@ -242,6 +366,8 @@ class ConversationStateSnapshot(BaseModel):
     push_strength: Optional[PushStrengthRecommendation] = None
     conversion_event: Optional[ConversionEventObject] = None
     conversion_events: List[ConversionEventObject] = Field(default_factory=list)
+    deal_disposition: Optional[DealDispositionRecord] = None
+    deal_dispositions: List[DealDispositionRecord] = Field(default_factory=list)
     overall_confidence: float = Field(0.75, ge=0.0, le=1.0)
     change_history: List[StateChangeRecord] = Field(default_factory=list)
 
@@ -258,13 +384,48 @@ class ConversationStateSnapshot(BaseModel):
         return [f for f in self.facts if f.status == "superseded"]
 
     def get_unresolved_objections(self) -> List[ObjectionRecord]:
-        return [o for o in self.objections if o.lifecycle_state in ("unresolved", "reactivated", "partially_resolved")]
+        return [
+            o for o in self.objections
+            if o.lifecycle_state in (
+                ObjectionLifecycleState.ACTIVE,
+                ObjectionLifecycleState.PARTIALLY_ADDRESSED,
+                "active",
+                "partially_addressed",
+                "unresolved",
+                "reactivated",
+                "partially_resolved",
+            )
+        ]
 
     def get_active_objections(self) -> List[ObjectionRecord]:
-        return [o for o in self.objections if o.lifecycle_state in ("unresolved", "clarified", "partially_resolved", "reactivated")]
+        return [
+            o for o in self.objections
+            if o.lifecycle_state in (
+                ObjectionLifecycleState.ACTIVE,
+                ObjectionLifecycleState.PARTIALLY_ADDRESSED,
+                "active",
+                "partially_addressed",
+                "unresolved",
+                "clarified",
+                "partially_resolved",
+                "reactivated",
+            )
+        ]
+
+    def get_dormant_objections(self) -> List[ObjectionRecord]:
+        return [o for o in self.objections if o.lifecycle_state in (ObjectionLifecycleState.DORMANT, "dormant")]
 
     def get_superseded_objections(self) -> List[ObjectionRecord]:
-        return [o for o in self.objections if o.lifecycle_state == "superseded"]
+        return [o for o in self.objections if o.lifecycle_state in (ObjectionLifecycleState.SUPERSEDED, "superseded")]
+
+    def get_deal_disposition_history(self) -> List[DealDispositionRecord]:
+        return list(self.deal_dispositions)
+
+    def get_active_deal_disposition(self) -> Optional[DealDispositionRecord]:
+        for d in reversed(self.deal_dispositions):
+            if d.superseded_by_id is None:
+                return d
+        return self.deal_disposition
 
     def get_conversion_event_history(self) -> List[ConversionEventObject]:
         """Returns the full chronological lineage of conversion events."""

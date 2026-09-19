@@ -78,6 +78,16 @@ class ConversationScoringConfig(BaseModel):
     two_window_choice_max_specificity: float = Field(0.45, ge=0.0, le=1.0, description="Maximum specificity for agreeable-but-vague classification")
     reduce_friction_logistical_upper: float = Field(55.0, ge=0.0, le=100.0, description="Upper bound for soft logistical hesitation before direct ask")
 
+    # -------------------------------------------------------------------------
+    # 6. Concern Lifecycle & Dormancy Thresholds (Provisional v1 Calibration)
+    # -------------------------------------------------------------------------
+    dormancy_turn_threshold: int = Field(
+        3,
+        ge=1,
+        le=10,
+        description="Provisional v1 threshold: unaddressed conversation turns before an active/partially-addressed objection transitions to DORMANT. Calibrated for standard ~1.5-2 min dialogue cadence."
+    )
+
     @model_validator(mode="after")
     def validate_weights(self) -> ConversationScoringConfig:
         momentum_sum = (

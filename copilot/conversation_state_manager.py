@@ -15,6 +15,10 @@ from .conversation_state_models import (
     PushStrengthRecommendation,
     StateChangeRecord,
     ConversionEventStatus,
+    ConversionEventObject,
+    DealDispositionType,
+    DealDispositionRecord,
+    ObjectionLifecycleState,
 )
 from .conversation_facts import PersistentFactsManager
 from .conversation_objections import ObjectionLifecycleEngine, DECISION_TO_STAY_PATTERNS
@@ -48,7 +52,11 @@ class ConversationStateManager:
         self.conversion_target = conversion_target
         self.current_state = initial_snapshot or ConversationStateSnapshot(call_sid=call_sid)
         self.facts_manager = PersistentFactsManager(initial_facts=self.current_state.facts)
-        self.objections_engine = ObjectionLifecycleEngine(initial_objections=self.current_state.objections)
+        dormancy_thresh = scoring_config.dormancy_turn_threshold if scoring_config else 3
+        self.objections_engine = ObjectionLifecycleEngine(
+            initial_objections=self.current_state.objections,
+            dormancy_turn_threshold=dormancy_thresh,
+        )
         self.supersession_detector = TruthSupersessionDetector()
         self.materiality_filter = MaterialityFilter()
         self.scoring_engine = ConversationScoringEngine(config=scoring_config)
@@ -61,6 +69,12 @@ class ConversationStateManager:
         self._conversion_events: List[ConversionEventObject] = list(self.current_state.conversion_events)
         if self.current_state.conversion_event and not any(e.event_id == self.current_state.conversion_event.event_id for e in self._conversion_events):
             self._conversion_events.append(self.current_state.conversion_event)
+        self.deal_disposition: Optional[DealDispositionRecord] = self.current_state.deal_disposition or DealDispositionRecord(disposition=DealDispositionType.ACTIVELY_SELLING)
+        self.current_state.deal_disposition = self.deal_disposition
+        self._deal_dispositions: List[DealDispositionRecord] = list(self.current_state.deal_dispositions)
+        if self.deal_disposition and not any(d.disposition_id == self.deal_disposition.disposition_id for d in self._deal_dispositions):
+            self._deal_dispositions.append(self.deal_disposition)
+        self.current_state.deal_dispositions = list(self._deal_dispositions)
 
     def process_turn_bundle(
         self,
@@ -105,9 +119,16 @@ class ConversationStateManager:
         old_version = self.current_state.state_version
         next_version = old_version
 
-        # If turn is non-material (no targets affected and no manual decision/fact updates),
+        dormancy_thresh = getattr(self.objections_engine, "dormancy_turn_threshold", 3)
+        dormant_due = any(
+            o.lifecycle_state in ("active", "partially_addressed", "unresolved", "reactivated", ObjectionLifecycleState.ACTIVE, ObjectionLifecycleState.PARTIALLY_ADDRESSED)
+            and (bundle.turn_id - o.last_updated_turn_id) >= dormancy_thresh
+            for o in self.current_state.objections
+        )
+
+        # If turn is non-material (no targets affected, no manual decision/fact updates, and no dormancy aging due),
         # preserve state version and dimension stability entirely without mutating state.
-        if not materiality.is_material and not decision_updates and not fact_updates:
+        if not materiality.is_material and not decision_updates and not fact_updates and not dormant_due:
             self.current_state.last_updated_turn_id = bundle.turn_id
             self.current_state.last_updated_timestamp_ms = bundle.timestamp_ms
             self.prior_bundle = bundle
@@ -216,6 +237,16 @@ class ConversationStateManager:
             self.current_state.objections = updated_objs
             changes.extend(obj_changes)
 
+        # 4b. Evaluate Dormancy Aging for unaddressed concerns across turns
+        updated_objs, dormant_changes, next_version = self.objections_engine.check_dormancy_aging(
+            current_turn_id=bundle.turn_id,
+            timestamp_ms=bundle.timestamp_ms,
+            current_version=next_version,
+            contributing_evidence_ids=bundle.contributing_evidence_ids,
+        )
+        self.current_state.objections = updated_objs
+        changes.extend(dormant_changes)
+
         # 5. Process Fact Updates if provided or autonomously extracted from client disclosures
         autonomous_fact_updates = None
         if not fact_updates and bundle.speaker_id == "client":
@@ -283,6 +314,42 @@ class ConversationStateManager:
 
         # 7. Sync facts snapshot
         self.current_state.facts = self.facts_manager.get_all_facts()
+
+        # 7b. Evaluate Deal Disposition (Phase 8 / Fix 2)
+        if bundle.speaker_id == "client":
+            new_disp = self.supersession_detector.evaluate_deal_disposition(
+                candidate_text=bundle.utterance_text,
+                current_disposition=self.deal_disposition,
+                turn_id=bundle.turn_id,
+                timestamp_ms=bundle.timestamp_ms,
+            )
+            if new_disp is not None and (self.deal_disposition is None or self.deal_disposition.disposition != new_disp.disposition or self.deal_disposition.disposition_id != new_disp.disposition_id):
+                if self.deal_disposition is not None and self.deal_disposition.disposition_id != new_disp.disposition_id:
+                    self.deal_disposition.superseded_by_id = new_disp.disposition_id
+                    self.deal_disposition.superseded_at_turn_id = bundle.turn_id
+
+                if not any(d.disposition_id == new_disp.disposition_id for d in self._deal_dispositions):
+                    self._deal_dispositions.append(new_disp)
+                prev_disp = self.deal_disposition
+                self.deal_disposition = new_disp
+                next_version += 1
+                changes.append(
+                    StateChangeRecord(
+                        state_version_before=next_version - 1,
+                        state_version_after=next_version,
+                        field_path="deal_disposition",
+                        old_value=prev_disp.model_dump() if prev_disp else None,
+                        new_value=new_disp.model_dump(),
+                        triggering_turn_id=bundle.turn_id,
+                        evidence_ids=bundle.contributing_evidence_ids,
+                        reason=f"Deal disposition transitioned to {new_disp.disposition}: {new_disp.rationale or ''}".strip(),
+                        confidence=new_disp.confidence,
+                        timestamp_ms=bundle.timestamp_ms,
+                    )
+                )
+
+        self.current_state.deal_disposition = self.deal_disposition
+        self.current_state.deal_dispositions = list(self._deal_dispositions)
 
         # 8. Compute Momentum & Readiness Scoring (Phase 6)
         momentum_res = self.scoring_engine.compute_momentum(bundle, self.current_state)
@@ -637,3 +704,14 @@ class ConversationStateManager:
             if ev.superseded_by_event_id is None:
                 return ev
         return self.current_state.conversion_event
+
+    def get_deal_disposition_history(self) -> List[DealDispositionRecord]:
+        """Returns the complete chronological history of deal disposition records."""
+        return list(self._deal_dispositions)
+
+    def get_active_deal_disposition(self) -> Optional[DealDispositionRecord]:
+        """Returns the current active (unsuperseded) deal disposition record."""
+        for d in reversed(self._deal_dispositions):
+            if d.superseded_by_id is None:
+                return d
+        return self.deal_disposition

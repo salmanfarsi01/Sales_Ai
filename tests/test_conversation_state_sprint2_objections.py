@@ -186,8 +186,8 @@ class TestConversationStateSprint2Objections:
         snap8 = manager.process_turn_bundle(t8)
         fee_turn8 = next(o for o in snap8.objections if o.objection_id == fee_id)
         assert fee_turn8.lifecycle_state == "partially_resolved"
-        # Spouse objection remains UNRESOLVED
-        assert next(o for o in snap8.objections if o.objection_id == spouse_id).lifecycle_state == "unresolved"
+        # Spouse objection remains UNRESOLVED or aged to DORMANT (not resolved!)
+        assert next(o for o in snap8.objections if o.objection_id == spouse_id).lifecycle_state in ("unresolved", "dormant")
 
         # Turn 9 (Agent): Sets up meeting to inspect the proof
         t9 = _create_turn_bundle(
@@ -214,9 +214,10 @@ class TestConversationStateSprint2Objections:
         assert fee_turn10.lifecycle_state == "resolved"
         assert fee_turn10.resolution_evidence is not None
 
-        # Critical Scope Check: Spouse authority was NEVER addressed and MUST REMAIN UNRESOLVED
+        # Critical Scope Check: Spouse authority was NEVER addressed and MUST REMAIN UNRESOLVED / DORMANT (NOT RESOLVED!)
         # even though call-wide readiness is 0.82!
-        assert spouse_turn10.lifecycle_state == "unresolved"
+        assert spouse_turn10.lifecycle_state in ("unresolved", "dormant")
+        assert spouse_turn10.lifecycle_state != "resolved"
 
         # Turn 11 (Prospect): Previously resolved objection returns -> REACTIVATED (Client Principle #5)
         t11 = _create_turn_bundle(
