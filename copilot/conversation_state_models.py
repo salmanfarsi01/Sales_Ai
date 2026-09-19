@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import uuid
+from enum import Enum
 from typing import Any, Dict, List, Literal, Optional
 from pydantic import BaseModel, Field
 
@@ -157,15 +158,21 @@ ConversionType = Literal[
     "unspecified",
 ]
 
-ConversionStatus = Literal[
-    "not_attempted",
-    "eligible",
-    "proposed",
-    "tentative",
-    "confirmed",
-    "blocked",
-    "declined",
-]
+class ConversionEventStatus(str, Enum):
+    PROPOSED = "proposed"
+    TENTATIVE = "tentative"
+    CONFIRMED = "confirmed"
+    CANCELLED = "cancelled"
+    RESCHEDULED = "rescheduled"
+    COMPLETED = "completed"
+    # Stage-gate and compatibility states
+    ELIGIBLE = "eligible"
+    BLOCKED = "blocked"
+    NOT_ATTEMPTED = "not_attempted"
+    DECLINED = "declined"
+
+
+ConversionStatus = ConversionEventStatus
 
 
 class GateConditionResult(BaseModel):
@@ -200,10 +207,10 @@ class PushStrengthRecommendation(BaseModel):
 
 
 class ConversionEventObject(BaseModel):
-    """Structured commitment / conversion tracking entity (Phase 7)."""
+    """Structured commitment / conversion tracking entity with non-destructive supersession."""
     event_id: str = Field(default_factory=lambda: f"conv_{uuid.uuid4().hex[:8]}")
     conversion_type: ConversionType = "unspecified"
-    status: ConversionStatus = "not_attempted"
+    status: ConversionEventStatus = ConversionEventStatus.NOT_ATTEMPTED
     start_at: Optional[str] = None
     location_or_format: Optional[str] = None
     participants: List[str] = Field(default_factory=list)
@@ -211,6 +218,10 @@ class ConversionEventObject(BaseModel):
     source_turn_ids: List[int] = Field(default_factory=list)
     blocking_items: List[str] = Field(default_factory=list)
     followup_is_conversion: bool = False
+    superseded_by_event_id: Optional[str] = None
+    supersedes_event_id: Optional[str] = None
+    superseded_at_turn_id: Optional[int] = None
+    reversal_reason: Optional[str] = None
 
 
 class ConversationStateSnapshot(BaseModel):
@@ -230,6 +241,7 @@ class ConversationStateSnapshot(BaseModel):
     conversion_gate: Optional[MeetingConversionGate] = None
     push_strength: Optional[PushStrengthRecommendation] = None
     conversion_event: Optional[ConversionEventObject] = None
+    conversion_events: List[ConversionEventObject] = Field(default_factory=list)
     overall_confidence: float = Field(0.75, ge=0.0, le=1.0)
     change_history: List[StateChangeRecord] = Field(default_factory=list)
 
@@ -253,4 +265,19 @@ class ConversationStateSnapshot(BaseModel):
 
     def get_superseded_objections(self) -> List[ObjectionRecord]:
         return [o for o in self.objections if o.lifecycle_state == "superseded"]
+
+    def get_conversion_event_history(self) -> List[ConversionEventObject]:
+        """Returns the full chronological lineage of conversion events."""
+        return list(self.conversion_events)
+
+    def get_active_conversion_event(self) -> Optional[ConversionEventObject]:
+        """Returns the current active (unsuperseded) conversion event, if any."""
+        for ev in reversed(self.conversion_events):
+            if ev.superseded_by_event_id is None:
+                return ev
+        return self.conversion_event
+
+    def get_superseded_conversion_events(self) -> List[ConversionEventObject]:
+        """Returns all superseded historical conversion events."""
+        return [ev for ev in self.conversion_events if ev.superseded_by_event_id is not None]
 

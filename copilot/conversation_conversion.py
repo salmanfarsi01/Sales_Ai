@@ -16,10 +16,55 @@ from .conversation_state_models import (
     PushStrengthRecommendation,
     ConversionType,
     ConversionStatus,
+    ConversionEventStatus,
     ConversionEventObject,
 )
 
-LOGGER = logging.getLogger("copilot.conversation_conversion")
+def detect_explicit_reversal_in_text(text: str) -> tuple[bool, Optional[str]]:
+    """Detects whether explicit text requests to cancel, retract, or call off an appointment/meeting.
+    Guarded with negation filters and hypothetical conditionals.
+    """
+    text_lower = text.lower()
+
+    # Negation guards: Prospect asserting they do NOT want to cancel
+    negation_patterns = [
+        r"\b(?:don't|do\s+not|won't|will\s+not|not\s+going\s+to|not\s+trying\s+to)\s+cancel\b",
+        r"\b(?:not|never)\s+cancelling\b",
+        r"\b(?:still\s+want\s+to\s+meet|still\s+planning\s+to|still\s+good\s+for)\b",
+        r"\b(?:no\s+need\s+to\s+cancel|don't\s+cancel)\b",
+    ]
+    # Hypothetical guards: Prospect framing cancellation hypothetically
+    hypothetical_patterns = [
+        r"\bhypothetical(?:ly)?\b",
+        r"\blet's\s+say\b",
+        r"\bwhat\s+if\b",
+        r"\bsuppose\b",
+        r"\bjust\s+pretend\b",
+        r"\bmaybe\b",
+        r"\bif\s+i\s+(?:had\s+to|needed\s+to|were\s+to\s+cancel)\b",
+    ]
+    if any(re.search(pat, text_lower) for pat in negation_patterns) or any(re.search(pat, text_lower) for pat in hypothetical_patterns):
+        return False, None
+
+    # Reversal keywords & phrases
+    reversal_patterns = [
+        (r"\b(?:cancel|cancelling|cancelled)\b", "Prospect requested meeting cancellation"),
+        (r"\b(?:never\s+mind|nevermind)\b", "Prospect stated 'never mind' to conversion"),
+        (r"\b(?:let's\s+not|let\s+us\s+not)\s+(?:meet|do\s+that|do\s+this|schedule)\b", "Prospect requested not to meet/schedule"),
+        (r"\bforget\s+(?:about\s+)?(?:it|that|thursday|friday|monday|tuesday|wednesday|tomorrow|the\s+meeting|meeting)\b", "Prospect requested to forget scheduled meeting"),
+        (r"\b(?:can't|cannot|couldn't|could\s+not)\s+make\s+it\s+(?:anymore|after\s+all|now)\b", "Prospect stated they cannot make the meeting"),
+        (r"\bwon't\s+be\s+able\s+to\s+meet\b", "Prospect unavailable to meet"),
+        (r"\b(?:call\s+off|called\s+off)\b", "Prospect called off meeting"),
+        (r"\bnot\s+going\s+to\s+work\s+out\b", "Prospect stated meeting will not work out"),
+        (r"\bdecided\s+(?:against|not\s+to\s+meet)\b", "Prospect decided not to meet"),
+        (r"\btake\s+me\s+off\s+(?:the\s+schedule|your\s+calendar)\b", "Prospect requested removal from calendar"),
+    ]
+
+    for pat, desc in reversal_patterns:
+        if re.search(pat, text_lower):
+            return True, desc
+
+    return False, None
 
 
 class MeetingConversionGateEngine:
@@ -122,6 +167,18 @@ class MeetingConversionGateEngine:
             return True, bundle.utterance_text.strip()
 
         return False, None
+
+    def detect_explicit_reversal(
+        self,
+        bundle: BehavioralSignalInputBundle,
+        current_state: ConversationStateSnapshot,
+        prior_bundle: Optional[BehavioralSignalInputBundle] = None,
+    ) -> tuple[bool, Optional[str]]:
+        """Detects whether prospect explicitly requested to cancel, retract, or call off an appointment/meeting."""
+        if bundle.speaker_id != "client":
+            return False, None
+
+        return detect_explicit_reversal_in_text(bundle.utterance_text)
 
     def evaluate_gate(
         self,
@@ -561,10 +618,101 @@ class MeetingConversionGateEngine:
         gate: MeetingConversionGate,
         previous_event: Optional[ConversionEventObject] = None,
     ) -> Optional[ConversionEventObject]:
-        """Tracks, creates, or updates the structured Conversion Event Object."""
+        """Tracks, creates, or updates the structured Conversion Event Object with non-destructive supersession."""
         text_lower = bundle.utterance_text.lower()
 
+        # ---------------------------------------------------------------------
+        # Trigger A: Hard Boundary Active Override (Automatic Cancellation)
+        # ---------------------------------------------------------------------
+        is_hard_boundary = current_state.contact_compliance.hard_boundary_active or bundle.boundary_score >= 0.85
+        if is_hard_boundary:
+            if previous_event and previous_event.status in (
+                ConversionEventStatus.CONFIRMED,
+                ConversionEventStatus.TENTATIVE,
+                ConversionEventStatus.PROPOSED,
+                ConversionEventStatus.ELIGIBLE,
+            ):
+                new_event = ConversionEventObject(
+                    event_id=f"conv_{uuid.uuid4().hex[:8]}",
+                    conversion_type=previous_event.conversion_type,
+                    status=ConversionEventStatus.CANCELLED,
+                    start_at=previous_event.start_at,
+                    location_or_format=previous_event.location_or_format,
+                    participants=previous_event.participants,
+                    confirmation_confidence=1.0,
+                    source_turn_ids=[bundle.turn_id],
+                    blocking_items=["hard_boundary"],
+                    followup_is_conversion=False,
+                    supersedes_event_id=previous_event.event_id,
+                    reversal_reason="hard_boundary",
+                )
+                previous_event.superseded_by_event_id = new_event.event_id
+                previous_event.superseded_at_turn_id = bundle.turn_id
+                return new_event
+            elif previous_event and previous_event.status == ConversionEventStatus.CANCELLED:
+                return previous_event
+
+        # ---------------------------------------------------------------------
+        # Trigger B: Explicit Reversal Language (Independent of Boundary)
+        # ---------------------------------------------------------------------
+        is_reversal, reversal_reason = self.detect_explicit_reversal(bundle, current_state)
+        if is_reversal:
+            if previous_event and previous_event.status in (
+                ConversionEventStatus.CONFIRMED,
+                ConversionEventStatus.TENTATIVE,
+                ConversionEventStatus.PROPOSED,
+            ):
+                new_event = ConversionEventObject(
+                    event_id=f"conv_{uuid.uuid4().hex[:8]}",
+                    conversion_type=previous_event.conversion_type,
+                    status=ConversionEventStatus.CANCELLED,
+                    start_at=previous_event.start_at,
+                    location_or_format=previous_event.location_or_format,
+                    participants=previous_event.participants,
+                    confirmation_confidence=0.90,
+                    source_turn_ids=[bundle.turn_id],
+                    blocking_items=[reversal_reason or "explicit_cancellation"],
+                    followup_is_conversion=False,
+                    supersedes_event_id=previous_event.event_id,
+                    reversal_reason=reversal_reason or "explicit_cancellation",
+                )
+                previous_event.superseded_by_event_id = new_event.event_id
+                previous_event.superseded_at_turn_id = bundle.turn_id
+                return new_event
+            elif previous_event and previous_event.status == ConversionEventStatus.CANCELLED:
+                return previous_event
+
+        # If previous event is already cancelled, stay cancelled unless a new affirmative commitment is made
+        if previous_event and previous_event.status == ConversionEventStatus.CANCELLED:
+            has_commit, _ = self.detect_explicit_commitment(bundle, current_state)
+            if not has_commit:
+                return previous_event
+
+        # ---------------------------------------------------------------------
+        # Salesperson Slot Proposal (State: PROPOSED)
+        # ---------------------------------------------------------------------
+        if bundle.speaker_id == "salesperson":
+            prop_match = re.search(
+                r"\b(monday|tuesday|wednesday|thursday|friday|saturday|sunday|tomorrow)\b.*?\b(?:at\s+)?(\d{1,2}(?::\d{2})?\s*(?:am|pm)?|one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve)\b",
+                text_lower,
+            )
+            if prop_match and (previous_event is None or previous_event.status in (ConversionEventStatus.NOT_ATTEMPTED, ConversionEventStatus.ELIGIBLE)):
+                return ConversionEventObject(
+                    event_id=f"conv_{uuid.uuid4().hex[:8]}",
+                    conversion_type="in_person_meeting",
+                    status=ConversionEventStatus.PROPOSED,
+                    start_at=prop_match.group(0).strip().title(),
+                    location_or_format="Scheduled Meeting",
+                    participants=["Agent", "Client"],
+                    confirmation_confidence=0.50,
+                    source_turn_ids=[bundle.turn_id],
+                    blocking_items=[],
+                    followup_is_conversion=True,
+                )
+
+        # ---------------------------------------------------------------------
         # Spec Acceptance Test #3: "Send me something" alone != conversion
+        # ---------------------------------------------------------------------
         send_info_patterns = [
             r"\bsend\s+(me\s+)?(an?\s+)?(email|info|information|brochure|package|something)\b",
             r"\bemail\s+me\s+(the\s+)?(details|pricing|packet|info)\b",
@@ -577,7 +725,7 @@ class MeetingConversionGateEngine:
             return ConversionEventObject(
                 event_id=previous_event.event_id if previous_event else f"conv_{uuid.uuid4().hex[:8]}",
                 conversion_type="information_send",
-                status="blocked",
+                status=ConversionEventStatus.BLOCKED,
                 start_at=None,
                 location_or_format="email",
                 participants=[bundle.speaker_id],
@@ -587,7 +735,9 @@ class MeetingConversionGateEngine:
                 followup_is_conversion=False,
             )
 
+        # ---------------------------------------------------------------------
         # Spec Acceptance Test #2: Walkthrough confirmation
+        # ---------------------------------------------------------------------
         walkthrough_patterns = [
             r"\b(walkthrough|walk\s*through|walk\s+the\s+property|walk\s+the\s+house)\b",
             r"\bcome\s+(by|over|see)\b",
@@ -605,71 +755,157 @@ class MeetingConversionGateEngine:
 
         # Confirming words
         confirm_patterns = [
-            r"\b(yes|yeah|sure|that\s+works|sounds\s+good|perfect|see\s+you\s+then|i'll\s+be\s+there)\b",
-            r"\blet's\s+do\s+it\b",
-            r"\bthursday\s+at\s+\d\b",
+            r"\b(?:that\s+works|works\s+for\s+me|this\s+works|it\s+works)\b",
+            r"\b(?:sounds\s+good|sounds\s+fair|perfect|let's\s+do\s+it|deal|fine\s+with\s+me|see\s+you\s+then|i'll\s+be\s+there)\b",
+            r"\b(?:i\s+could\s+do|i\s+can\s+do|let's\s+meet|we\s+can\s+meet|come\s+by|stop\s+by)\b",
+            r"\b(?:sure\s+let's\s+meet|sure\s+come\s+by)\b",
+            r"(?<!doesn't\s)(?<!does\snot\s)(?<!won't\s)(?<!not\s)\bworks\b",
+            r"\b(yes|yeah|sure|definitely|absolutely)\b",
         ]
-        is_confirming = any(re.search(pat, text_lower) for pat in confirm_patterns)
+        has_explicit_commit, commit_slot = self.detect_explicit_commitment(bundle, current_state)
+        is_confirming = any(re.search(pat, text_lower) for pat in confirm_patterns) or has_explicit_commit
 
         if (is_walkthrough or (previous_event and previous_event.conversion_type == "property_walkthrough")) and bundle.speaker_id == "client":
-            # If confirmed walkthrough
             if (is_confirming and (has_time or (previous_event and previous_event.start_at))) or (is_walkthrough and has_time and is_confirming):
-                extracted_time = None
                 time_match = re.search(r"\b(thursday|friday|monday|tuesday|wednesday|tomorrow)\s*(at\s*\d{1,2}(:\d{2})?\s*(am|pm)?)?", text_lower)
-                if time_match:
-                    extracted_time = time_match.group(0).title()
-                elif previous_event and previous_event.start_at:
-                    extracted_time = previous_event.start_at
+                extracted_time = commit_slot or (time_match.group(0).strip().title() if time_match else None) or (previous_event.start_at if previous_event else None)
 
-                return ConversionEventObject(
-                    event_id=previous_event.event_id if previous_event else f"conv_{uuid.uuid4().hex[:8]}",
-                    conversion_type="property_walkthrough",
-                    status="confirmed",
-                    start_at=extracted_time or "Confirmed Time Slot",
-                    location_or_format="Property Address",
-                    participants=["Client", "Agent"],
-                    confirmation_confidence=0.90,
-                    source_turn_ids=sorted(list(set((previous_event.source_turn_ids if previous_event else []) + [bundle.turn_id]))),
-                    blocking_items=[],
-                    followup_is_conversion=True,
-                )
+                target_time = extracted_time or "Confirmed Time Slot"
 
-        # If gate is open and prospect agrees to meeting proposal
+                if previous_event and (
+                    previous_event.status in (ConversionEventStatus.PROPOSED, ConversionEventStatus.TENTATIVE, ConversionEventStatus.ELIGIBLE, ConversionEventStatus.CANCELLED)
+                    or (previous_event.status == ConversionEventStatus.CONFIRMED and previous_event.start_at and target_time != previous_event.start_at)
+                ):
+                    new_event = ConversionEventObject(
+                        event_id=f"conv_{uuid.uuid4().hex[:8]}",
+                        conversion_type="property_walkthrough",
+                        status=ConversionEventStatus.CONFIRMED,
+                        start_at=target_time,
+                        location_or_format="Property Address",
+                        participants=["Client", "Agent"],
+                        confirmation_confidence=0.90,
+                        source_turn_ids=sorted(list(set(previous_event.source_turn_ids + [bundle.turn_id]))),
+                        blocking_items=[],
+                        followup_is_conversion=True,
+                        supersedes_event_id=previous_event.event_id,
+                        reversal_reason="rescheduled" if (previous_event.status == ConversionEventStatus.CONFIRMED and target_time != previous_event.start_at) else None,
+                    )
+                    previous_event.superseded_by_event_id = new_event.event_id
+                    previous_event.superseded_at_turn_id = bundle.turn_id
+                    return new_event
+                elif previous_event and previous_event.status == ConversionEventStatus.CONFIRMED:
+                    return ConversionEventObject(
+                        event_id=previous_event.event_id,
+                        conversion_type="property_walkthrough",
+                        status=ConversionEventStatus.CONFIRMED,
+                        start_at=target_time,
+                        location_or_format="Property Address",
+                        participants=["Client", "Agent"],
+                        confirmation_confidence=0.90,
+                        source_turn_ids=sorted(list(set(previous_event.source_turn_ids + [bundle.turn_id]))),
+                        blocking_items=[],
+                        followup_is_conversion=True,
+                        supersedes_event_id=previous_event.supersedes_event_id,
+                        reversal_reason=previous_event.reversal_reason,
+                    )
+                else:
+                    return ConversionEventObject(
+                        event_id=f"conv_{uuid.uuid4().hex[:8]}",
+                        conversion_type="property_walkthrough",
+                        status=ConversionEventStatus.CONFIRMED,
+                        start_at=target_time,
+                        location_or_format="Property Address",
+                        participants=["Client", "Agent"],
+                        confirmation_confidence=0.90,
+                        source_turn_ids=[bundle.turn_id],
+                        blocking_items=[],
+                        followup_is_conversion=True,
+                    )
+
+        # ---------------------------------------------------------------------
+        # Meeting Confirmation (General Consultation / Appointment)
+        # ---------------------------------------------------------------------
         meeting_patterns = [
             r"\b(meet|meeting|consultation|call|schedule|calendar)\b",
         ]
         is_meeting_topic = any(re.search(pat, text_lower) for pat in meeting_patterns)
 
-        # Check if timeline fact exists with confirmed meeting time
         confirmed_fact = next((f for f in current_state.facts if f.fact_key == "confirmed_meeting_time" and f.status == "active"), None)
         has_meeting_confirmation = bool(confirmed_fact) or is_meeting_topic or has_time
 
         if (gate.is_open or confirmed_fact) and is_confirming and has_meeting_confirmation:
+            time_match = re.search(
+                r"\b(monday|tuesday|wednesday|thursday|friday|saturday|sunday|tomorrow)\b.*?\b(?:at\s+)?(\d{1,2}(?::\d{2})?\s*(?:am|pm)?|one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve)\b",
+                text_lower,
+            )
             extracted_slot = (
-                (confirmed_fact.fact_value if confirmed_fact else None)
+                (time_match.group(0).strip().title() if time_match else None)
+                or (confirmed_fact.fact_value if confirmed_fact else None)
                 or (previous_event.start_at if previous_event else None)
                 or (has_time and "Confirmed Window")
                 or "Confirmed Time Slot"
             )
-            return ConversionEventObject(
-                event_id=previous_event.event_id if previous_event else f"conv_{uuid.uuid4().hex[:8]}",
-                conversion_type="in_person_meeting",
-                status="confirmed",
-                start_at=extracted_slot,
-                location_or_format="Scheduled Meeting",
-                participants=["Client", "Agent"],
-                confirmation_confidence=0.85,
-                source_turn_ids=sorted(list(set((previous_event.source_turn_ids if previous_event else []) + [bundle.turn_id]))),
-                blocking_items=[],
-                followup_is_conversion=True,
-            )
 
+            if previous_event and (
+                previous_event.status in (ConversionEventStatus.PROPOSED, ConversionEventStatus.TENTATIVE, ConversionEventStatus.ELIGIBLE, ConversionEventStatus.CANCELLED)
+                or (previous_event.status == ConversionEventStatus.CONFIRMED and previous_event.start_at and extracted_slot != previous_event.start_at)
+            ):
+                new_event = ConversionEventObject(
+                    event_id=f"conv_{uuid.uuid4().hex[:8]}",
+                    conversion_type="in_person_meeting",
+                    status=ConversionEventStatus.CONFIRMED,
+                    start_at=extracted_slot,
+                    location_or_format="Scheduled Meeting",
+                    participants=["Client", "Agent"],
+                    confirmation_confidence=0.85,
+                    source_turn_ids=sorted(list(set(previous_event.source_turn_ids + [bundle.turn_id]))),
+                    blocking_items=[],
+                    followup_is_conversion=True,
+                    supersedes_event_id=previous_event.event_id,
+                    reversal_reason="rescheduled" if (previous_event.status == ConversionEventStatus.CONFIRMED and extracted_slot != previous_event.start_at) else None,
+                )
+                previous_event.superseded_by_event_id = new_event.event_id
+                previous_event.superseded_at_turn_id = bundle.turn_id
+                return new_event
+            elif previous_event and previous_event.status == ConversionEventStatus.CONFIRMED:
+                return ConversionEventObject(
+                    event_id=previous_event.event_id,
+                    conversion_type="in_person_meeting",
+                    status=ConversionEventStatus.CONFIRMED,
+                    start_at=extracted_slot,
+                    location_or_format="Scheduled Meeting",
+                    participants=["Client", "Agent"],
+                    confirmation_confidence=0.85,
+                    source_turn_ids=sorted(list(set(previous_event.source_turn_ids + [bundle.turn_id]))),
+                    blocking_items=[],
+                    followup_is_conversion=True,
+                    supersedes_event_id=previous_event.supersedes_event_id,
+                    reversal_reason=previous_event.reversal_reason,
+                )
+            else:
+                return ConversionEventObject(
+                    event_id=f"conv_{uuid.uuid4().hex[:8]}",
+                    conversion_type="in_person_meeting",
+                    status=ConversionEventStatus.CONFIRMED,
+                    start_at=extracted_slot,
+                    location_or_format="Scheduled Meeting",
+                    participants=["Client", "Agent"],
+                    confirmation_confidence=0.85,
+                    source_turn_ids=[bundle.turn_id],
+                    blocking_items=[],
+                    followup_is_conversion=True,
+                )
+
+        # ---------------------------------------------------------------------
         # If gate is open but no explicit confirmation turn yet, state is eligible
+        # ---------------------------------------------------------------------
         if gate.is_open:
+            if previous_event and previous_event.status in (ConversionEventStatus.CONFIRMED, ConversionEventStatus.PROPOSED):
+                return previous_event
             return ConversionEventObject(
                 event_id=previous_event.event_id if previous_event else f"conv_{uuid.uuid4().hex[:8]}",
                 conversion_type=previous_event.conversion_type if previous_event else "in_person_meeting",
-                status="eligible",
+                status=ConversionEventStatus.ELIGIBLE,
                 start_at=previous_event.start_at if previous_event else None,
                 location_or_format=previous_event.location_or_format if previous_event else None,
                 participants=previous_event.participants if previous_event else ["Client", "Agent"],
@@ -679,20 +915,26 @@ class MeetingConversionGateEngine:
                 followup_is_conversion=True,
             )
 
+        # ---------------------------------------------------------------------
         # Gate is closed
+        # ---------------------------------------------------------------------
         if previous_event:
-            # Update previous event with current gate blockers
+            if previous_event.status in (ConversionEventStatus.CONFIRMED, ConversionEventStatus.CANCELLED):
+                return previous_event
             return ConversionEventObject(
                 event_id=previous_event.event_id,
                 conversion_type=previous_event.conversion_type,
-                status="blocked" if previous_event.status != "confirmed" else "confirmed",
+                status=ConversionEventStatus.BLOCKED,
                 start_at=previous_event.start_at,
                 location_or_format=previous_event.location_or_format,
                 participants=previous_event.participants,
-                confirmation_confidence=previous_event.confirmation_confidence if previous_event.status == "confirmed" else 0.20,
+                confirmation_confidence=previous_event.confirmation_confidence if previous_event.status == ConversionEventStatus.CONFIRMED else 0.20,
                 source_turn_ids=sorted(list(set(previous_event.source_turn_ids + [bundle.turn_id]))),
                 blocking_items=gate.blocking_reasons,
                 followup_is_conversion=previous_event.followup_is_conversion,
+                supersedes_event_id=previous_event.supersedes_event_id,
+                superseded_by_event_id=previous_event.superseded_by_event_id,
+                reversal_reason=previous_event.reversal_reason,
             )
 
         return None

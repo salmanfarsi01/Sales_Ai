@@ -11,6 +11,7 @@ from .conversation_state_models import (
     PersistentFactRecord,
     PersistentFactCategory,
     DecisionStructure,
+    ConversionEventObject,
 )
 
 LOGGER = logging.getLogger("copilot.conversation_supersession")
@@ -99,6 +100,16 @@ class TruthSupersessionDetector:
         if any(re.search(p, text_lower) for p in financial_markers):
             matched_categories.add("financial")
             matched_keys.update(["max_budget", "net_proceeds", "price_expectation"])
+
+        # Domain 5: Scheduled Appointment / Meeting Commitments
+        meeting_markers = [
+            r"\b(?:cancel|cancelling|cancelled|never\s+mind|nevermind|call\s+off|reschedule)\b",
+            r"\b(?:monday|tuesday|wednesday|thursday|friday|saturday|sunday|tomorrow)\b",
+            r"\b(?:meet|meeting|walkthrough|appointment|schedule)\b",
+        ]
+        if any(re.search(p, text_lower) for p in meeting_markers):
+            matched_categories.add("timeline")
+            matched_keys.add("confirmed_meeting_time")
 
         # Filter facts matching either the category domain or explicit fact key
         candidate_facts = [
@@ -383,12 +394,103 @@ class TruthSupersessionDetector:
                     confidence=0.93,
                 )
 
+        # -------------------------------------------------------------------------
+        # 5. Scheduled Meeting / Appointment Supersession
+        # -------------------------------------------------------------------------
+        if fact.fact_key == "confirmed_meeting_time":
+            from .conversation_conversion import detect_explicit_reversal_in_text
+            is_rev, rev_reason = detect_explicit_reversal_in_text(candidate_text)
+            if is_rev:
+                return SupersessionDecision(
+                    has_supersession=True,
+                    target_fact_id=fact.fact_id,
+                    target_fact_key=fact.fact_key,
+                    relation="REVERSES",
+                    old_truth_summary=fact.fact_value,
+                    new_truth_value="Cancelled",
+                    reasoning=rev_reason or "Prospect explicitly cancelled scheduled meeting.",
+                    relation_confidence=0.95,
+                    confidence=0.95,
+                )
+            time_match = re.search(
+                r"\b(monday|tuesday|wednesday|thursday|friday|saturday|sunday|tomorrow)\b.*?\b(?:at\s+)?(\d{1,2}(?::\d{2})?\s*(?:am|pm)?|one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve)\b",
+                text_lower,
+            )
+            if time_match:
+                new_slot = time_match.group(0).strip().title()
+                if new_slot.lower() != fact.fact_value.strip().lower():
+                    return SupersessionDecision(
+                        has_supersession=True,
+                        target_fact_id=fact.fact_id,
+                        target_fact_key=fact.fact_key,
+                        relation="UPDATES",
+                        old_truth_summary=fact.fact_value,
+                        new_truth_value=new_slot,
+                        reasoning=f"Meeting rescheduled from '{fact.fact_value}' to '{new_slot}'.",
+                        relation_confidence=0.90,
+                        confidence=0.90,
+                    )
+
         return SupersessionDecision(
             has_supersession=False,
             target_fact_id=fact.fact_id,
             target_fact_key=fact.fact_key,
             relation="UNCHANGED",
             reasoning="Utterance does not update or contradict this active fact.",
+            relation_confidence=1.0,
+            confidence=1.0,
+        )
+
+    def evaluate_event_supersession(
+        self,
+        candidate_text: str,
+        active_event: ConversionEventObject,
+    ) -> SupersessionDecision:
+        """Evaluates whether candidate_text supersedes, reverses, or updates an active ConversionEventObject."""
+        from .conversation_conversion import detect_explicit_reversal_in_text
+        text_lower = candidate_text.lower().strip()
+
+        # Check for explicit cancellation
+        is_rev, rev_reason = detect_explicit_reversal_in_text(candidate_text)
+        if is_rev:
+            return SupersessionDecision(
+                has_supersession=True,
+                target_fact_id=active_event.event_id,
+                target_fact_key="conversion_event",
+                relation="REVERSES",
+                old_truth_summary=f"{active_event.status.value}: {active_event.start_at or active_event.conversion_type}",
+                new_truth_value="cancelled",
+                reasoning=rev_reason or "Prospect explicitly cancelled event.",
+                relation_confidence=0.95,
+                confidence=0.95,
+            )
+
+        # Check for reschedule
+        time_match = re.search(
+            r"\b(monday|tuesday|wednesday|thursday|friday|saturday|sunday|tomorrow)\b.*?\b(?:at\s+)?(\d{1,2}(?::\d{2})?\s*(?:am|pm)?|one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve)\b",
+            text_lower,
+        )
+        if time_match:
+            new_slot = time_match.group(0).strip().title()
+            if active_event.start_at and new_slot.lower() != active_event.start_at.strip().lower():
+                return SupersessionDecision(
+                    has_supersession=True,
+                    target_fact_id=active_event.event_id,
+                    target_fact_key="conversion_event",
+                    relation="UPDATES",
+                    old_truth_summary=active_event.start_at,
+                    new_truth_value=new_slot,
+                    reasoning=f"Rescheduled meeting slot to '{new_slot}'.",
+                    relation_confidence=0.90,
+                    confidence=0.90,
+                )
+
+        return SupersessionDecision(
+            has_supersession=False,
+            target_fact_id=active_event.event_id,
+            target_fact_key="conversion_event",
+            relation="UNCHANGED",
+            reasoning="Utterance does not alter active conversion event.",
             relation_confidence=1.0,
             confidence=1.0,
         )

@@ -14,6 +14,7 @@ from .conversation_state_models import (
     ContactComplianceState,
     PushStrengthRecommendation,
     StateChangeRecord,
+    ConversionEventStatus,
 )
 from .conversation_facts import PersistentFactsManager
 from .conversation_objections import ObjectionLifecycleEngine, DECISION_TO_STAY_PATTERNS
@@ -57,6 +58,9 @@ class ConversationStateManager:
         )
         self.prior_bundle: Optional[BehavioralSignalInputBundle] = None
         self.has_prospect_spoken: bool = False
+        self._conversion_events: List[ConversionEventObject] = list(self.current_state.conversion_events)
+        if self.current_state.conversion_event and not any(e.event_id == self.current_state.conversion_event.event_id for e in self._conversion_events):
+            self._conversion_events.append(self.current_state.conversion_event)
 
     def process_turn_bundle(
         self,
@@ -342,26 +346,98 @@ class ConversationStateManager:
                 )
             )
 
-        if conv_res and (prev_conv is None or prev_conv.status != conv_res.status):
-            next_version += 1
-            changes.append(
-                StateChangeRecord(
-                    state_version_before=next_version - 1,
-                    state_version_after=next_version,
-                    field_path="conversion_event",
-                    old_value=prev_conv.model_dump() if prev_conv else None,
-                    new_value=conv_res.model_dump(),
-                    triggering_turn_id=bundle.turn_id,
-                    evidence_ids=bundle.contributing_evidence_ids,
-                    reason=f"Conversion event updated: {conv_res.conversion_type} status={conv_res.status} (followup_is_conversion={conv_res.followup_is_conversion}).",
-                    confidence=conv_res.confirmation_confidence,
-                    timestamp_ms=bundle.timestamp_ms,
+        if conv_res is not None:
+            # Sync into _conversion_events
+            existing_idx = next((i for i, e in enumerate(self._conversion_events) if e.event_id == conv_res.event_id), None)
+            if existing_idx is not None:
+                self._conversion_events[existing_idx] = conv_res
+            else:
+                self._conversion_events.append(conv_res)
+
+            # If it supersedes an event, ensure that event in self._conversion_events is marked superseded
+            if conv_res.supersedes_event_id:
+                for ev in self._conversion_events:
+                    if ev.event_id == conv_res.supersedes_event_id:
+                        ev.superseded_by_event_id = conv_res.event_id
+                        ev.superseded_at_turn_id = bundle.turn_id
+
+            if prev_conv is None or prev_conv.status != conv_res.status or prev_conv.event_id != conv_res.event_id:
+                next_version += 1
+                supersede_info = f" (supersedes {conv_res.supersedes_event_id}, reversal_reason: {conv_res.reversal_reason})" if conv_res.supersedes_event_id else ""
+                changes.append(
+                    StateChangeRecord(
+                        state_version_before=next_version - 1,
+                        state_version_after=next_version,
+                        field_path="conversion_event",
+                        old_value=prev_conv.model_dump() if prev_conv else None,
+                        new_value=conv_res.model_dump(),
+                        triggering_turn_id=bundle.turn_id,
+                        evidence_ids=bundle.contributing_evidence_ids,
+                        reason=f"Conversion event updated: {conv_res.conversion_type} status={conv_res.status}{supersede_info}.",
+                        confidence=conv_res.confirmation_confidence,
+                        timestamp_ms=bundle.timestamp_ms,
+                    )
                 )
+
+            # Deterministic Cascade: Conversion Event status directly governs confirmed_meeting_time fact
+            active_meeting_fact = next(
+                (f for f in self.facts_manager.get_active_facts() if f.fact_key == "confirmed_meeting_time"),
+                None,
             )
+            if conv_res.status == ConversionEventStatus.CANCELLED and active_meeting_fact:
+                old_f, new_f = self.facts_manager.supersede_fact(
+                    old_fact_id=active_meeting_fact.fact_id,
+                    new_fact_value="Cancelled",
+                    source_turn_id=bundle.turn_id,
+                    timestamp_ms=bundle.timestamp_ms,
+                    notes=conv_res.reversal_reason or "Conversion event cancelled",
+                )
+                self.current_state.facts = self.facts_manager.get_all_facts()
+                next_version += 1
+                changes.append(
+                    StateChangeRecord(
+                        state_version_before=next_version - 1,
+                        state_version_after=next_version,
+                        field_path="facts.confirmed_meeting_time",
+                        old_value=old_f.fact_value,
+                        new_value=new_f.fact_value,
+                        triggering_turn_id=bundle.turn_id,
+                        evidence_ids=bundle.contributing_evidence_ids,
+                        reason=f"Deterministic cascade from conversion event cancellation: {conv_res.reversal_reason or 'Cancelled'}",
+                        confidence=conv_res.confirmation_confidence,
+                        timestamp_ms=bundle.timestamp_ms,
+                    )
+                )
+            elif conv_res.status == ConversionEventStatus.CONFIRMED and conv_res.start_at:
+                if active_meeting_fact and active_meeting_fact.fact_value.strip().lower() != conv_res.start_at.strip().lower():
+                    old_f, new_f = self.facts_manager.supersede_fact(
+                        old_fact_id=active_meeting_fact.fact_id,
+                        new_fact_value=conv_res.start_at,
+                        source_turn_id=bundle.turn_id,
+                        timestamp_ms=bundle.timestamp_ms,
+                        notes=conv_res.reversal_reason or f"Meeting rescheduled to '{conv_res.start_at}'",
+                    )
+                    self.current_state.facts = self.facts_manager.get_all_facts()
+                    next_version += 1
+                    changes.append(
+                        StateChangeRecord(
+                            state_version_before=next_version - 1,
+                            state_version_after=next_version,
+                            field_path="facts.confirmed_meeting_time",
+                            old_value=old_f.fact_value,
+                            new_value=new_f.fact_value,
+                            triggering_turn_id=bundle.turn_id,
+                            evidence_ids=bundle.contributing_evidence_ids,
+                            reason=f"Deterministic cascade from conversion event confirmation: '{conv_res.start_at}'",
+                            confidence=conv_res.confirmation_confidence,
+                            timestamp_ms=bundle.timestamp_ms,
+                        )
+                    )
 
         self.current_state.conversion_gate = gate_res
         self.current_state.push_strength = push_res
         self.current_state.conversion_event = conv_res
+        self.current_state.conversion_events = list(self._conversion_events)
 
         # Update metadata
         self.current_state.last_updated_turn_id = bundle.turn_id
@@ -482,14 +558,26 @@ class ConversationStateManager:
             r"\b(monday|tuesday|wednesday|thursday|friday|saturday|sunday|tomorrow)\b.*?\b(?:at\s+)?(\d{1,2}(?::\d{2})?\s*(?:am|pm)?|one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve)\b",
             text_lower,
         )
-        if time_day_match and "confirmed_meeting_time" not in existing_keys:
-            updates.append({
-                "category": "timeline",
-                "fact_key": "confirmed_meeting_time",
-                "fact_value": time_day_match.group(0).title(),
-                "confidence": 0.85,
-                "notes": f"Prospect confirmed meeting time directly: '{bundle.utterance_text[:60]}'",
-            })
+        if time_day_match:
+            new_val = time_day_match.group(0).strip().title()
+            if "confirmed_meeting_time" not in existing_keys:
+                updates.append({
+                    "category": "timeline",
+                    "fact_key": "confirmed_meeting_time",
+                    "fact_value": new_val,
+                    "confidence": 0.85,
+                    "notes": f"Prospect confirmed meeting time directly: '{bundle.utterance_text[:60]}'",
+                })
+            else:
+                active_f = next((f for f in self.current_state.facts if f.fact_key == "confirmed_meeting_time" and f.status == "active"), None)
+                if active_f and active_f.fact_value.strip().lower() != new_val.strip().lower():
+                    self.facts_manager.supersede_fact(
+                        old_fact_id=active_f.fact_id,
+                        new_fact_value=new_val,
+                        source_turn_id=bundle.turn_id,
+                        timestamp_ms=bundle.timestamp_ms,
+                        notes=f"Meeting rescheduled to '{new_val}'",
+                    )
         elif self.prior_bundle and self.prior_bundle.speaker_id == "salesperson":
             # Case B: Salesperson proposed a day/time and prospect confirmed affirmatively
             prior_text_lower = self.prior_bundle.utterance_text.lower()
@@ -515,6 +603,8 @@ class ConversationStateManager:
                     "notes": f"Prospect confirmed proposed time '{raw_time_str}' from salesperson proposal.",
                 })
 
+
+
         # 3. Decision to Stay / Cancellation of sale
         if any(re.search(p, text_lower) for p in DECISION_TO_STAY_PATTERNS) and "decision_to_stay" not in existing_keys:
             updates.append({
@@ -536,3 +626,14 @@ class ConversationStateManager:
             })
 
         return updates
+
+    def get_conversion_event_history(self) -> List[ConversionEventObject]:
+        """Returns the complete chronological history of conversion events (both superseded and active)."""
+        return list(self._conversion_events)
+
+    def get_active_conversion_event(self) -> Optional[ConversionEventObject]:
+        """Returns the current active (unsuperseded) conversion event, if any."""
+        for ev in reversed(self._conversion_events):
+            if ev.superseded_by_event_id is None:
+                return ev
+        return self.current_state.conversion_event

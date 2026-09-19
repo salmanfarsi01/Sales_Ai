@@ -165,6 +165,20 @@ class MaterialityFilter:
             forced_targets.update(["objections", "facts", "dimensions"])
             forced_reasons.append("Deterministic Override: client decision to stay/cancel sale supersedes active objections.")
 
+        # 5c. Conversion Commitment or Cancellation / Reversal Overrides
+        reversal_markers = [
+            r"\b(?:cancel|cancelling|cancelled)\b",
+            r"\b(?:never\s+mind|nevermind)\b",
+            r"\b(?:let's\s+not|let\s+us\s+not)\s+(?:meet|do\s+that|do\s+this|schedule)\b",
+            r"\bforget\s+(?:about\s+)?(?:it|that|thursday|friday|monday|tuesday|wednesday|tomorrow|the\s+meeting|meeting)\b",
+            r"\b(?:can't|cannot|couldn't|could\s+not)\s+make\s+it\b",
+            r"\bwon't\s+be\s+able\s+to\s+meet\b",
+            r"\b(?:call\s+off|called\s+off)\b",
+        ]
+        if bundle.speaker_id == "client" and any(re.search(p, bundle.utterance_text.lower()) for p in reversal_markers):
+            forced_targets.update(["facts", "dimensions"])
+            forced_reasons.append("Deterministic Override: client explicit conversion reversal / cancellation.")
+
         # 6. Behavioral & Acoustic Shifts (Client Principle #3: Dimension Stability & Materiality Gating)
         # Protect dimension sync: If upstream inference in bundle meaningfully diverges
         # from current state dimensions (delta >= 0.08 or client substantive agreement >= 0.70),

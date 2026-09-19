@@ -167,6 +167,7 @@ class ConversationReplayEngine:
             "failed_conditions": final_state.conversion_gate.failed_conditions if final_state.conversion_gate else [],
             "blocking_reasons": final_state.conversion_gate.blocking_reasons if final_state.conversion_gate else [],
             "conversion_event": final_state.conversion_event.model_dump() if final_state.conversion_event else None,
+            "conversion_events": [e.model_dump() for e in final_state.conversion_events] if getattr(final_state, "conversion_events", None) else [],
             "momentum_score": final_state.momentum.momentum_score if final_state.momentum else 50.0,
             "momentum_trend": final_state.momentum.trend if final_state.momentum else "stable",
             "readiness_score": final_state.readiness.readiness_score if final_state.readiness else 50.0,
@@ -504,6 +505,17 @@ class ConversationReplayEngine:
             source="synthetic_simulation",
         )
 
+    def get_conversion_event_history(self, call_sid: str) -> List[Dict[str, Any]]:
+        """Returns the complete chronological lineage of conversion events for a call."""
+        report = self.load_replay_report(call_sid)
+        if not report:
+            return []
+        if hasattr(report.final_state, "conversion_events") and report.final_state.conversion_events:
+            return [e.model_dump() for e in report.final_state.conversion_events]
+        elif report.final_state.conversion_event:
+            return [report.final_state.conversion_event.model_dump()]
+        return []
+
 
 class ReplayDialogueRequest(BaseModel):
     """Request payload for dialogue simulation endpoint."""
@@ -550,6 +562,11 @@ def get_conversation_replay_router(
         if not report:
             raise HTTPException(status_code=404, detail=f"Replay report for {call_sid} not found")
         return report.model_dump()
+
+    @router.get("/api/conversation-state/replay/{call_sid}/conversion-events")
+    async def get_replay_conversion_events(call_sid: str):
+        engine = ConversationReplayEngine(reports_dir=reports_dir)
+        return engine.get_conversion_event_history(call_sid)
 
     @router.post("/api/conversation-state/replay-dialogue")
     async def replay_conversation_state_dialogue(req: ReplayDialogueRequest):

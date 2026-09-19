@@ -953,9 +953,11 @@
         const hasActiveObjections = (step.state_after.objections || []).some(o => o.lifecycle_state !== 'resolved' && o.lifecycle_state !== 'superseded');
         const hasBoundary = (step.evidence_bundle && step.evidence_bundle.boundary_score >= 0.5);
         const hasConv = (step.state_after.conversion_event && step.state_after.conversion_event.status === 'confirmed');
+        const hasCancelled = (step.state_after.conversion_event && step.state_after.conversion_event.status === 'cancelled');
 
         if (hasActiveObjections) telemetryDots += '<span class="badge badge-closed" style="font-size:9px; padding:1px 4px;" title="Active Objection">OBJ</span> ';
         if (hasBoundary) telemetryDots += '<span class="badge badge-closed" style="font-size:9px; padding:1px 4px; background:#FEF2F2; color:#DC2626; border:1px solid #FECACA;" title="Boundary Reached">BND</span> ';
+        if (hasCancelled) telemetryDots += '<span class="badge badge-closed" style="font-size:9px; padding:1px 4px; background:#FEF2F2; color:#DC2626; border:1px solid #FCA5A5;" title="Conversion Cancelled">CNCL</span> ';
         if (hasConv || stepGateOpen) telemetryDots += '<span class="badge badge-open" style="font-size:9px; padding:1px 4px;" title="Conversion Confirmed / Gate Open">GATE</span> ';
 
         card.innerHTML = `
@@ -1214,20 +1216,37 @@
         </div>
       ` : ''}
 
-      <!-- Conversion Event Card if present -->
+      <!-- Conversion Event Card with Lineage & History -->
       ${convEvt ? `
-        <div class="card-unit" style="border: 1px solid var(--prospect-border); background: #FFFFFF;">
+        <div class="card-unit" style="border: 1px solid ${convEvt.status === 'cancelled' ? '#FCA5A5' : (convEvt.status === 'confirmed' ? 'var(--prospect-border)' : '#CBD5E1')}; background: #FFFFFF;">
           <div class="card-unit-title">
             <span style="color:#000000; font-weight:700;">Conversion Event</span>
-            <span class="badge badge-open">${convEvt.status}</span>
+            <span class="badge ${convEvt.status === 'confirmed' ? 'badge-open' : (convEvt.status === 'cancelled' ? 'badge-closed' : 'badge-push')}">${String(convEvt.status).toUpperCase()}</span>
           </div>
           <div style="font-size:12px;line-height:1.6;color:#000000;">
             <div>Type: <strong class="mono" style="color:#000000;">${escapeHtml(convEvt.conversion_type)}</strong></div>
             <div>Time/Slot: <strong style="color:#000000;">${escapeHtml(convEvt.start_at || 'Unscheduled')}</strong></div>
-            <div>Format: <strong style="color:#000000;">${escapeHtml(convEvt.location_or_format || 'In-Person')}</strong></div>
+            ${convEvt.reversal_reason ? `<div style="color:#DC2626; font-size:11.5px; margin-top:2px;"><strong>Reversal Reason:</strong> ${escapeHtml(convEvt.reversal_reason)}</div>` : ''}
+            ${convEvt.supersedes_event_id ? `<div style="font-size:11px;color:#475569; margin-top:2px;">↳ Supersedes: <span class="mono">${escapeHtml(convEvt.supersedes_event_id)}</span></div>` : ''}
             <div>Confirmation Conf: <strong class="mono" style="color:#000000;">${(convEvt.confirmation_confidence * 100).toFixed(0)}%</strong></div>
-            <div>Followup is Conversion: <strong style="color:#000000;">${convEvt.followup_is_conversion}</strong></div>
           </div>
+          ${(sAfter.conversion_events && sAfter.conversion_events.length > 1) ? `
+            <div style="margin-top:10px; border-top:1px solid var(--border); padding-top:8px;">
+              <div style="font-size:11px; font-weight:700; color:#000000; text-transform:uppercase; margin-bottom:6px;">Lifecycle History (${sAfter.conversion_events.length} Events)</div>
+              ${sAfter.conversion_events.map(ev => `
+                <div style="font-size:11.5px; padding:4px 6px; margin-bottom:4px; border-radius:4px; background:${ev.event_id === convEvt.event_id ? '#F8FAFC' : '#FFFFFF'}; border:1px solid ${ev.event_id === convEvt.event_id ? '#94A3B8' : '#E2E8F0'}; display:flex; justify-content:space-between; align-items:center;">
+                  <div>
+                    <span class="mono" style="font-weight:600; color:#000000;">${escapeHtml(ev.event_id)}</span>
+                    <span class="badge ${ev.status === 'confirmed' ? 'badge-open' : (ev.status === 'cancelled' ? 'badge-closed' : 'badge-push')}" style="font-size:9.5px; margin-left:4px;">${String(ev.status).toUpperCase()}</span>
+                    ${ev.reversal_reason ? `<span style="font-size:10.5px; color:#DC2626; margin-left:4px;">(${escapeHtml(ev.reversal_reason)})</span>` : ''}
+                  </div>
+                  <div style="font-size:10.5px; color:#475569;">
+                    ${ev.superseded_by_event_id ? `<span style="color:#64748B;">↳ superseded at T${ev.superseded_at_turn_id || '—'}</span>` : '<strong style="color:#059669;">current</strong>'}
+                  </div>
+                </div>
+              `).join('')}
+            </div>
+          ` : ''}
         </div>
       ` : ''}
 
