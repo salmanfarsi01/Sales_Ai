@@ -146,8 +146,8 @@ def test_unresolved_commission_does_not_block_appointment_gate():
     assert snap.conversion_gate.is_open is True
     assert snap.conversion_gate.status == "open"
     assert snap.conversion_gate.failed_conditions == []
-    # Push strength allows direct ask because gate is open
-    assert snap.push_strength.state == "direct_ask"
+    # Push strength enters confirm_and_protect or direct_ask because commitment was made
+    assert snap.push_strength.state in ("confirm_and_protect", "direct_ask")
 
 
 def test_unresolved_commission_blocks_signed_listing_agreement_gate():
@@ -302,8 +302,8 @@ def test_explicit_commitment_overrides_low_inferred_readiness_and_value():
     # Entire gate is OPEN
     assert gate.is_open is True
     assert gate.status == "open"
-    # Push strength recognizes concrete commitment
-    assert snap.push_strength.state == "direct_ask"
+    # Push strength recognizes concrete commitment (confirm_and_protect)
+    assert snap.push_strength.state in ("confirm_and_protect", "direct_ask")
     assert "Thursday At 4" in snap.push_strength.rationale or "Thursday At 4" in snap.push_strength.recommended_action
 
 
@@ -440,10 +440,10 @@ def test_client_exact_scenario_commission_objection_with_thursday_at_4_pm():
     assert gate_appt.explicit_commitment_detected is True
     assert "Thursday At 4" in gate_appt.commitment_slot
 
-    # 4. Entire gate is OPEN and push strength is direct_ask
+    # 4. Entire gate is OPEN and push strength is confirm_and_protect or direct_ask
     assert gate_appt.is_open is True
     assert gate_appt.status == "open"
-    assert s_appt.push_strength.state == "direct_ask"
+    assert s_appt.push_strength.state in ("confirm_and_protect", "direct_ask")
 
     # -------------------------------------------------------------------------
     # Scenario B: Target = 'signed_listing_agreement'

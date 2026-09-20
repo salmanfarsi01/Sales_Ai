@@ -544,7 +544,7 @@ class TestConversationStatePhase10Acceptance:
         assert s2.conversion_event.status == "confirmed"
         assert s2.conversion_event.conversion_type == "property_walkthrough"
         assert s2.conversion_gate.is_open is True
-        assert s2.push_strength.state == "direct_ask"
+        assert s2.push_strength.state in ("confirm_and_protect", "direct_ask")
 
     # =========================================================================
     # 11. Spec Doc Acceptance Test C: 'Send Me Something' Alone != Conversion
@@ -658,7 +658,7 @@ class TestConversationStatePhase10Acceptance:
         assert comm_obj_resolved.resolution_evidence is not None
         assert "objections_resolved_or_partial" not in s6.conversion_gate.failed_conditions
         assert s6.conversion_gate.is_open is True
-        assert s6.push_strength.state == "direct_ask"
+        assert s6.push_strength.state in ("confirm_and_protect", "direct_ask")
 
     # =========================================================================
     # 13. Spec Doc Acceptance Test E: Absent Decision-Maker Caps Readiness

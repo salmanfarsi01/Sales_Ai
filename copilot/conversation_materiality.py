@@ -206,6 +206,9 @@ class MaterialityFilter:
             trust_delta = abs(bundle.trust.score - cur_dim.trust)
             readiness_delta = abs(bundle.readiness.score - cur_dim.readiness)
             engagement_delta = abs(bundle.engagement.score - cur_dim.engagement)
+            bundle_commit = bundle.commitment.score if bundle.commitment is not None else 0.0
+            cur_commit = getattr(cur_dim, "commitment", 0.0)
+            commitment_delta = abs(bundle_commit - cur_commit)
 
             has_behavioral_shift = (
                 valence_delta >= 0.08
@@ -213,6 +216,7 @@ class MaterialityFilter:
                 or trust_delta >= 0.08
                 or readiness_delta >= 0.08
                 or engagement_delta >= 0.08
+                or commitment_delta >= 0.08
                 or (bundle.speaker_id == "client" and bundle.agreement_score >= 0.70)
             )
             if has_behavioral_shift and (bundle.speaker_id == "client" or result.is_material):
@@ -462,6 +466,9 @@ class MaterialityFilter:
             trust_delta = abs(bundle.trust.score - cur_dim.trust)
             readiness_delta = abs(bundle.readiness.score - cur_dim.readiness)
             engagement_delta = abs(bundle.engagement.score - cur_dim.engagement)
+            bundle_commit = bundle.commitment.score if bundle.commitment is not None else 0.0
+            cur_commit = getattr(cur_dim, "commitment", 0.0)
+            commitment_delta = abs(bundle_commit - cur_commit)
 
             has_behavioral_shift = (
                 valence_delta >= 0.08
@@ -469,6 +476,7 @@ class MaterialityFilter:
                 or trust_delta >= 0.08
                 or readiness_delta >= 0.08
                 or engagement_delta >= 0.08
+                or commitment_delta >= 0.08
                 or (bundle.speaker_id == "client" and bundle.agreement_score >= 0.70)
             )
 

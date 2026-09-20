@@ -138,6 +138,7 @@ class ConversationStateManager:
 
         # 1. Update Dimensions (Gated by Materiality)
         if "dimensions" in materiality.affected_targets:
+            commit_val, commit_conf = self._compute_commitment(bundle)
             new_dims = DimensionScores(
                 trust=bundle.trust.score,
                 trust_confidence=bundle.trust.confidence,
@@ -150,6 +151,8 @@ class ConversationStateManager:
                 momentum_confidence=bundle.momentum.confidence,
                 readiness=bundle.readiness.score,
                 readiness_confidence=bundle.readiness.confidence,
+                commitment=commit_val,
+                commitment_confidence=commit_conf,
                 pacing=bundle.pacing.score,
                 pacing_confidence=bundle.pacing.confidence,
             )
@@ -550,6 +553,12 @@ class ConversationStateManager:
         self.current_state.conversion_event = conv_res
         self.current_state.conversion_events = list(self._conversion_events)
 
+        # Re-sync commitment on dimensions if conversion event or gate updated commitment
+        post_commit_val, post_commit_conf = self._compute_commitment_from_lifecycle(bundle, conv_res, gate_res)
+        if post_commit_val != self.current_state.dimensions.commitment:
+            self.current_state.dimensions.commitment = post_commit_val
+            self.current_state.dimensions.commitment_confidence = post_commit_conf
+
         # Update metadata
         self.current_state.last_updated_turn_id = bundle.turn_id
         self.current_state.last_updated_timestamp_ms = bundle.timestamp_ms
@@ -565,6 +574,72 @@ class ConversationStateManager:
         self.prior_bundle = bundle
 
         return self.current_state
+
+    def _compute_commitment(self, bundle: BehavioralSignalInputBundle) -> tuple[float, float]:
+        """Client Feedback Issue #8: Computes explicit commitment score (0.0 to 1.0)
+        separate from general readiness and independent of trust.
+        Readiness = 'how prepared are they, generally'
+        Commitment = 'what have they concretely said yes to, specifically'
+        """
+        # 1. Check conversion event status (Ground-truth lifecycle state strictly takes precedence)
+        if self.current_state.conversion_event:
+            ev = self.current_state.conversion_event
+            if ev.status == ConversionEventStatus.CONFIRMED:
+                return 1.0, ev.confirmation_confidence or 0.95
+            elif ev.status == ConversionEventStatus.TENTATIVE:
+                return 0.70, ev.confirmation_confidence or 0.85
+            elif ev.status == ConversionEventStatus.CANCELLED:
+                return 0.0, 1.0
+            elif ev.status == ConversionEventStatus.PROPOSED:
+                return 0.40, 0.75
+
+        # 2. Check conversion gate explicit commitment flag
+        if (
+            self.current_state.conversion_gate
+            and self.current_state.conversion_gate.explicit_commitment_detected
+        ):
+            return 0.85, 0.85
+
+        # 3. If bundle already carries an explicit commitment dimension, use it as behavioral prior
+        if bundle.commitment is not None and bundle.commitment.score > 0.0:
+            return bundle.commitment.score, bundle.commitment.confidence
+
+        # 4. Check client affirmative scheduling agreement in current turn
+        if bundle.speaker_id == "client":
+            if bundle.recurrence_type in ("scheduling_detail_repeated", "scheduling_repeated") and bundle.agreement_score >= 0.70:
+                return 0.85, 0.85
+
+        # 5. Fallback to existing state commitment if available
+        cur_commit = getattr(self.current_state.dimensions, "commitment", 0.0)
+        cur_conf = getattr(self.current_state.dimensions, "commitment_confidence", 0.7)
+        return cur_commit, cur_conf
+
+    def _compute_commitment_from_lifecycle(
+        self,
+        bundle: BehavioralSignalInputBundle,
+        conv_res: Optional[ConversionEventObject],
+        gate_res: Optional[Any],
+    ) -> tuple[float, float]:
+        """Re-syncs commitment from the newly evaluated conversion event and conversion gate."""
+        if conv_res:
+            if conv_res.status == ConversionEventStatus.CONFIRMED:
+                return 1.0, conv_res.confirmation_confidence or 0.95
+            elif conv_res.status == ConversionEventStatus.TENTATIVE:
+                return 0.70, conv_res.confirmation_confidence or 0.85
+            elif conv_res.status == ConversionEventStatus.CANCELLED:
+                return 0.0, 1.0
+            elif conv_res.status == ConversionEventStatus.PROPOSED:
+                return 0.40, 0.75
+
+        if gate_res and getattr(gate_res, "explicit_commitment_detected", False):
+            return 0.85, 0.85
+
+        if bundle.commitment is not None and bundle.commitment.score > 0.0:
+            return bundle.commitment.score, bundle.commitment.confidence
+
+        cur_commit = getattr(self.current_state.dimensions, "commitment", 0.0)
+        cur_conf = getattr(self.current_state.dimensions, "commitment_confidence", 0.7)
+        return cur_commit, cur_conf
 
     def _extract_autonomous_decision_updates(
         self,

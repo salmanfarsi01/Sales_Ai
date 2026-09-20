@@ -125,6 +125,12 @@ class ContactPreferenceRecord(BaseModel):
     first_observed_turn: Optional[int] = None
     call_sid: Optional[str] = None
     timestamp_ms: Optional[int] = None
+    # Client Feedback Issue #7 Wishlist Schema Fields (Cross-layer parity with ContactPreference)
+    channel: Optional[Literal["sms", "call", "email"]] = None
+    allowed: bool = True
+    cadence: Optional[Literal["reduced", "specific_times", "no_preference"]] = None
+    prohibited_behavior: Optional[str] = None
+    boundary_strength: Literal["preference", "hard_restriction"] = "preference"
 
 
 class ContactPreferenceStore:

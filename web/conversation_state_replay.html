@@ -247,6 +247,32 @@
       border: 1px solid #CBD5E1;
     }
 
+    /* Section Separation Headers (Client Feedback Item 10) */
+    .replay-section-header {
+      padding: 9px 28px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      flex-wrap: wrap;
+      gap: 10px;
+    }
+
+    .replay-section-tag {
+      font-size: 11px;
+      font-weight: 800;
+      letter-spacing: 0.8px;
+      text-transform: uppercase;
+      color: #0F172A;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+
+    .replay-section-desc {
+      font-size: 11.5px;
+      color: var(--text-dim);
+    }
+
     /* Main Replay Layout */
     .main-container {
       display: flex;
@@ -635,6 +661,15 @@
     </div>
   </header>
 
+  <!-- FINAL CALL STATE (Client Feedback Item 10) -->
+  <div class="replay-section-header" style="background: #F8FAFC; border-bottom: 1px solid var(--border);">
+    <div class="replay-section-tag">
+      <span style="display:inline-block; width:8px; height:8px; border-radius:50%; background:#2563EB;"></span>
+      FINAL CALL STATE (CUMULATIVE CALL-LEVEL SUMMARY)
+    </div>
+    <div class="replay-section-desc">Overall end-of-call status across all turns (QA verification)</div>
+  </div>
+
   <!-- Top KPI Ribbon -->
   <div class="kpi-ribbon" id="kpiRibbon">
     <div class="kpi-item">
@@ -642,31 +677,31 @@
       <span class="kpi-value mono" id="kpiCallSid">No Call Loaded</span>
     </div>
     <div class="kpi-item">
-      <span class="kpi-label">Conversion Gate</span>
+      <span class="kpi-label">Final Conversion Gate</span>
       <span class="kpi-value" id="kpiGate"><span class="badge badge-muted">—</span></span>
     </div>
     <div class="kpi-item">
-      <span class="kpi-label">Push Strength</span>
+      <span class="kpi-label">Final Push Recommendation</span>
       <span class="kpi-value" id="kpiPush"><span class="badge badge-muted">—</span></span>
     </div>
     <div class="kpi-item">
-      <span class="kpi-label">Momentum</span>
+      <span class="kpi-label">Final Momentum</span>
       <span class="kpi-value mono" id="kpiMomentum">—</span>
     </div>
     <div class="kpi-item">
-      <span class="kpi-label" title="Gate-Aware & Blocker-Capped Composite Readiness (0–100)">Composite Readiness</span>
+      <span class="kpi-label" title="Gate-Aware & Blocker-Capped Composite Readiness (0–100)">Final Composite Readiness</span>
       <span class="kpi-value mono" id="kpiReadiness">—</span>
     </div>
     <div class="kpi-item">
-      <span class="kpi-label">Deal Disposition</span>
+      <span class="kpi-label">Final Deal Disposition</span>
       <span class="kpi-value mono" id="kpiDisposition" style="font-size: 13px;">—</span>
     </div>
     <div class="kpi-item">
-      <span class="kpi-label">State Version</span>
+      <span class="kpi-label">Final State Version</span>
       <span class="kpi-value mono" id="kpiVersion">V0</span>
     </div>
     <div class="kpi-item">
-      <span class="kpi-label">Active Objections</span>
+      <span class="kpi-label">Final Active Objections</span>
       <span class="kpi-value mono" id="kpiObjections">0</span>
     </div>
   </div>
@@ -677,13 +712,25 @@
       <div style="padding: 16px; color: var(--text-dim);">Load a call report above to scrub through turns.</div>
     </div>
 
+    <!-- SELECTED TURN STATE Header (Client Feedback Item 10) -->
+    <div class="replay-section-header" style="background: #F1F5F9; border-radius: 8px 8px 0 0; margin-top: 14px; border: 1px solid var(--border); border-bottom: none;">
+      <div class="replay-section-tag" id="selectedTurnHeaderTag">
+        <span style="display:inline-block; width:8px; height:8px; border-radius:50%; background:#0D9488;"></span>
+        SELECTED TURN STATE (POINT-IN-TIME TRANSITION)
+      </div>
+      <div id="selectedTurnHeaderDetails" style="display: flex; align-items: center; gap: 12px;">
+        <span class="replay-section-desc" id="selectedTurnDescText">Select a turn to inspect point-in-time state transition</span>
+        <div id="selectedTurnSnapshotPills" style="display: flex; gap: 6px;"></div>
+      </div>
+    </div>
+
     <!-- 4-Column Synchronized Inspection Panel -->
-    <div class="columns-grid">
+    <div class="columns-grid" style="margin-top: 0; border-top: 1px solid var(--border);">
 
       <!-- Column 1: State Before (V_t-1) -->
       <div class="column-panel">
         <div class="column-header">
-          <span class="column-title">1. State Before (V<sub>t-1</sub>)</span>
+          <span class="column-title">1. Selected Turn: State Before (V<sub>t-1</sub>)</span>
           <span class="badge badge-muted" id="col1Version">V—</span>
         </div>
         <div class="column-body" id="col1Body">
@@ -695,7 +742,7 @@
       <!-- Column 2: New Evidence (Turn t) -->
       <div class="column-panel">
         <div class="column-header">
-          <span class="column-title">2. Turn Evidence & Gating</span>
+          <span class="column-title">2. Selected Turn: Evidence & Gating</span>
           <span class="badge badge-muted" id="col2Speaker">—</span>
         </div>
         <div class="column-body" id="col2Body">
@@ -707,7 +754,7 @@
       <!-- Column 3: State Changes & Reasons -->
       <div class="column-panel">
         <div class="column-header">
-          <span class="column-title">3. Changes & Audit Trail</span>
+          <span class="column-title">3. Selected Turn: Applied Mutations</span>
           <span class="badge badge-muted" id="col3Count">0 changes</span>
         </div>
         <div class="column-body" id="col3Body">
@@ -719,7 +766,7 @@
       <!-- Column 4: State After (V_t) -->
       <div class="column-panel">
         <div class="column-header">
-          <span class="column-title">4. State After (V<sub>t</sub>)</span>
+          <span class="column-title">4. Selected Turn: State After (V<sub>t</sub>)</span>
           <span class="badge badge-muted" id="col4Version">V—</span>
         </div>
         <div class="column-body" id="col4Body">
@@ -999,10 +1046,33 @@
     function renderSelectedTurn(step) {
       if (!step) return;
 
+      const sBefore = step.state_before;
+      const sAfter = step.state_after;
+      const turnNum = step.turn_id !== undefined ? step.turn_id : (activeTurnIndex + 1);
+      const speaker = (step.speaker_id || 'client').toUpperCase();
+
+      // Update Selected Turn section header (Client Feedback Item 10)
+      const tagEl = document.getElementById('selectedTurnHeaderTag');
+      if (tagEl) {
+        tagEl.innerHTML = `<span style="display:inline-block; width:8px; height:8px; border-radius:50%; background:#0D9488;"></span> SELECTED TURN STATE (TURN #${turnNum} · ${speaker})`;
+      }
+      const descEl = document.getElementById('selectedTurnDescText');
+      if (descEl) {
+        descEl.textContent = `Point-in-time state transition for Turn #${turnNum} (${sBefore ? 'V' + sBefore.state_version : 'V0'} → V${sAfter ? sAfter.state_version : '—'})`;
+      }
+      const pillsEl = document.getElementById('selectedTurnSnapshotPills');
+      if (pillsEl && sAfter) {
+        const turnGateOpen = sAfter.conversion_gate ? sAfter.conversion_gate.is_open : false;
+        const turnPush = sAfter.push_strength ? sAfter.push_strength.state : '—';
+        pillsEl.innerHTML = `
+          <span class="badge ${turnGateOpen ? 'badge-open' : 'badge-closed'}">Turn Gate: ${turnGateOpen ? 'OPEN' : 'CLOSED'}</span>
+          <span class="badge badge-push">Turn Push: ${escapeHtml(turnPush)}</span>
+        `;
+      }
+
       // ==========================================
       // COLUMN 1: STATE BEFORE (V_t-1)
       // ==========================================
-      const sBefore = step.state_before;
       document.getElementById('col1Version').textContent = sBefore ? `V${sBefore.state_version}` : 'V0 (Bootstrap)';
       const col1 = document.getElementById('col1Body');
       if (!sBefore) {
@@ -1017,6 +1087,7 @@
           ${renderDimensionBar('Engagement', sBefore.dimensions.engagement, '#0EADAB')}
           ${renderDimensionBar('Momentum', sBefore.dimensions.momentum, '#8B5CF6')}
           ${renderDimensionBar('Raw Readiness', sBefore.dimensions.readiness, '#F59E0B', 'Uncapped Behavioral Signal Engine prior (0.00–1.00)')}
+          ${renderDimensionBar('Commitment', sBefore.dimensions.commitment !== undefined ? sBefore.dimensions.commitment : 0.0, '#6366F1', 'Explicit milestone / slot agreement (0.00–1.00)')}
         </div>
 
         <div class="card-unit">
@@ -1363,6 +1434,7 @@
         ${renderDimensionBar('Engagement', sAfter.dimensions.engagement, '#0EADAB')}
         ${renderDimensionBar('Momentum', sAfter.dimensions.momentum, '#8B5CF6')}
         ${renderDimensionBar('Raw Readiness', sAfter.dimensions.readiness, '#F59E0B', 'Uncapped Behavioral Signal Engine prior (0.00–1.00)')}
+        ${renderDimensionBar('Commitment', sAfter.dimensions.commitment !== undefined ? sAfter.dimensions.commitment : 0.0, '#6366F1', 'Explicit milestone / slot agreement (0.00–1.00)')}
       </div>
     `;
     }

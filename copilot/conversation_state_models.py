@@ -210,6 +210,8 @@ class DimensionScores(BaseModel):
     momentum_confidence: float = Field(0.7, ge=0.0, le=1.0)
     readiness: float = Field(0.5, ge=0.0, le=1.0)
     readiness_confidence: float = Field(0.7, ge=0.0, le=1.0)
+    commitment: float = Field(0.0, ge=0.0, le=1.0)
+    commitment_confidence: float = Field(0.7, ge=0.0, le=1.0)
     pacing: float = Field(0.5, ge=0.0, le=1.0)
     pacing_confidence: float = Field(0.7, ge=0.0, le=1.0)
 
@@ -281,6 +283,7 @@ class ReadinessBreakdown(BaseModel):
 
 
 PushStrengthState = Literal[
+    "confirm_and_protect",  # Client Feedback Item 9: "We already won, stop selling" mode
     "protect_and_shorten",
     "resolve_then_ask",
     "direct_ask",

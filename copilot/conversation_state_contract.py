@@ -26,6 +26,7 @@ class BehavioralSignalInputBundle(BaseModel):
     engagement: DimensionScore
     momentum: DimensionScore
     readiness: DimensionScore
+    commitment: Optional[DimensionScore] = None
     inference_confidence: float = Field(..., ge=0.0, le=1.0)
     inference_latency_ms: float = Field(0.0, ge=0.0)
 
@@ -101,6 +102,7 @@ def extract_behavioral_bundle(
         engagement=inference_state.engagement,
         momentum=inference_state.momentum,
         readiness=inference_state.readiness,
+        commitment=getattr(inference_state, "commitment", None),
         inference_confidence=inference_state.overall_confidence,
         inference_latency_ms=inference_state.inference_latency_ms,
         boundary_score=semantic_snapshot.boundary_score,

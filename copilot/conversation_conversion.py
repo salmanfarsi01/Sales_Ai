@@ -124,7 +124,7 @@ class MeetingConversionGateEngine:
         confirm_keywords = [
             r"\b(?:that\s+works|works\s+for\s+me|this\s+works|thursday\s+works|friday\s+works|it\s+works)\b",
             r"\b(?:sounds\s+good|sounds\s+fair|perfect|let's\s+do\s+it|deal|fine\s+with\s+me|see\s+you\s+then|i'll\s+be\s+there)\b",
-            r"\b(?:i\s+could\s+do|i\s+can\s+do|let's\s+meet|we\s+can\s+meet|come\s+by|stop\s+by)\b",
+            r"\b(?:i\s+could\s+do|i\s+can\s+do|i\s+can\s+meet|i\s+could\s+meet|let's\s+meet|we\s+can\s+meet|can\s+meet|could\s+meet|come\s+by|stop\s+by)\b",
             r"\b(?:sure\s+let's\s+meet|sure\s+come\s+by)\b",
             r"(?<!doesn't\s)(?<!does\snot\s)(?<!won't\s)(?<!not\s)\bworks\b",
             r"\b(yes|yeah|sure|definitely|absolutely)\b",
@@ -530,7 +530,52 @@ class MeetingConversionGateEngine:
                 confidence=conf,
             )
 
-        # 1b. Deal Disposition: Reconsidering conditionality check (distinct operational state)
+        # 2. We Already Won (Client Feedback Item 9): Stop selling, confirm & protect
+        # If prospect has provided an explicit concrete commitment or confirmed/tentative slot,
+        # persuasion is COMPLETE. Stop selling, do NOT ask again ('direct_ask'), do NOT re-open
+        # objections ('resolve_then_ask'), and do NOT abort ('protect_and_shorten').
+        # CRITICAL ARCHITECTURAL INVARIANT:
+        # This operates INDEPENDENTLY of gate.is_open and BEFORE any objection-blocking fallthroughs
+        # or threat dampeners. An unresolved objection (e.g. commission_fee) can coexist with,
+        # or even be the exact rationale for, the meeting itself:
+        # "Your commission is still too expensive, but I can meet Thursday at 4."
+        is_appointment_target = target in ("appointment", "property_walkthrough", "initial_consultation", "meeting")
+        has_appointment_slot = gate.explicit_commitment_detected and is_appointment_target
+        has_confirmed_event = (
+            current_state.conversion_event is not None
+            and getattr(current_state.conversion_event, "status", None) in (
+                "confirmed", "tentative",
+                ConversionEventStatus.CONFIRMED, ConversionEventStatus.TENTATIVE,
+            )
+            and (
+                getattr(current_state.conversion_event, "event_type", None) == target
+                or is_appointment_target
+            )
+        )
+        has_explicit_commitment = has_appointment_slot or has_confirmed_event
+        if has_explicit_commitment:
+            slot_info = gate.commitment_slot or (
+                current_state.conversion_event.start_at if current_state.conversion_event else None
+            )
+            slot_str = f" at {slot_info}" if slot_info else ""
+            pref_reassurance = ""
+            if comp.contact_preference != "none" or comp.contact_preferences:
+                pref_reassurance = " Reassure and respect their stated contact preferences (e.g. reduced texting cadence)."
+
+            return PushStrengthRecommendation(
+                state="confirm_and_protect",
+                rationale=(
+                    f"Milestone secured: Prospect explicitly agreed to the conversion target{slot_str}. "
+                    "Persuasion is complete; stop selling, avoid re-opening closed or dormant objections, and protect the commitment."
+                ),
+                recommended_action=(
+                    f"Confirm the scheduled appointment{slot_str}.{pref_reassurance} "
+                    "Do not reopen objections, send calendar invite, and exit the call cleanly."
+                ),
+                confidence=conf,
+            )
+
+        # 3. Deal Disposition: Reconsidering conditionality check (distinct operational state)
         if (
             current_state.deal_disposition is not None
             and getattr(current_state.deal_disposition, "disposition", None) in ("reconsidering", DealDispositionType.RECONSIDERING)
@@ -542,7 +587,7 @@ class MeetingConversionGateEngine:
                 confidence=conf,
             )
 
-        # 2. Low Trust / High Threat: Protect & shorten
+        # 4. Low Trust / High Threat: Protect & shorten
         if dims.trust < cfg.gate_min_trust or dims.emotion_tension > cfg.gate_max_tension:
             return PushStrengthRecommendation(
                 state="protect_and_shorten",
@@ -551,7 +596,7 @@ class MeetingConversionGateEngine:
                 confidence=conf,
             )
 
-        # 3. Moderate Trust + Unresolved Target-Blocking Objection: Resolve then ask
+        # 5. Moderate Trust + Unresolved Target-Blocking Objection: Resolve then ask
         target_blocking_cats = self.blocking_config.blocking_categories.get(target, ["boundary"])
         unresolved_blocking_objs = [
             o for o in current_state.objections
@@ -567,20 +612,13 @@ class MeetingConversionGateEngine:
                 confidence=conf,
             )
 
-        # 4. Gate Open: Direct ask / Confirm & Respect
-        if gate.is_open and (dims.trust >= cfg.direct_ask_min_trust or gate.explicit_commitment_detected):
-            if gate.explicit_commitment_detected and gate.commitment_slot:
-                return PushStrengthRecommendation(
-                    state="direct_ask",
-                    rationale=f"Meeting gate is open: Prospect provided explicit concrete commitment ('{gate.commitment_slot}'). Confirm slot directly.",
-                    recommended_action=f"Confirm the appointment at {gate.commitment_slot} and thank the prospect.",
-                    confidence=conf,
-                )
+        # 6. Gate Open without Concrete Slot: Direct close proposal
+        if gate.is_open and dims.trust >= cfg.direct_ask_min_trust:
             if comp.contact_preference == "reduced_frequency":
                 return PushStrengthRecommendation(
                     state="direct_ask",
-                    rationale="Meeting gate is open and prospect requested reduced frequency. Confirmed appointment must respect cadence preference.",
-                    recommended_action="Confirm the scheduled appointment time and explicitly reassure prospect that frequent follow-up messages will not be sent.",
+                    rationale="Meeting gate is open and prospect requested reduced frequency. Proposed appointment must respect cadence preference.",
+                    recommended_action="Propose a specific walkthrough or meeting date, time, and format while reassuring prospect that frequent follow-ups will not be sent.",
                     confidence=conf,
                 )
             return PushStrengthRecommendation(

@@ -29,8 +29,10 @@ from copilot.conversation_state_models import (
     ContactComplianceState,
     DecisionStakeholder,
 )
+from copilot.behavioral_baseline import ContactPreferenceRecord
 from copilot.conversation_state_contract import extract_behavioral_bundle
 from copilot.conversation_state_manager import ConversationStateManager
+from copilot.conversation_conversion_config import ConversionBlockingConfig
 
 
 def _create_bundle(
@@ -41,6 +43,7 @@ def _create_bundle(
     emotion_valence: float = 0.0,
     emotion_tension: float = 0.20,
     readiness: float = 0.55,
+    commitment: Optional[float] = None,
     engagement: float = 0.60,
     pacing: float = 0.60,
     momentum: float = 0.55,
@@ -56,6 +59,11 @@ def _create_bundle(
     contact_preference_confidence: float = 0.0,
     call_sid: str = "CA_decoupling_test",
 ):
+    commit_dim = (
+        DimensionScore(score=commitment, confidence=0.85, primary_horizon="current_utterance")
+        if commitment is not None
+        else None
+    )
     inference = DownstreamInferenceState(
         call_sid=call_sid,
         timestamp_ms=3000 * turn_id,
@@ -65,6 +73,7 @@ def _create_bundle(
         engagement=DimensionScore(score=engagement, confidence=0.85, primary_horizon="last_60_90s"),
         momentum=DimensionScore(score=momentum, confidence=0.85, primary_horizon="last_60_90s"),
         readiness=DimensionScore(score=readiness, confidence=0.85, primary_horizon="full_call"),
+        commitment=commit_dim,
         overall_confidence=0.85,
         contributing_evidence_ids=[f"ev_{turn_id}"],
     )
@@ -589,5 +598,364 @@ def test_casual_family_mention_does_not_trigger_sensitive_trust_boost(tmp_path: 
     assert inf2.trust.score <= 0.55, f"Casual family mention should not inflate trust: got {inf2.trust.score:.2f}"
     assert not any("sensitive constraint" in d.lower() for d in inf2.trust.drivers)
     store.close()
+
+
+def test_contact_preference_record_schema_parity():
+    """Client Item 7 Confirmation:
+    Verifies that ContactPreferenceRecord supports the client's 5 exact named wishlist fields:
+    channel, allowed, cadence, prohibited_behavior, boundary_strength.
+    """
+    rec = ContactPreferenceRecord(
+        preference="reduced_frequency",
+        confidence=0.95,
+        channel="sms",
+        allowed=True,
+        cadence="reduced",
+        prohibited_behavior="daily texting before Thursday",
+        boundary_strength="preference",
+        details="texting once a week only",
+    )
+    assert rec.channel == "sms"
+    assert rec.allowed is True
+    assert rec.cadence == "reduced"
+    assert rec.prohibited_behavior == "daily texting before Thursday"
+    assert rec.boundary_strength == "preference"
+    # Ensure serializability
+    dumped = rec.model_dump()
+    assert dumped["channel"] == "sms"
+    assert dumped["boundary_strength"] == "preference"
+
+
+def test_issue8_skeptical_meeting_confirmation_correlation_check():
+    """Client Item 8 Mandate: Dedicated Correlation-Check Test.
+    Scenario: Prospect agrees to logistical time slot while expressing pricing skepticism
+    ('Fine, Thursday at 3 works to see your presentation, but I still think your 5% commission
+     is way too high and I don't buy that you're worth it.').
+
+    Asserts:
+    1. Commitment rises significantly (>= 0.85) from logistical slot lock.
+    2. Readiness rises moderately (>= 0.60) due to willingness to proceed with presentation.
+    3. Trust remains low / baseline (<= 0.50, delta <= 0.05 from baseline).
+    4. Decoupling gap (Commitment - Trust) >= 0.35, proving dimensions do not move in lockstep.
+    """
+    manager = ConversationStateManager(call_sid="call_corr_check", conversion_target="appointment")
+
+    # Turn 1: Salesperson establishes baseline and proposes Thursday at 3
+    t1 = _create_bundle(
+        turn_id=1,
+        speaker_id="client",
+        text="I own the house and am looking at options.",
+        trust=0.50,
+        readiness=0.40,
+        commitment=0.0,
+    )
+    manager.process_turn_bundle(
+        t1,
+        decision_updates={
+            "primary_decision_maker": "Self",
+            "decision_maker_present": True,
+            "stakeholders": [DecisionStakeholder(name="Self", role="owner", presence="on_call")],
+        },
+        fact_updates=[
+            {"category": "property", "fact_key": "property_address", "fact_value": "100 Main St"},
+        ],
+    )
+    initial_trust = manager.current_state.dimensions.trust
+    assert initial_trust == 0.50
+    assert manager.current_state.dimensions.commitment == 0.0
+
+    # Turn 2: Prospect agrees to appointment time while actively contesting commission fee
+    # Raw signals: high agreement on scheduling, but friction and pricing objection present
+    t2 = _create_bundle(
+        turn_id=2,
+        speaker_id="client",
+        text="Fine, Thursday at 3 works to see your presentation, but I still think your 5% commission is way too high and I don't buy that you're worth it.",
+        trust=0.48,  # Trust stays low/flat due to skepticism
+        readiness=0.75,  # Prepared to attend presentation
+        commitment=0.85,  # Concrete slot agreed
+        engagement=0.75,
+        momentum=0.60,
+        agreement=0.85,
+        future_lang=0.70,
+        recurrence_id="objection_commission_fee",
+        recurrence_type="same_objection_repeated",
+    )
+    state2 = manager.process_turn_bundle(
+        t2,
+        fact_updates=[
+            {"category": "timeline", "fact_key": "confirmed_meeting_time", "fact_value": "Thursday at 3pm"},
+        ],
+    )
+
+    dims = state2.dimensions
+
+    # 1. Commitment rose sharply
+    assert dims.commitment >= 0.85, f"Expected high commitment on confirmed slot: got {dims.commitment:.2f}"
+
+    # 2. Readiness rose
+    assert dims.readiness >= 0.60, f"Expected readiness to reflect presentation agreement: got {dims.readiness:.2f}"
+
+    # 3. Trust did NOT jump with commitment/readiness
+    assert dims.trust <= 0.50, f"Trust should remain skeptical/low despite meeting agreement: got {dims.trust:.2f}"
+    trust_delta = abs(dims.trust - initial_trust)
+    assert trust_delta <= 0.05, f"Trust moved too much: delta={trust_delta:.3f} (initial={initial_trust}, current={dims.trust})"
+
+    # 4. Decoupling Correlation Gap: Commitment and Trust are completely decoupled
+    decoupling_gap = dims.commitment - dims.trust
+    assert decoupling_gap >= 0.35, (
+        f"Expected Commitment ({dims.commitment:.2f}) and Trust ({dims.trust:.2f}) "
+        f"to diverge by at least 0.35: gap={decoupling_gap:.2f}"
+    )
+
+
+def test_issue8_behavioral_engine_decouples_commitment_from_trust_on_skeptical_agreement(tmp_path: Path):
+    """Verifies that the upstream DownstreamInferenceEngine independently decouples
+    Commitment from Trust on the exact skeptical agreement utterance.
+    """
+    db_path = tmp_path / "test_skeptical_engine.db"
+    store = SQLiteEvidenceLogStore(db_path=db_path)
+    timing_engine = DeterministicTimingEngine()
+    aggregator = MultiWindowAggregator("call_skeptical_eng", timing_engine, store=store)
+    engine = DownstreamInferenceEngine()
+
+    # Turn 1: Baseline intro
+    utt1 = normalize_generic_transcript(
+        text="Hi, I am reaching out regarding your home on Maple Street.",
+        speaker_id="salesperson",
+        start_ms=1000,
+        end_ms=4000,
+        call_sid="call_skeptical_eng",
+    )
+    t_snap1 = timing_engine.process_utterance(utt1)
+    frame1 = aggregator.process_turn(utt1, t_snap1)
+
+    # Turn 2: Skeptical agreement utterance
+    utt2 = normalize_generic_transcript(
+        text="Fine, Thursday at 3 works to see your presentation, but I still think your 5% commission is way too high and I don't buy that you're worth it.",
+        speaker_id="client",
+        start_ms=5000,
+        end_ms=12000,
+        call_sid="call_skeptical_eng",
+    )
+    t_snap2 = timing_engine.process_utterance(utt2)
+    sem_snap2 = SemanticFeatureSnapshot(
+        utterance_id=utt2.utterance_id,
+        call_sid="call_skeptical_eng",
+        speaker_id="client",
+        agreement_score=0.85,
+        future_language_score=0.70,
+        specificity_score=0.75,
+        recurrence_type="scheduling_detail_repeated",
+        recurrence_id="objection_commission_fee",
+    )
+    frame2 = aggregator.process_turn(utt2, t_snap2, sem_snap2)
+    inf = engine.compute_inference("call_skeptical_eng", current_frame=frame2, recent_frames=[frame1])
+
+    # 1. Commitment is high from concrete scheduling detail
+    assert inf.commitment is not None
+    assert inf.commitment.score >= 0.80, f"Commitment should be high: got {inf.commitment.score:.2f}"
+
+    # 2. Readiness is high from future language and scheduling
+    assert inf.readiness.score >= 0.60, f"Readiness should be elevated: got {inf.readiness.score:.2f}"
+
+    # 3. Trust is NOT inflated by the agreement (remains at or below baseline 0.50)
+    assert inf.trust.score <= 0.50, f"Trust should not be inflated by meeting agreement: got {inf.trust.score:.2f}"
+
+    # 4. Proves decoupling gap in raw inference
+    engine_decoupling_gap = inf.commitment.score - inf.trust.score
+    assert engine_decoupling_gap >= 0.30, f"Engine commitment and trust should diverge: gap={engine_decoupling_gap:.2f}"
+    store.close()
+
+
+# =============================================================================
+# Issue #9 Tests: "We Already Won, Stop Selling" Mode (confirm_and_protect)
+# =============================================================================
+
+def test_issue9_confirm_and_protect_mode_activates_on_slot_agreement():
+    """Client Item 9 Validation: 'We already won, stop selling' mode.
+    Scenario:
+    Prospect confirms an appointment slot:
+    'Yeah. Thursday at three is fine. One thing, though, please don't start texting me every day before Thursday.'
+
+    Asserts:
+    1. Gate is OPEN (explicit_commitment_detected is True, plausible_logistics is True, no_active_boundary is True).
+    2. Contact preference ('sms', reduced cadence) is cleanly captured without triggering hard boundary.
+    3. Push strength state transitions to 'confirm_and_protect' (NOT 'direct_ask', NOT 'resolve_then_ask').
+    4. Recommended action explicitly instructs the rep to confirm appointment, respect stated preferences
+       (e.g. reduced texting cadence), avoid reopening objections, and exit cleanly.
+    """
+    manager = ConversationStateManager(call_sid="call_item9_confirm_protect", conversion_target="appointment")
+
+    # Turn 1: Decision maker baseline + property fact
+    t1 = _create_bundle(
+        turn_id=1,
+        speaker_id="client",
+        text="I own the property and make the decisions.",
+        trust=0.55,
+        readiness=0.50,
+        momentum=0.55,
+    )
+    manager.process_turn_bundle(
+        t1,
+        decision_updates={
+            "primary_decision_maker": "Self",
+            "decision_maker_present": True,
+            "stakeholders": [DecisionStakeholder(name="Self", role="owner", presence="on_call")],
+        },
+        fact_updates=[
+            {"category": "property", "fact_key": "property_address", "fact_value": "500 Elm St"},
+            {"category": "timeline", "fact_key": "target_closing", "fact_value": "Fall"},
+        ],
+    )
+
+    # Turn 2: Prospect accepts: "Yeah. Thursday at three is fine. One thing, though, please don't start texting me every day before Thursday."
+    t2 = _create_bundle(
+        turn_id=2,
+        speaker_id="client",
+        text="Yeah. Thursday at three is fine. One thing, though, please don't start texting me every day before Thursday.",
+        trust=0.55,
+        readiness=0.85,
+        commitment=0.90,
+        momentum=0.75,
+        agreement=0.90,
+        specificity=0.85,
+        future_lang=0.80,
+        contact_preference="reduced_frequency",
+        contact_preference_details="texting every day",
+        contact_preference_confidence=0.92,
+    )
+    state2 = manager.process_turn_bundle(
+        t2,
+        fact_updates=[
+            {"category": "timeline", "fact_key": "confirmed_meeting_time", "fact_value": "Thursday at 3pm"},
+        ],
+    )
+
+    # 1. Gate is open
+    gate = state2.conversion_gate
+    assert gate.is_open is True
+    assert gate.explicit_commitment_detected is True
+
+    # 2. Soft contact preference captured, hard boundary NOT active
+    comp = state2.contact_compliance
+    assert comp.hard_boundary_active is False
+    assert len(comp.contact_preferences) >= 1
+    pref = comp.contact_preferences[0]
+    assert pref.channel == "sms"
+    assert pref.cadence == "reduced"
+    assert pref.boundary_strength == "preference"
+
+    # 3. Push strength transitions to 'confirm_and_protect'
+    push = state2.push_strength
+    assert push.state == "confirm_and_protect", f"Expected 'confirm_and_protect', got '{push.state}'"
+
+    # 4. Rationale and recommended action verification
+    assert "Milestone secured" in push.rationale or "stop selling" in push.rationale
+    assert "Confirm the scheduled appointment" in push.recommended_action
+    assert "reopen objections" in push.recommended_action.lower()
+    assert "respect their stated contact preferences" in push.recommended_action or "texting cadence" in push.recommended_action
+
+
+def test_issue9_confirm_and_protect_fires_when_gate_is_closed_with_active_objection():
+    """Client Item 9 Defining Case Validation:
+    Prospect utterance:
+    'Your commission is still too expensive, but I can meet Thursday at 4.'
+
+    Key Validations:
+    1. An active, unresolved objection ('commission_fee') is present.
+    2. The conversion gate is CLOSED (gate.is_open is False) because:
+       - Condition 3 (objections_resolved_or_partial) fails on the active commission objection blocking appointment.
+       - Conversational tension from the pricing debate is elevated.
+    3. Despite the gate being CLOSED and the objection being ACTIVE:
+       - Push strength transitions to 'confirm_and_protect' (NOT 'resolve_then_ask', NOT 'protect_and_shorten').
+       - Rationale acknowledges the secured milestone and instructs rep to stop selling.
+       - Recommended action instructs rep to confirm the appointment at Thursday at 4,
+         avoid re-opening the commission objection, send the calendar invite, and exit cleanly.
+    """
+    manager = ConversationStateManager(
+        call_sid="call_item9_gate_closed",
+        conversion_target="appointment",
+        blocking_config=ConversionBlockingConfig(
+            blocking_categories={"appointment": ["commission_fee", "boundary"]}
+        ),
+    )
+
+    # Turn 1: Decision maker baseline + property fact
+    t1 = _create_bundle(
+        turn_id=1,
+        speaker_id="client",
+        text="I own the house and am looking at my options.",
+        trust=0.50,
+        readiness=0.50,
+        momentum=0.50,
+    )
+    manager.process_turn_bundle(
+        t1,
+        decision_updates={
+            "primary_decision_maker": "Self",
+            "decision_maker_present": True,
+            "stakeholders": [DecisionStakeholder(name="Self", role="owner", presence="on_call")],
+        },
+        fact_updates=[
+            {"category": "property", "fact_key": "property_address", "fact_value": "789 Willow Way"},
+            {"category": "timeline", "fact_key": "target_closing", "fact_value": "Summer"},
+        ],
+    )
+
+    # Turn 2: Exact client utterance:
+    # "Your commission is still too expensive, but I can meet Thursday at 4."
+    t2 = _create_bundle(
+        turn_id=2,
+        speaker_id="client",
+        text="Your commission is still too expensive, but I can meet Thursday at 4.",
+        trust=0.48,
+        emotion_tension=0.70,  # elevated tension from objection
+        readiness=0.70,
+        commitment=0.85,
+        momentum=0.50,
+        agreement=0.45,
+        specificity=0.80,
+        future_lang=0.75,
+        recurrence_id="objection_commission_fee",
+        recurrence_type="same_objection_repeated",
+    )
+    state2 = manager.process_turn_bundle(
+        t2,
+        fact_updates=[
+            {"category": "timeline", "fact_key": "confirmed_meeting_time", "fact_value": "Thursday at 4pm"},
+        ],
+    )
+
+    # 1. Verify that the objection is ACTIVE and UNRESOLVED
+    active_objs = [o for o in state2.objections if o.canonical_category == "commission_fee" and o.lifecycle_state in ("active", "unresolved")]
+    assert len(active_objs) >= 1, "Expected active commission_fee objection"
+
+    # 2. Verify that the gate is strictly CLOSED
+    gate = state2.conversion_gate
+    assert gate.is_open is False, "Gate should be closed due to active blocking objection and elevated tension"
+    assert gate.status == "closed"
+    c3 = next(c for c in gate.conditions if c.condition_name == "objections_resolved_or_partial")
+    assert c3.met is False, "Condition 3 must fail due to active commission objection"
+    assert "commission_fee" in c3.reason
+
+    # 3. Verify that explicit commitment was detected
+    assert gate.explicit_commitment_detected is True
+    assert "Thursday" in (gate.commitment_slot or "")
+
+    # 4. CRITICAL INVARIANT: confirm_and_protect triggers despite gate being CLOSED!
+    push = state2.push_strength
+    assert push.state == "confirm_and_protect", (
+        f"Expected 'confirm_and_protect' even with closed gate, but got '{push.state}'. "
+        f"Push strength fell through to gate-closed logic incorrectly."
+    )
+    assert push.state != "resolve_then_ask", "Should NOT attempt to resolve objection before meeting"
+    assert push.state != "protect_and_shorten", "Should NOT abort when appointment is secured"
+
+    # 5. Verify recommended action
+    assert "Confirm the scheduled appointment" in push.recommended_action
+    assert "Do not reopen objections" in push.recommended_action
+    assert "Thursday" in push.recommended_action
+
+
 
 

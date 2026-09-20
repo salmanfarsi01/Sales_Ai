@@ -44,6 +44,7 @@ class DownstreamInferenceState(BaseModel):
     engagement: DimensionScore
     momentum: DimensionScore
     readiness: DimensionScore
+    commitment: Optional[DimensionScore] = None
     acoustic_evidence: Literal["unavailable", "available"] = "unavailable"
     overall_confidence: float = Field(..., ge=0.0, le=1.0)
     overall_confidence_reason: Optional[str] = None
@@ -362,20 +363,30 @@ class DownstreamInferenceEngine:
             if (w_60s and w_60s.semantic_features)
             else (w_full.semantic_features if w_full else sem_curr)
         )
-        if sem_trust is not None:
-            if sem_trust.boundary_score >= 0.80:
+        sem_eval = sem_curr or sem_trust
+        has_active_objection_or_pushback = False
+
+        if sem_eval is not None:
+            if sem_eval.boundary_score >= 0.80:
                 trust_score -= self.config.trust_boundary_penalty
                 trust_drivers.append("Boundary statement suppresses trust")
-            if sem_trust.recurrence_type == "positive_echo":
+            if sem_eval.recurrence_type == "positive_echo":
                 trust_score += self.config.trust_positive_echo_boost
                 trust_drivers.append("Client echoes rep strategic framing")
-            elif sem_trust.recurrence_type in ("same_objection_repeated", "concern_after_failed_reframe"):
+            elif sem_eval.recurrence_type in ("same_objection_repeated", "concern_after_failed_reframe") or (
+                sem_eval.recurrence_id is not None and "objection" in sem_eval.recurrence_id
+            ):
+                has_active_objection_or_pushback = True
                 trust_score -= self.config.trust_unresolved_objection_penalty
-                trust_drivers.append(f"Unresolved objection recurrence ({sem_trust.recurrence_type})")
+                trust_drivers.append(f"Unresolved objection recurrence ({sem_eval.recurrence_type or sem_eval.recurrence_id})")
+
+        if tension_level >= 0.35:
+            has_active_objection_or_pushback = True
 
         # Multi-turn sustained disclosure depth across recent dialogue
+        # Sustained disclosure depth only builds trust when NOT actively pushing back or expressing friction
         t_len = w_60s.timing_features.turn_length_words
-        if t_len >= 12 and len(frames) >= 2:
+        if t_len >= 12 and len(frames) >= 2 and not has_active_objection_or_pushback:
             trust_score += self.config.trust_sustained_disclosure_boost
             trust_drivers.append(f"Sustained multi-turn disclosure depth ({t_len} words/turn)")
         elif t_len <= 3 and len(frames) >= 2:
@@ -503,6 +514,32 @@ class DownstreamInferenceEngine:
             drivers=read_drivers,
         )
 
+        # 7. Commitment Calculation (Explicit concrete milestone / slot agreement)
+        commit_drivers: List[str] = []
+        if sem_curr is not None and sem_curr.boundary_score >= 0.80:
+            commit_score = 0.0
+            commit_drivers.append("Hard boundary overrides commitment to 0.0")
+        elif sem_curr is not None and sem_curr.recurrence_type == "scheduling_detail_repeated":
+            commit_score = 0.85
+            commit_drivers.append("Client confirmed concrete scheduling milestone / appointment slot")
+        elif sem_curr is not None and sem_curr.agreement_score >= 0.70 and sem_curr.future_language_score >= 0.50:
+            commit_score = 0.80
+            commit_drivers.append(f"Substantive commitment language on future next step (future={sem_curr.future_language_score:.2f})")
+        elif sem_curr is not None and sem_curr.agreement_score >= 0.70:
+            commit_score = 0.40
+            commit_drivers.append("Verbal alignment without concrete locked scheduling parameters")
+        else:
+            commit_score = 0.0
+            commit_drivers.append("No explicit conversion commitment locked")
+
+        commitment = DimensionScore(
+            score=commit_score,
+            confidence=round(read_conf, 2),
+            primary_horizon="current_utterance",
+            contributing_evidence_ids=[w_curr.evidence_id],
+            drivers=commit_drivers,
+        )
+
         # Overall confidence is strict weakest link across all 6 dimensions
         dim_conf_map = [
             ("pacing", pacing.confidence, pacing_evidence),
@@ -522,7 +559,7 @@ class DownstreamInferenceEngine:
 
         # Collect unique contributing evidence IDs
         all_evidence_ids: List[str] = []
-        for d in (pacing, engagement, trust, momentum, readiness):
+        for d in (pacing, engagement, trust, momentum, readiness, commitment):
             for eid in d.contributing_evidence_ids:
                 if eid not in all_evidence_ids:
                     all_evidence_ids.append(eid)
@@ -558,6 +595,7 @@ class DownstreamInferenceEngine:
             engagement=engagement,
             momentum=momentum,
             readiness=readiness,
+            commitment=commitment,
             acoustic_evidence=acoustic_flag,
             overall_confidence=round(overall_conf, 2),
             overall_confidence_reason=overall_conf_reason,
