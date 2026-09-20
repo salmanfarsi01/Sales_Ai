@@ -5,6 +5,7 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>PitchProX ConversationState Replay Console</title>
+  <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='8' fill='%230D9488'/%3E%3Cpath d='M9 16h14M16 9v14' stroke='%23FFFFFF' stroke-width='3' stroke-linecap='round'/%3E%3C/svg%3E">
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link
@@ -780,22 +781,30 @@
 
   <!-- Modal: Simulate Script -->
   <div class="modal-backdrop" id="simModal">
-    <div class="modal-card">
+    <div class="modal-card" style="max-width: 680px;">
       <div style="display: flex; justify-content: space-between; align-items: center;">
         <h3 style="margin: 0;">Simulate Dialogue Script</h3>
         <button class="btn-ghost" onclick="document.getElementById('simModal').classList.remove('open')" style="font-size: 18px; line-height: 1;">&times;</button>
       </div>
       <div style="font-size: 12px; color: var(--text-muted);">
-        Paste a JSON array of turns to run end-to-end through ConversationStateManager:
+        Paste or choose a preset JSON dialogue to run through ConversationStateManager:
       </div>
-      <textarea id="simScriptText" placeholder='[
+      <div style="display: flex; gap: 8px; flex-wrap: wrap;">
+        <button type="button" class="btn-ghost" style="font-size: 11px; padding: 4px 10px;" onclick="loadSampleScript('default')">Preset: Standard (3 Turns)</button>
+        <button type="button" class="btn-ghost" style="font-size: 11px; padding: 4px 10px;" onclick="loadSampleScript('commission_appt')">Preset: Commission Objection + Thursday at 4</button>
+        <button type="button" class="btn-ghost" style="font-size: 11px; padding: 4px 10px;" onclick="loadSampleScript('boundary')">Preset: Hard Boundary (Exit)</button>
+      </div>
+      <textarea id="simScriptText" style="height: 200px;" placeholder='[
   {"turn_id": 1, "speaker_id": "client", "text": "Hi, who is this?"},
   {"turn_id": 2, "speaker_id": "salesperson", "text": "Hi Daniel, I noticed your home was listed previously..."},
   {"turn_id": 3, "speaker_id": "client", "text": "Yeah, that sounds nice. Sure, maybe sometime."}
 ]'></textarea>
-      <div style="display: flex; justify-content: flex-end; gap: 8px;">
-        <button class="btn-ghost" onclick="document.getElementById('simModal').classList.remove('open')">Cancel</button>
-        <button class="btn-primary" id="btnRunSimScript">Run Simulation</button>
+      <div style="display: flex; justify-content: space-between; align-items: center; gap: 8px;">
+        <span id="simStatusMsg" style="font-size: 11.5px; color: var(--text-dim);"></span>
+        <div style="display: flex; gap: 8px;">
+          <button class="btn-ghost" onclick="document.getElementById('simModal').classList.remove('open')">Cancel</button>
+          <button class="btn-primary" id="btnRunSimScript">Run Simulation</button>
+        </div>
       </div>
     </div>
   </div>
@@ -829,16 +838,71 @@
   </div>
 
   <script>
+    // Dynamic backend API base detection:
+    // 1. Direct file access (file:///) -> target local backend at http://127.0.0.1:5002
+    // 2. Localhost frontends on other ports (e.g. 3000, 5500, 8080) -> target http://127.0.0.1:5002
+    // 3. Port 5002 or ngrok domain -> use relative paths ('')
+    let API_BASE = '';
+    if (window.location.protocol === 'file:') {
+      API_BASE = 'http://127.0.0.1:5002';
+    } else if (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1') {
+      if (window.location.port !== '5002') {
+        API_BASE = 'http://127.0.0.1:5002';
+      }
+    }
+
+    // Centralized fetch helper injecting ngrok bypass and JSON headers
+    async function apiFetch(endpoint, options = {}) {
+      const url = endpoint.startsWith('http') ? endpoint : `${API_BASE}${endpoint}`;
+      const defaultHeaders = {
+        'Accept': 'application/json',
+        'ngrok-skip-browser-warning': 'true',
+        'Bypass-Tunnel-Reminder': 'true'
+      };
+      if (options.body && typeof options.body === 'string' && !options.headers?.['Content-Type']) {
+        defaultHeaders['Content-Type'] = 'application/json';
+      }
+      const mergedHeaders = Object.assign({}, defaultHeaders, options.headers || {});
+      const mergedOptions = Object.assign({}, options, { headers: mergedHeaders });
+      return fetch(url, mergedOptions);
+    }
+
     let currentReport = null;
     let activeTurnIndex = 0;
     let allReports = [];
     let activeJsonTab = 'after';
 
+    const SAMPLE_SCRIPTS = {
+      default: [
+        {"turn_id": 1, "speaker_id": "client", "text": "Hi, who is this?"},
+        {"turn_id": 2, "speaker_id": "salesperson", "text": "Hi Daniel, I noticed your home was listed previously and wanted to see if you are still looking to sell."},
+        {"turn_id": 3, "speaker_id": "client", "text": "Yeah, that sounds nice. Sure, maybe sometime next week."}
+      ],
+      commission_appt: [
+        {"turn_id": 1, "speaker_id": "client", "text": "I own the home and make the listing decisions."},
+        {"turn_id": 2, "speaker_id": "salesperson", "text": "Our standard fee is 5% which includes full staging and premium marketing."},
+        {"turn_id": 3, "speaker_id": "client", "text": "Your commission is still too expensive, but I can meet Thursday at 4 to see the numbers."}
+      ],
+      boundary: [
+        {"turn_id": 1, "speaker_id": "client", "text": "Who gave you this number?"},
+        {"turn_id": 2, "speaker_id": "salesperson", "text": "We are reaching out to homeowners on Elm Street."},
+        {"turn_id": 3, "speaker_id": "client", "text": "Do not call me again. Take me off your list immediately."}
+      ]
+    };
+
+    function loadSampleScript(key) {
+      const script = SAMPLE_SCRIPTS[key] || SAMPLE_SCRIPTS.default;
+      document.getElementById('simScriptText').value = JSON.stringify(script, null, 2);
+      const statusEl = document.getElementById('simStatusMsg');
+      if (statusEl) statusEl.textContent = 'Preset loaded: ' + key;
+    }
+
     function showCopyToast(msg = 'Copied to clipboard!') {
       const toast = document.getElementById('copyToast');
+      if (!toast) return;
       toast.textContent = msg;
       toast.style.opacity = '1';
-      setTimeout(() => { toast.style.opacity = '0'; }, 2200);
+      setTimeout(() => { toast.style.opacity = '0'; }, 2400);
     }
 
     // Client Requirement: UI Presentation layer maps internal "unresolved" to human-readable "active"
@@ -864,32 +928,56 @@
 
     function populateReportSelect(filterText = '') {
       const select = document.getElementById('reportSelect');
+      if (!select) return;
       const term = filterText.toLowerCase().trim();
       select.innerHTML = '<option value="">-- Load Stored Call Report --</option>';
 
       const filtered = allReports.filter(item => {
         if (!term) return true;
-        const haystack = `${item.call_sid} ${item.source} ${item.gate_status} ${item.push_strength}`.toLowerCase();
+        const haystack = `${item.call_sid || ''} ${item.source || ''} ${item.gate_status || ''} ${item.push_strength || ''}`.toLowerCase();
         return haystack.includes(term);
       });
+
+      if (filtered.length === 0 && term) {
+        const emptyOpt = document.createElement('option');
+        emptyOpt.value = '';
+        emptyOpt.textContent = `No reports matching "${filterText}"`;
+        select.appendChild(emptyOpt);
+        return;
+      }
 
       filtered.forEach(item => {
         const opt = document.createElement('option');
         opt.value = item.call_sid;
         const tag = item.is_synthetic ? '[SYNTHETIC] ' : (item.source === 'recording_replay' ? '[RECORDING] ' : '[LIVE] ');
         const runs = item.run_count > 1 ? ` (Run #${item.run_count})` : '';
-        const stateBadge = item.has_state_replay === false ? ' [Audio Only - Click to Replay]' : ` (${item.total_turns} turns, Gate: ${item.gate_status})`;
+        const stateBadge = item.has_state_replay === false ? ' [Audio Only - Click to Replay]' : ` (${item.total_turns || 0} turns, Gate: ${item.gate_status || 'closed'})`;
         opt.textContent = `${tag}${item.call_sid}${stateBadge}${runs}`;
         select.appendChild(opt);
       });
+
+      if (currentReport && currentReport.call_sid) {
+        select.value = currentReport.call_sid;
+      }
     }
 
     // Fetch available reports on load
     async function loadReportList() {
+      const select = document.getElementById('reportSelect');
+      if (select && select.options.length <= 1) {
+        select.innerHTML = '<option value="">Connecting to backend reports...</option>';
+      }
       try {
-        const res = await fetch('/api/conversation-state/reports');
-        if (!res.ok) return;
+        const res = await apiFetch('/api/conversation-state/reports');
+        if (!res.ok) {
+          const errText = await res.text();
+          throw new Error(`HTTP ${res.status}: ${errText.slice(0, 100)}`);
+        }
         allReports = await res.json();
+        if (!Array.isArray(allReports) || allReports.length === 0) {
+          if (select) select.innerHTML = '<option value="">No stored reports found (Click Simulate)</option>';
+          return;
+        }
         populateReportSelect();
 
         // Deep linking from query params
@@ -898,26 +986,29 @@
         const targetTurn = urlParams.get('turn');
 
         if (targetSid) {
-          const select = document.getElementById('reportSelect');
-          select.value = targetSid;
+          if (select) select.value = targetSid;
           if (targetTurn) {
             activeTurnIndex = Math.max(0, parseInt(targetTurn, 10) - 1);
           }
           fetchAndRenderReport(targetSid, activeTurnIndex);
-        } else if (allReports.length > 0) {
-          const select = document.getElementById('reportSelect');
-          select.selectedIndex = 1;
+        } else if (allReports.length > 0 && !currentReport) {
+          if (select) select.selectedIndex = 1;
           fetchAndRenderReport(allReports[0].call_sid, 0);
         }
       } catch (e) {
         console.warn('Could not list reports:', e);
+        if (select) {
+          select.innerHTML = '<option value="">Backend connection failed (Click to retry)</option>';
+          select.onchange = () => { loadReportList(); };
+        }
+        showCopyToast('Backend connection error: ' + e.message);
       }
     }
 
     async function fetchAndRenderReport(callSid, turnIndexToSelect = 0) {
       if (!callSid) return;
       try {
-        const res = await fetch(`/api/conversation-state/replay/${encodeURIComponent(callSid)}`);
+        const res = await apiFetch(`/api/conversation-state/replay/${encodeURIComponent(callSid)}`);
         if (!res.ok) {
           alert('Could not load replay for ' + callSid);
           return;
@@ -926,7 +1017,7 @@
         activeTurnIndex = Math.min(turnIndexToSelect, Math.max(0, (currentReport.timeline || []).length - 1));
         renderReplay();
       } catch (e) {
-        alert('Error loading report: ' + e);
+        alert('Error loading report: ' + e.message);
       }
     }
 
@@ -935,11 +1026,17 @@
         return;
       }
 
-      // Sync deep link query params
-      const url = new URL(window.location);
-      url.searchParams.set('call_sid', currentReport.call_sid);
-      url.searchParams.set('turn', activeTurnIndex + 1);
-      window.history.replaceState(null, '', url);
+      // Safe deep link query param sync (handles file:// without crashing)
+      try {
+        if (window.location.protocol === 'http:' || window.location.protocol === 'https:') {
+          const url = new URL(window.location);
+          url.searchParams.set('call_sid', currentReport.call_sid);
+          url.searchParams.set('turn', activeTurnIndex + 1);
+          window.history.replaceState(null, '', url);
+        }
+      } catch (e) {
+        // Silently ignore SecurityError or DOMException on file:// protocol
+      }
 
       // Top ribbon
       const finalState = currentReport.final_state || {};
@@ -1047,7 +1144,7 @@
       if (!step) return;
 
       const sBefore = step.state_before;
-      const sAfter = step.state_after;
+      const sAfter = step.state_after || {};
       const turnNum = step.turn_id !== undefined ? step.turn_id : (activeTurnIndex + 1);
       const speaker = (step.speaker_id || 'client').toUpperCase();
 
@@ -1234,7 +1331,6 @@
       // ==========================================
       // COLUMN 4: STATE AFTER (V_t)
       // ==========================================
-      const sAfter = step.state_after || {};
       document.getElementById('col4Version').textContent = `V${sAfter.state_version || 0}`;
       const gate = sAfter.conversion_gate || {};
       const push = sAfter.push_strength || {};
@@ -1487,9 +1583,18 @@
 
     // JSON Inspector Modal Logic
     function updateJsonModalContent() {
-      if (!currentReport || !currentReport.timeline || !currentReport.timeline[activeTurnIndex]) return;
+      const viewer = document.getElementById('rawJsonViewer');
+      const titleEl = document.getElementById('jsonModalTitle');
+      if (!viewer) return;
+
+      if (!currentReport || !currentReport.timeline || !currentReport.timeline[activeTurnIndex]) {
+        viewer.textContent = 'No call report or turn selected.\n\nPlease select a call report from the dropdown above, or click "Simulate" to run a test dialogue.';
+        if (titleEl) titleEl.textContent = 'Inspect Turn State (No Call Loaded)';
+        return;
+      }
+
       const step = currentReport.timeline[activeTurnIndex];
-      document.getElementById('jsonModalTitle').textContent = `Inspect Turn ${step.turn_id} (${step.speaker_id}) · State JSON`;
+      if (titleEl) titleEl.textContent = `Inspect Turn ${step.turn_id} (${step.speaker_id}) · State JSON`;
 
       let dataToDisplay = null;
       if (activeJsonTab === 'after') {
@@ -1505,7 +1610,7 @@
         dataToDisplay = step.evidence_bundle;
       }
 
-      document.getElementById('rawJsonViewer').textContent = JSON.stringify(dataToDisplay, null, 2);
+      viewer.textContent = JSON.stringify(dataToDisplay, null, 2);
     }
 
     function switchJsonTab(tab) {
@@ -1521,7 +1626,12 @@
     }
 
     function copyCurrentJson() {
-      const text = document.getElementById('rawJsonViewer').textContent;
+      const viewer = document.getElementById('rawJsonViewer');
+      const text = viewer ? viewer.textContent : '';
+      if (!text || text.startsWith('No call report')) {
+        showCopyToast('No JSON data to copy');
+        return;
+      }
       navigator.clipboard.writeText(text).then(() => {
         showCopyToast('JSON copied to clipboard!');
       });
@@ -1534,9 +1644,16 @@
 
     document.getElementById('btnLoadReport').onclick = () => {
       const select = document.getElementById('reportSelect');
-      if (select.value) {
+      if (select && select.value) {
         activeTurnIndex = 0;
         fetchAndRenderReport(select.value);
+      } else {
+        if (!allReports || allReports.length === 0) {
+          alert('No reports loaded yet. Please wait for reports to connect, or click "Simulate" to create a test call.');
+          loadReportList();
+        } else {
+          alert('Please select a call report from the dropdown first (or click "Simulate" to run a test dialogue).');
+        }
       }
     };
 
@@ -1546,30 +1663,61 @@
     };
 
     document.getElementById('btnOpenSimModal').onclick = () => {
+      const textarea = document.getElementById('simScriptText');
+      if (!textarea.value.trim()) {
+        loadSampleScript('commission_appt');
+      }
+      const statusEl = document.getElementById('simStatusMsg');
+      if (statusEl) statusEl.textContent = 'Ready to simulate dialogue';
       document.getElementById('simModal').classList.add('open');
     };
 
     document.getElementById('btnRunSimScript').onclick = async () => {
-      const raw = document.getElementById('simScriptText').value.trim();
-      if (!raw) return;
+      let raw = document.getElementById('simScriptText').value.trim();
+      if (!raw) {
+        loadSampleScript('commission_appt');
+        raw = document.getElementById('simScriptText').value.trim();
+      }
+
+      const btn = document.getElementById('btnRunSimScript');
+      const statusEl = document.getElementById('simStatusMsg');
+      const originalText = btn.textContent;
+      btn.textContent = 'Simulating...';
+      btn.disabled = true;
+      if (statusEl) statusEl.textContent = 'Executing dialogue through ConversationStateManager...';
+
       try {
         const turns = JSON.parse(raw);
-        const res = await fetch('/api/conversation-state/replay-dialogue', {
+        if (!Array.isArray(turns) || turns.length === 0) {
+          throw new Error('Dialogue must be a non-empty array of turn objects.');
+        }
+
+        const simSid = 'sim_' + Date.now().toString(36);
+        const res = await apiFetch('/api/conversation-state/replay-dialogue', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ call_sid: 'sim_' + Date.now().toString(36), turns: turns })
+          body: JSON.stringify({ call_sid: simSid, turns: turns })
         });
+
         if (!res.ok) {
-          alert('Simulation failed: ' + (await res.text()));
-          return;
+          const errText = await res.text();
+          throw new Error('Server returned HTTP ' + res.status + ': ' + errText);
         }
+
         currentReport = await res.json();
         document.getElementById('simModal').classList.remove('open');
         activeTurnIndex = 0;
         renderReplay();
-        loadReportList();
+        await loadReportList();
+        const select = document.getElementById('reportSelect');
+        if (select) select.value = currentReport.call_sid;
+        showCopyToast('Simulation generated and loaded: ' + currentReport.call_sid);
       } catch (e) {
-        alert('Invalid JSON dialogue: ' + e);
+        if (statusEl) statusEl.textContent = 'Error: ' + e.message;
+        alert('Simulation failed: ' + e.message);
+      } finally {
+        btn.textContent = originalText;
+        btn.disabled = false;
       }
     };
 

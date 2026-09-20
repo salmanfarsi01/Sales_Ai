@@ -17,9 +17,9 @@ from typing import Optional, Dict, Any
 
 from dotenv import load_dotenv
 import uvicorn
-from fastapi import FastAPI, UploadFile, File, Form, HTTPException
+from fastapi import FastAPI, UploadFile, File, Form, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse, JSONResponse
+from fastapi.responses import FileResponse, JSONResponse, Response
 
 # Load environment variables (.env)
 load_dotenv(override=False)
@@ -43,8 +43,6 @@ from copilot.behavioral_baseline import (
 from copilot.behavioral_evidence import (
     MultiWindowAggregator,
     SQLiteEvidenceLogStore,
-    MultiWindowEvidenceFrame,
-    BehavioralEvidenceSnapshot,
 )
 from copilot.behavioral_inference import (
     DownstreamInferenceEngine,
@@ -124,6 +122,12 @@ async def serve_test_console():
     if not HTML_FILE.exists():
         raise HTTPException(status_code=404, detail="behavioral_test.html not found in web/ directory")
     return FileResponse(HTML_FILE)
+
+
+@app.get("/favicon.ico", include_in_schema=False)
+async def favicon():
+    """Silences browser 404 logs for favicon."""
+    return Response(status_code=204)
 
 
 # Shared ConversationState Replay & Inspection Console Router (Phase 9)
@@ -358,4 +362,12 @@ if __name__ == "__main__":
     print(f"  --> Dual Track:           http://{host}:{port}/api/test/analyze-two-tracks")
     print("=" * 65 + "\n")
 
-    uvicorn.run("run_behavioral_signal:app", host=host, port=port, reload=True, log_level="info")
+    reload_flag = os.getenv("UVICORN_RELOAD", "false").lower() in ("true", "1")
+    uvicorn.run(
+        "run_behavioral_signal:app",
+        host=host,
+        port=port,
+        reload=reload_flag,
+        reload_dirs=[str(STATIC_DIR), str(Path(__file__).resolve().parent / "copilot")] if reload_flag else None,
+        log_level="info",
+    )

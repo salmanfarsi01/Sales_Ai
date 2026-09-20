@@ -536,13 +536,17 @@ def get_conversation_replay_router(
     Guarantees zero route definition drift across the repository.
     """
     from fastapi import APIRouter, HTTPException
-    from fastapi.responses import FileResponse
+    from fastapi.responses import FileResponse, Response
     import uuid
 
     router = APIRouter(tags=["conversation-state-replay"])
 
     if html_file_path is None:
         html_file_path = Path(__file__).resolve().parent.parent / "web" / "conversation_state_replay.html"
+
+    @router.get("/favicon.ico", include_in_schema=False)
+    async def favicon():
+        return Response(status_code=204)
 
     @router.get("/conversation-state-replay")
     async def serve_conversation_state_replay():
