@@ -179,7 +179,9 @@ class MaterialityFilter:
             r"\b(?:call\s+off|called\s+off)\b",
         ]
         if bundle.speaker_id == "client" and any(re.search(p, bundle.utterance_text.lower()) for p in reversal_markers):
-            forced_targets.update(["facts", "dimensions"])
+            forced_targets.add("facts")
+            if current_state and getattr(current_state.dimensions, "commitment", 0.0) > 0.0:
+                forced_targets.add("dimensions")
             forced_reasons.append("Deterministic Override: client explicit conversion reversal / cancellation.")
 
         # 5d. Objection Reversal / Withdrawal Overrides
@@ -197,7 +199,7 @@ class MaterialityFilter:
 
         # 6. Behavioral & Acoustic Shifts (Client Principle #3: Dimension Stability & Materiality Gating)
         # Protect dimension sync: If upstream inference in bundle meaningfully diverges
-        # from current state dimensions (delta >= 0.08 or client substantive agreement >= 0.70),
+        # from current state dimensions (delta >= 0.08),
         # dimensions MUST be updated, regardless of whether LLM or heuristic classified it.
         if current_state and current_state.dimensions:
             cur_dim = current_state.dimensions
@@ -206,24 +208,25 @@ class MaterialityFilter:
             trust_delta = abs(bundle.trust.score - cur_dim.trust)
             readiness_delta = abs(bundle.readiness.score - cur_dim.readiness)
             engagement_delta = abs(bundle.engagement.score - cur_dim.engagement)
-            bundle_commit = bundle.commitment.score if bundle.commitment is not None else 0.0
-            cur_commit = getattr(cur_dim, "commitment", 0.0)
-            commitment_delta = abs(bundle_commit - cur_commit)
 
-            has_behavioral_shift = (
-                valence_delta >= 0.08
-                or tension_delta >= 0.08
-                or trust_delta >= 0.08
-                or readiness_delta >= 0.08
-                or engagement_delta >= 0.08
-                or commitment_delta >= 0.08
-                or (bundle.speaker_id == "client" and bundle.agreement_score >= 0.70)
-            )
-            if has_behavioral_shift and (bundle.speaker_id == "client" or result.is_material):
+            deltas: Dict[str, float] = {
+                "trust_d": trust_delta,
+                "ready_d": readiness_delta,
+                "val_d": valence_delta,
+                "ten_d": tension_delta,
+                "eng_d": engagement_delta,
+            }
+            if bundle.commitment is not None:
+                cur_commit = getattr(cur_dim, "commitment", 0.0)
+                deltas["commit_d"] = abs(bundle.commitment.score - cur_commit)
+
+            # Strictly require at least one delta >= 0.08
+            active_shifts = {k: v for k, v in deltas.items() if v >= 0.08}
+            if active_shifts and (bundle.speaker_id == "client" or result.is_material):
                 forced_targets.add("dimensions")
+                shift_desc = ", ".join(f"{k}={v:.2f}" for k, v in active_shifts.items())
                 forced_reasons.append(
-                    f"Deterministic Override: behavioral/acoustic shift detected "
-                    f"(trust_d={trust_delta:.2f}, ready_d={readiness_delta:.2f}, val_d={valence_delta:.2f})."
+                    f"Deterministic Override: behavioral/acoustic shift detected ({shift_desc})."
                 )
 
         if forced_targets:
@@ -538,7 +541,7 @@ class MaterialityFilter:
             f"1. Casual pleasantries or weather chatter ('Looks like rain', 'Good morning') with no deal facts are NOT material.\n"
             f"2. Statements that superficially look like casual chatter but contain embedded structural facts "
             f"('We were having coffee talking about how my brother-in-law co-owns the deed') MUST be marked for decision_structure and facts.\n"
-            f"3. A pure factual disclosure should NOT mark dimensions unless significant emotion/tension is present.\n"
+            f"3. A turn should ONLY mark dimensions if explicit emotional cues, hostility, or trust shifts are present. Do NOT mark dimensions for cancellations, boundaries, or factual disclosures unless accompanied by a shift in trust, tension, or commitment.\n"
             f"4. AGENT INQUIRIES & PROPOSALS: Questions or scheduling proposals asked by the salesperson (e.g. 'Thursday at three still work?', 'Would you want him involved?', 'Who else makes decisions?') "
             f"are exploratory inquiries/proposals, NOT established deal facts. Do NOT mark decision_structure or facts for an agent inquiry alone; wait for prospect confirmation.\n"
             f"5. PROSPECT CONFIRMATIONS: If the salesperson previously proposed a meeting time or asked about involving a stakeholder, and the prospect affirmatively confirms "

@@ -177,15 +177,23 @@ class ConversationStateManager:
         # 2. Update Contact/Compliance State (Gated by Materiality)
         if "contact_compliance" in materiality.affected_targets:
             text_lower = bundle.utterance_text.lower().strip()
+            matched_boundary_pattern = next((p for p in HARD_BOUNDARY_PATTERNS if re.search(p, text_lower)), None)
             is_hard_turn = (
                 bundle.boundary_score >= 0.85
                 or bundle.recurrence_type == "boundary_repeated"
-                or any(re.search(p, text_lower) for p in HARD_BOUNDARY_PATTERNS)
+                or bool(matched_boundary_pattern)
             )
             hard_active = self.current_state.contact_compliance.hard_boundary_active or is_hard_turn
             hard_reason = self.current_state.contact_compliance.hard_boundary_reason
             if is_hard_turn:
-                hard_reason = f"Triggered by upstream compliance boundary detection (score={bundle.boundary_score:.2f})"
+                if bundle.boundary_score >= 0.85:
+                    hard_reason = f"Triggered by upstream compliance boundary detection (score={bundle.boundary_score:.2f})"
+                elif bundle.recurrence_type == "boundary_repeated":
+                    hard_reason = "Triggered by repeated compliance boundary escalation"
+                elif matched_boundary_pattern:
+                    hard_reason = f"Triggered by explicit compliance cutoff phrase ('{bundle.utterance_text.strip()}')"
+                else:
+                    hard_reason = "Triggered by compliance boundary detection"
 
             # Track prohibited channels
             channels = list(self.current_state.contact_compliance.hard_boundary_channels)
@@ -505,29 +513,30 @@ class ConversationStateManager:
                 None,
             )
             if conv_res.status == ConversionEventStatus.CANCELLED and active_meeting_fact:
-                old_f, new_f = self.facts_manager.supersede_fact(
-                    old_fact_id=active_meeting_fact.fact_id,
-                    new_fact_value="Cancelled",
-                    source_turn_id=bundle.turn_id,
-                    timestamp_ms=bundle.timestamp_ms,
-                    notes=conv_res.reversal_reason or "Conversion event cancelled",
-                )
-                self.current_state.facts = self.facts_manager.get_all_facts()
-                next_version += 1
-                changes.append(
-                    StateChangeRecord(
-                        state_version_before=next_version - 1,
-                        state_version_after=next_version,
-                        field_path="facts.confirmed_meeting_time",
-                        old_value=old_f.fact_value,
-                        new_value=new_f.fact_value,
-                        triggering_turn_id=bundle.turn_id,
-                        evidence_ids=bundle.contributing_evidence_ids,
-                        reason=f"Deterministic cascade from conversion event cancellation: {conv_res.reversal_reason or 'Cancelled'}",
-                        confidence=conv_res.confirmation_confidence,
+                if not active_meeting_fact.fact_value.lower().startswith("cancel"):
+                    old_f, new_f = self.facts_manager.supersede_fact(
+                        old_fact_id=active_meeting_fact.fact_id,
+                        new_fact_value="Cancelled",
+                        source_turn_id=bundle.turn_id,
                         timestamp_ms=bundle.timestamp_ms,
+                        notes=conv_res.reversal_reason or "Conversion event cancelled",
                     )
-                )
+                    self.current_state.facts = self.facts_manager.get_all_facts()
+                    next_version += 1
+                    changes.append(
+                        StateChangeRecord(
+                            state_version_before=next_version - 1,
+                            state_version_after=next_version,
+                            field_path="facts.confirmed_meeting_time",
+                            old_value=old_f.fact_value,
+                            new_value=new_f.fact_value,
+                            triggering_turn_id=bundle.turn_id,
+                            evidence_ids=bundle.contributing_evidence_ids,
+                            reason=f"Deterministic cascade from conversion event cancellation: {conv_res.reversal_reason or 'Cancelled'}",
+                            confidence=conv_res.confirmation_confidence,
+                            timestamp_ms=bundle.timestamp_ms,
+                        )
+                    )
             elif conv_res.status == ConversionEventStatus.CONFIRMED and conv_res.start_at:
                 if active_meeting_fact and active_meeting_fact.fact_value.strip().lower() != conv_res.start_at.strip().lower():
                     old_f, new_f = self.facts_manager.supersede_fact(
@@ -562,8 +571,32 @@ class ConversationStateManager:
         # Re-sync commitment on dimensions if conversion event or gate updated commitment
         post_commit_val, post_commit_conf = self._compute_commitment_from_lifecycle(bundle, conv_res, gate_res)
         if post_commit_val != self.current_state.dimensions.commitment:
+            old_commit = self.current_state.dimensions.commitment
             self.current_state.dimensions.commitment = post_commit_val
             self.current_state.dimensions.commitment_confidence = post_commit_conf
+            next_version += 1
+            changes.append(
+                StateChangeRecord(
+                    state_version_before=next_version - 1,
+                    state_version_after=next_version,
+                    field_path="dimensions.commitment",
+                    old_value=old_commit,
+                    new_value=post_commit_val,
+                    triggering_turn_id=bundle.turn_id,
+                    evidence_ids=bundle.contributing_evidence_ids,
+                    reason=(
+                        f"Commitment dimension updated from {old_commit:.2f} to {post_commit_val:.2f} "
+                        f"reflecting conversion event status '{conv_res.status if conv_res else 'cancelled'}'."
+                    ),
+                    confidence=post_commit_conf,
+                    timestamp_ms=bundle.timestamp_ms,
+                )
+            )
+
+        # Inconsistency Guard: Prune dimensions from materiality affected_targets if no dimension change materialized
+        has_dim_change = any(c.field_path.startswith("dimensions") for c in changes)
+        if "dimensions" in materiality.affected_targets and not has_dim_change:
+            materiality.affected_targets.discard("dimensions")
 
         # Update metadata
         self.current_state.last_updated_turn_id = bundle.turn_id

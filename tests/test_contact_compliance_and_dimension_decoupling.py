@@ -957,5 +957,69 @@ def test_issue9_confirm_and_protect_fires_when_gate_is_closed_with_active_object
     assert "Thursday" in push.recommended_action
 
 
+def test_hard_boundary_phrase_audit_reason_does_not_cite_zero_score():
+    """Validates that explicit cutoff phrases cite the phrase pattern, NOT upstream score=0.00."""
+    manager = ConversationStateManager("CA_boundary_phrase_test")
+    b = _create_bundle(
+        turn_id=1,
+        speaker_id="client",
+        text="Actually, cancel that. Stop calling me.",
+        boundary=0.0,
+    )
+    snap = manager.process_turn_bundle(b)
+    comp = snap.contact_compliance
+    assert comp.hard_boundary_active is True
+    assert "score=0.00" not in (comp.hard_boundary_reason or "")
+    assert "explicit compliance cutoff phrase" in (comp.hard_boundary_reason or "")
+
+
+def test_conversion_cancellation_updates_dimensions_commitment_and_avoids_bogus_acoustic_override():
+    """Validates that a meeting cancellation updates dimensions.commitment from 1.0 to 0.0 with a StateChangeRecord,
+    and materiality reasoning does NOT contain a bogus all-zero behavioral/acoustic shift override.
+    """
+    manager = ConversationStateManager("CA_cancellation_dim_test")
+
+    # Turn 1: Meeting confirmed
+    t1 = _create_bundle(
+        turn_id=1,
+        speaker_id="client",
+        text="Yes, Thursday at 3pm works perfectly.",
+        agreement=0.90,
+    )
+    snap1 = manager.process_turn_bundle(
+        t1,
+        fact_updates=[
+            {"category": "timeline", "fact_key": "confirmed_meeting_time", "fact_value": "Thursday at 3pm"},
+        ],
+    )
+    assert snap1.dimensions.commitment == 1.0
+
+    # Turn 2: Cancellation with boundary
+    t2 = _create_bundle(
+        turn_id=2,
+        speaker_id="client",
+        text="Actually, cancel that. Stop calling me.",
+        boundary=0.0,
+    )
+    mat = manager.materiality_filter.classify_turn(t2, snap1)
+    # 1. Bogus all-zero override must NOT be present
+    assert "trust_d=0.00, ready_d=0.00, val_d=0.00" not in mat.reasoning
+
+    # 2. Process turn 2 through manager
+    snap2 = manager.process_turn_bundle(t2)
+    assert snap2.dimensions.commitment == 0.0
+
+    # 3. Exactly one dimensions.commitment change record emitted
+    dim_changes = [c for c in snap2.change_history if c.triggering_turn_id == 2 and c.field_path == "dimensions.commitment"]
+    assert len(dim_changes) == 1
+    assert dim_changes[0].old_value == 1.0
+    assert dim_changes[0].new_value == 0.0
+
+    # 4. Only one fact update for confirmed_meeting_time
+    fact_changes = [c for c in snap2.change_history if c.triggering_turn_id == 2 and c.field_path == "facts.confirmed_meeting_time"]
+    assert len(fact_changes) == 1
+    assert fact_changes[0].new_value == "Cancelled"
+
+
 
 
