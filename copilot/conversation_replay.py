@@ -467,12 +467,29 @@ class ConversationReplayEngine:
                 agreement_score=float(t.get("agreement", 0.50)),
             )
 
-            trust_val = float(t.get("trust", 0.70))
-            tension_val = float(t.get("tension", 0.15))
-            valence_val = float(t.get("valence", 0.20))
-            eng_val = float(t.get("engagement", 0.70))
-            read_val = float(t.get("readiness", 0.60))
-            mom_val = float(t.get("momentum", 0.65))
+            # Client Feedback Item 8: Inherit dimensions from prior bundle rather than injecting hardcoded jumps
+            if bundles:
+                prev_b = bundles[-1]
+                def_trust = prev_b.trust.score
+                def_tension = prev_b.emotion.tension_level
+                def_valence = prev_b.emotion.expressed_valence
+                def_eng = prev_b.engagement.score
+                def_read = prev_b.readiness.score
+                def_mom = prev_b.momentum.score
+            else:
+                def_trust = 0.50
+                def_tension = 0.20
+                def_valence = 0.00
+                def_eng = 0.50
+                def_read = 0.50
+                def_mom = 0.50
+
+            trust_val = float(t.get("trust", def_trust))
+            tension_val = float(t.get("tension", def_tension))
+            valence_val = float(t.get("valence", def_valence))
+            eng_val = float(t.get("engagement", def_eng))
+            read_val = float(t.get("readiness", def_read))
+            mom_val = float(t.get("momentum", def_mom))
 
             inf_state = DownstreamInferenceState(
                 call_sid=call_sid,

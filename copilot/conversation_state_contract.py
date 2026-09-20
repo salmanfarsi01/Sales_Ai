@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import logging
+import re
 from typing import Any, Dict, List, Literal, Optional
 from pydantic import BaseModel, Field
 
@@ -9,6 +10,36 @@ from .behavioral_semantic import SemanticFeatureSnapshot
 from .behavioral_baseline import ContactPreferenceRecord
 
 LOGGER = logging.getLogger("copilot.conversation_state_contract")
+
+
+def infer_salesperson_strategy_from_text(text: str) -> Optional[str]:
+    """Infers canonical salesperson objection reframe strategy from utterance text when not supplied in metadata."""
+    if not text:
+        return None
+    text_lower = text.lower()
+
+    # 1. Financial Net Proceeds / Fee Breakdown Reframe
+    if any(re.search(p, text_lower) for p in [
+        r"\b(?:net\s+proceeds|net\s+sheet|what\s+you\s+(?:actually\s+)?walk\s+away\s+with)\b",
+        r"\b(?:what\s+(?:that|the)\s+fee\s+covers|break\s+down\s+the\s+fee|covers\s+if\s+that\s+would\s+help)\b",
+        r"\bafter\s+all\s+costs\b",
+        r"\bsee\s+the\s+real\s+number\b",
+    ]):
+        return "financial_net_proceeds_reframe"
+
+    # 2. Hyperlocal Marketing Differentiation
+    if any(re.search(p, text_lower) for p in [
+        r"\b(?:hyperlocal|buyer\s+pipeline|marketing\s+(?:plan|differentiation|strategy)|syndication|staging|professional\s+photos?)\b",
+    ]):
+        return "hyperlocal_marketing_differentiation"
+
+    # 3. Performance / Fee Guarantee
+    if any(re.search(p, text_lower) for p in [
+        r"\b(?:guarantee|cancel\s+anytime|days\s+on\s+market\s+guarantee|performance\s+guarantee)\b",
+    ]):
+        return "fee_performance_guarantee"
+
+    return None
 
 
 class BehavioralSignalInputBundle(BaseModel):
@@ -27,13 +58,15 @@ class BehavioralSignalInputBundle(BaseModel):
     momentum: DimensionScore
     readiness: DimensionScore
     commitment: Optional[DimensionScore] = None
-    inference_confidence: float = Field(..., ge=0.0, le=1.0)
-    inference_latency_ms: float = Field(0.0, ge=0.0)
 
-    # Semantic Behavioral Features
+    # Quality & Performance Metrics
+    inference_confidence: float = Field(1.0, ge=0.0, le=1.0)
+    inference_latency_ms: float = 0.0
+
+    # Semantic & Compliance Signals
     boundary_score: float = Field(0.0, ge=0.0, le=1.0)
     boundary_confidence: float = Field(1.0, ge=0.0, le=1.0)
-    contact_preference: Literal["none", "reduced_frequency", "channel_restriction", "timing_restriction"] = "none"
+    contact_preference: Literal["none", "time_of_day", "reduced_frequency", "timing_restriction", "channel_restriction", "soft_cadence"] = "none"
     contact_preference_confidence: float = Field(0.0, ge=0.0, le=1.0)
     contact_preference_details: Optional[str] = None
     recurrence_type: Literal[
@@ -43,6 +76,7 @@ class BehavioralSignalInputBundle(BaseModel):
         "boundary_repeated",
         "scheduling_detail_repeated",
         "scheduling_repeated",
+        "clarification_probe",
         "none",
     ] = "none"
     recurrence_id: Optional[str] = None
@@ -58,7 +92,7 @@ class BehavioralSignalInputBundle(BaseModel):
         None,
         description="e.g. reframe_cost_of_inaction, hyperlocal_comps, fee_guarantee, social_proof"
     )
-    salesperson_strategy_source: Literal["strategic_engine", "salesperson_inference", "none"] = "none"
+    salesperson_strategy_source: Literal["strategic_engine", "salesperson_inference", "none", "speech_heuristic"] = "none"
 
     # Contributing Evidence IDs for backward traceability
     contributing_evidence_ids: List[str] = Field(default_factory=list)
@@ -72,7 +106,7 @@ def extract_behavioral_bundle(
     semantic_snapshot: SemanticFeatureSnapshot,
     contact_preference_record: Optional[ContactPreferenceRecord] = None,
     salesperson_strategy_tag: Optional[str] = None,
-    salesperson_strategy_source: Literal["strategic_engine", "salesperson_inference", "none"] = "none",
+    salesperson_strategy_source: Literal["strategic_engine", "salesperson_inference", "none", "speech_heuristic"] = "none",
 ) -> BehavioralSignalInputBundle:
     """Safely extracts and validates upstream Behavioral Signal Engine data into an input bundle."""
     # Combine evidence IDs from both inference and semantic snapshots
@@ -89,6 +123,18 @@ def extract_behavioral_bundle(
         pref = contact_preference_record.preference
         pref_conf = contact_preference_record.confidence
         pref_details = contact_preference_record.details
+
+    # Client Feedback Item 6: Automatically infer strategy tag for salesperson if not explicitly supplied
+    strat_tag = salesperson_strategy_tag
+    strat_source = salesperson_strategy_source
+    if speaker_id == "salesperson" and (not strat_tag or strat_tag == "none"):
+        # Reframe strategies are assertional/explanatory moves, not questions
+        is_question = utterance_text.strip().endswith("?") or semantic_snapshot.question_type in ("clarifying", "diagnostic")
+        if not is_question:
+            inferred = infer_salesperson_strategy_from_text(utterance_text)
+            if inferred:
+                strat_tag = inferred
+                strat_source = "speech_heuristic"
 
     return BehavioralSignalInputBundle(
         call_sid=inference_state.call_sid,
@@ -118,7 +164,7 @@ def extract_behavioral_bundle(
         future_language_score=semantic_snapshot.future_language_score,
         agreement_score=semantic_snapshot.agreement_score,
         semantic_confidence=semantic_snapshot.semantic_confidence,
-        salesperson_strategy_tag=salesperson_strategy_tag,
-        salesperson_strategy_source=salesperson_strategy_source,
+        salesperson_strategy_tag=strat_tag,
+        salesperson_strategy_source=strat_source,
         contributing_evidence_ids=evidence_ids,
     )

@@ -65,13 +65,15 @@ CANONICAL_OBJECTION_PATTERNS: Dict[str, List[str]] = {
         r"\b(?:wife|husband|spouse|partner)\b.*?\bbefore\s+(?:we|i)\s+(?:go|make|decide|move)\b",
     ],
     "general_hesitation": [
-        r"\bnot\s+ready\s+(?:yet|to\s+sell|to\s+commit)\b",
+        r"\bnot\s+ready\s+(?:yet|to\s+sell|to\s+commit|at\s+this\s+time|now|right\s+now)?\b",
         r"\bjust\s+(?:looking|browsing|curious)\b",
         r"\bneed\s+(?:more\s+)?time\s+to\s+think\b",
         r"\bthinking\s+it\s+over\b",
         r"\b(?:just\s+)?not\s+sure\b.*?\b(?:right\s+time|ready|good\s+time|now)\b",
         r"\b(?:just\s+)?not\s+sure\s+(?:this|if|about|whether|it['’]?s)\b",
         r"\b(?:just\s+)?not\s+(?:completely\s+)?sure\b",
+        r"\b(?:don['’]?t\s+think|not\s+thinking)\s+(?:it['’]?s\s+|it\s+is\s+)?(?:the\s+)?(?:right|good)\s+time\b",
+        r"\b(?:too\s+much\s+(?:stress|clutter|work|hassle|packing)|overwhelm(?:ed|ing)?)\b",
     ],
 }
 

@@ -5,6 +5,7 @@ from typing import Any, Dict, List, Literal, Optional
 from pydantic import BaseModel, Field
 
 from .conversation_scoring_config import ConversationScoringConfig, DEFAULT_CONVERSATION_SCORING_CONFIG
+from .conversation_conversion_config import ConversionBlockingConfig, DEFAULT_CONVERSION_BLOCKING_CONFIG
 from .conversation_state_contract import BehavioralSignalInputBundle
 from .conversation_state_models import (
     ConversationStateSnapshot,
@@ -157,6 +158,8 @@ class ConversationScoringEngine:
         self,
         bundle: BehavioralSignalInputBundle,
         current_state: ConversationStateSnapshot,
+        conversion_target: str = "appointment",
+        blocking_config: Optional[ConversionBlockingConfig] = None,
     ) -> ReadinessBreakdown:
         """Computes multi-dimensional readiness with deterministic blocker caps."""
         cfg = self.config
@@ -259,9 +262,24 @@ class ConversationScoringEngine:
                 f"Logistical readiness deficit ({logistical:.0f} <= {cfg.logistical_deficit_threshold:.0f}, ceiling {cfg.logistical_deficit_ceiling:.0f})"
             )
 
-        # Blocker 4: Active Unresolved Objection Blocker
-        has_unresolved_obj = any(o.lifecycle_state == "unresolved" for o in current_state.objections)
-        if not comp.hard_boundary_active and has_unresolved_obj:
+        # Blocker 4: Active Target-Blocking Objection Blocker (Goal-Aware Gating Alignment)
+        b_cfg = blocking_config or DEFAULT_CONVERSION_BLOCKING_CONFIG
+        target_blocking_cats = b_cfg.blocking_categories.get(conversion_target, ["boundary"])
+        non_esc_cats = getattr(b_cfg, "non_escalating_categories", {}).get(conversion_target, ["commission_fee"])
+
+        blocking_objs = []
+        for o in current_state.objections:
+            if o.lifecycle_state in ("unresolved", "reactivated", "active"):
+                if o.canonical_category in target_blocking_cats:
+                    blocking_objs.append(o)
+                elif (
+                    getattr(b_cfg, "escalate_on_recurrence", True)
+                    and o.canonical_category not in non_esc_cats
+                    and getattr(o, "recurrence_count", 1) > getattr(b_cfg, "max_non_blocking_recurrence", 2)
+                ):
+                    blocking_objs.append(o)
+
+        if not comp.hard_boundary_active and blocking_objs:
             active_blockers.append("unresolved_objection")
             applicable_ceilings["unresolved_objection"] = cfg.unresolved_objection_ceiling
             blocker_descriptions.append(f"Active unresolved objection (ceiling {cfg.unresolved_objection_ceiling:.0f})")

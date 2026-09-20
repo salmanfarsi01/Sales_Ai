@@ -20,6 +20,20 @@ class ConversionBlockingConfig(BaseModel):
             "permission_to_follow_up": ["boundary"],
         }
     )
+    escalate_on_recurrence: bool = Field(
+        default=True,
+        description="If True, repeated occurrences of a non-blocking objection escalate to blocking",
+    )
+    max_non_blocking_recurrence: int = Field(
+        default=2,
+        description="Maximum recurrence count an objection can reach before escalating to blocking (3rd occurrence escalates)",
+    )
+    non_escalating_categories: Dict[str, List[str]] = Field(
+        default_factory=lambda: {
+            "appointment": ["commission_fee"],  # commission fee is discussed at the meeting and never blocks appointment
+        },
+        description="Categories exempt from recurrence escalation for a given conversion target",
+    )
 
 
 DEFAULT_CONVERSION_BLOCKING_CONFIG = ConversionBlockingConfig()

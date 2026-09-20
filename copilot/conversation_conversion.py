@@ -265,18 +265,31 @@ class MeetingConversionGateEngine:
             o for o in current_state.objections
             if o.lifecycle_state in ("active", "unresolved", "reactivated", "boundary", "clarified")
         ]
-        target_blocking_unresolved = [
-            o for o in unresolved_objs
-            if o.canonical_category in target_blocking_cats
-        ]
-        non_blocking_unresolved = [
-            o for o in unresolved_objs
-            if o.canonical_category not in target_blocking_cats
-        ]
+        target_blocking_unresolved = []
+        non_blocking_unresolved = []
+        escalated_objs = []
+        non_esc_cats = getattr(self.blocking_config, "non_escalating_categories", {}).get(conversion_target, ["commission_fee"])
+        for o in unresolved_objs:
+            if o.canonical_category in target_blocking_cats:
+                target_blocking_unresolved.append(o)
+            elif (
+                getattr(self.blocking_config, "escalate_on_recurrence", True)
+                and o.canonical_category not in non_esc_cats
+                and getattr(o, "recurrence_count", 1) > getattr(self.blocking_config, "max_non_blocking_recurrence", 2)
+            ):
+                target_blocking_unresolved.append(o)
+                escalated_objs.append(o)
+            else:
+                non_blocking_unresolved.append(o)
 
         obj_ok = len(target_blocking_unresolved) == 0
         if not obj_ok:
-            categories = [o.canonical_category for o in target_blocking_unresolved]
+            categories = []
+            for o in target_blocking_unresolved:
+                if o in escalated_objs:
+                    categories.append(f"{o.canonical_category} (escalated due to recurrence >= {o.recurrence_count})")
+                else:
+                    categories.append(o.canonical_category)
             reason3 = f"Active unresolved objection(s) blocking '{conversion_target}': {', '.join(categories)}"
         else:
             if non_blocking_unresolved:
@@ -598,19 +611,82 @@ class MeetingConversionGateEngine:
 
         # 5. Moderate Trust + Unresolved Target-Blocking Objection: Resolve then ask
         target_blocking_cats = self.blocking_config.blocking_categories.get(target, ["boundary"])
-        unresolved_blocking_objs = [
-            o for o in current_state.objections
-            if o.lifecycle_state in ("unresolved", "reactivated")
-            and o.canonical_category in target_blocking_cats
-        ]
+        unresolved_blocking_objs = []
+        unresolved_non_blocking_objs = []
+        non_esc_cats = getattr(self.blocking_config, "non_escalating_categories", {}).get(target, ["commission_fee"])
+        for o in current_state.objections:
+            if o.lifecycle_state in ("unresolved", "reactivated", "active"):
+                is_blocking_cat = o.canonical_category in target_blocking_cats
+                is_escalated = (
+                    getattr(self.blocking_config, "escalate_on_recurrence", True)
+                    and o.canonical_category not in non_esc_cats
+                    and getattr(o, "recurrence_count", 1) > getattr(self.blocking_config, "max_non_blocking_recurrence", 2)
+                )
+                if is_blocking_cat or is_escalated:
+                    unresolved_blocking_objs.append(o)
+                else:
+                    unresolved_non_blocking_objs.append(o)
+
         if unresolved_blocking_objs:
             lead_obj = unresolved_blocking_objs[0]
+            driver = getattr(lead_obj, "driver_layer", None)
+            strat_target = getattr(driver, "strategic_target", None)
+            target_str = f" ({strat_target.replace('_', ' ')})" if strat_target else ""
             return PushStrengthRecommendation(
                 state="resolve_then_ask",
                 rationale=f"Active objection '{lead_obj.canonical_category}' blocks '{target}'. Asking for commitment before reframing will be perceived as dismissive.",
-                recommended_action=f"Acknowledge and resolve the {lead_obj.canonical_category} concern before proposing next steps.",
+                recommended_action=f"Acknowledge and resolve the {lead_obj.canonical_category} concern{target_str} before proposing next steps.",
                 confidence=conf,
             )
+
+        # 5b. Active Non-Blocking Objection (Item 9 Client Feedback Alignment):
+        # Even if objection does not structurally block milestone gating (e.g. general_hesitation for appointment),
+        # an active unresolved objection requires addressing the underlying driver before a direct close ('direct_ask')
+        # to prevent contradictory advice and avoid triggering defensive reactance.
+        if unresolved_non_blocking_objs:
+            lead_obj = unresolved_non_blocking_objs[0]
+            driver = getattr(lead_obj, "driver_layer", None)
+            if driver and getattr(driver, "strategic_target", None):
+                strat_action = driver.strategic_target.replace("_", " ")
+                driver_name = getattr(driver, "underlying_driver", "hesitation")
+                if driver_name in ("process_overwhelm", "information_deficit"):
+                    return PushStrengthRecommendation(
+                        state="reduce_friction_reask",
+                        rationale=(
+                            f"Active objection '{lead_obj.canonical_category}' is non-blocking for '{target}', "
+                            f"but underlying driver '{driver_name}' creates operational drag. "
+                            "Pushing for full commitment before lowering friction triggers resistance."
+                        ),
+                        recommended_action=(
+                            f"Execute driver target: {strat_action} before proposing a specific closing commitment."
+                        ),
+                        confidence=conf,
+                    )
+                else:
+                    return PushStrengthRecommendation(
+                        state="resolve_then_ask",
+                        rationale=(
+                            f"Active objection '{lead_obj.canonical_category}' is non-blocking for '{target}', "
+                            f"but underlying driver '{driver_name}' requires tactical exploration. "
+                            "Proposing a direct closing ask before surfacing root hesitation triggers defensive reactance."
+                        ),
+                        recommended_action=(
+                            f"Execute driver target: {strat_action} to clarify prospect hesitation before proposing a specific meeting time."
+                        ),
+                        confidence=conf,
+                    )
+            else:
+                return PushStrengthRecommendation(
+                    state="resolve_then_ask",
+                    rationale=(
+                        f"Active objection '{lead_obj.canonical_category}' is non-blocking for '{target}', "
+                        "but unaddressed hesitation will create sales friction if rushed."
+                    ),
+                    recommended_action=(
+                        f"Acknowledge and explore the {lead_obj.canonical_category} concern before directly pressing for an appointment."
+                    ),
+                    confidence=conf,
+                )
 
         # 6. Gate Open without Concrete Slot: Direct close proposal
         if gate.is_open and dims.trust >= cfg.direct_ask_min_trust:

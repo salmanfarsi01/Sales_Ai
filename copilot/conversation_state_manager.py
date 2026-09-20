@@ -28,7 +28,7 @@ from .conversation_supersession import TruthSupersessionDetector
 from .conversation_materiality import MaterialityFilter, ABSENT_DECISION_MAKER_PATTERNS
 from .conversation_scoring import ConversationScoringEngine
 from .conversation_scoring_config import ConversationScoringConfig
-from .conversation_conversion_config import ConversionBlockingConfig
+from .conversation_conversion_config import ConversionBlockingConfig, DEFAULT_CONVERSION_BLOCKING_CONFIG
 from .conversation_conversion import MeetingConversionGateEngine
 
 LOGGER = logging.getLogger("copilot.conversation_state_manager")
@@ -62,9 +62,10 @@ class ConversationStateManager:
         self.supersession_detector = TruthSupersessionDetector()
         self.materiality_filter = MaterialityFilter()
         self.scoring_engine = ConversationScoringEngine(config=scoring_config)
+        self.blocking_config = blocking_config or DEFAULT_CONVERSION_BLOCKING_CONFIG
         self.conversion_engine = MeetingConversionGateEngine(
             config=scoring_config,
-            blocking_config=blocking_config,
+            blocking_config=self.blocking_config,
         )
         self.prior_bundle: Optional[BehavioralSignalInputBundle] = None
         self.has_prospect_spoken: bool = False
@@ -400,7 +401,12 @@ class ConversationStateManager:
 
         # 8. Compute Momentum & Readiness Scoring (Phase 6)
         momentum_res = self.scoring_engine.compute_momentum(bundle, self.current_state)
-        readiness_res = self.scoring_engine.compute_readiness(bundle, self.current_state)
+        readiness_res = self.scoring_engine.compute_readiness(
+            bundle,
+            self.current_state,
+            conversion_target=self.conversion_target,
+            blocking_config=self.blocking_config,
+        )
         self.current_state.momentum = momentum_res
         self.current_state.readiness = readiness_res
 

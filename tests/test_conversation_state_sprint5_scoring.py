@@ -152,8 +152,11 @@ class TestConversationStateSprint5Scoring:
         assert readiness.readiness_score <= 60.0
 
     def test_active_unresolved_objection_caps_readiness(self):
-        """Validates that an active unresolved objection caps readiness at <= 55.0."""
-        manager = ConversationStateManager(call_sid="CA_objection_cap_001")
+        """Validates that an active unresolved objection caps readiness at <= 55.0 for a target where it blocks."""
+        manager = ConversationStateManager(
+            call_sid="CA_objection_cap_001",
+            conversion_target="signed_listing_agreement",
+        )
 
         # Turn 1: Prospect raises major commission objection
         t1 = _create_turn_bundle(
@@ -172,6 +175,30 @@ class TestConversationStateSprint5Scoring:
         assert "unresolved_objection" in readiness.active_blocker_caps
         assert readiness.readiness_score <= 55.0
 
+    def test_non_blocking_objection_does_not_cap_readiness_for_appointment_target(self):
+        """Validates Client Feedback Item 2: commission_fee does NOT cap readiness for 'appointment' target,
+        maintaining alignment between the conversion gate and readiness blocker caps.
+        """
+        manager = ConversationStateManager(
+            call_sid="CA_appointment_non_blocking_001",
+            conversion_target="appointment",
+        )
+        t1 = _create_turn_bundle(
+            turn_id=1,
+            speaker_id="client",
+            text="Your commission is just way too high. 6 percent is unreasonable.",
+            recurrence_id="rec_commission_01",
+            trust=0.70,
+            engagement=0.80,
+            agreement=0.30,
+        )
+        snap1 = manager.process_turn_bundle(t1)
+
+        readiness = snap1.readiness
+        assert readiness is not None
+        assert "unresolved_objection" not in readiness.active_blocker_caps
+        assert readiness.readiness_score > 55.0
+
     def test_simultaneous_multi_blocker_caps_strictest_wins_with_full_census(self):
         """Validates simultaneous multi-blocker interaction:
 
@@ -188,7 +215,10 @@ class TestConversationStateSprint5Scoring:
            proving non-binding blockers are still tracked for human auditability and explainability.
         3. Strictest blocker is identified in `capped_reason` along with all active blockers.
         """
-        manager = ConversationStateManager(call_sid="CA_simultaneous_blockers_001")
+        manager = ConversationStateManager(
+            call_sid="CA_simultaneous_blockers_001",
+            conversion_target="signed_listing_agreement",
+        )
 
         t1 = _create_turn_bundle(
             turn_id=1,
