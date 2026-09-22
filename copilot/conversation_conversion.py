@@ -391,7 +391,7 @@ class MeetingConversionGateEngine:
             current_state.readiness and ("absent_decision_maker" in current_state.readiness.active_blocker_caps)
         )
         has_absent_stakeholder = any(
-            s.role in ("spouse", "partner", "co-owner", "co_owner", "attorney") and s.presence == "absent"
+            s.role in ("spouse", "partner", "co-owner", "co_owner", "attorney", "wife", "husband") and s.presence == "absent"
             for s in dec.stakeholders
         )
         dm_ok = dec.decision_maker_present and not has_dm_blocker and not has_absent_stakeholder
@@ -427,7 +427,35 @@ class MeetingConversionGateEngine:
             has_hard_channel_restriction
             or comp.contact_preference in ("channel_restriction", "timing_restriction")
         )
-        has_access_constraints = bool(current_state.decision_structure.access_constraints)
+
+        # Evaluate access constraints against explicit commitment / proposed slot (Client Principles #1 & #6)
+        raw_constraints = current_state.decision_structure.access_constraints
+        unresolved_constraints: List[str] = []
+        slot_text = f"{commit_slot or ''} {bundle.utterance_text}".lower()
+
+        for c in raw_constraints:
+            c_lower = c.lower()
+            if "morning" in c_lower:
+                is_morning_slot = bool(re.search(r"\b(?:\d{1,2}\s*am|morning|mornings|10\s*am|11\s*am|9\s*am)\b", slot_text))
+                is_afternoon_slot = bool(re.search(r"\b(?:at\s+(?:[1-9]|1[0-2])\s*pm|\b(?:1[2-9]|[2-9])\b|afternoon|pm|evening|at\s+3\b|at\s+three\b)\b", slot_text))
+                if has_explicit_commit and (is_afternoon_slot or not is_morning_slot):
+                    continue
+                unresolved_constraints.append(c)
+            elif "afternoon" in c_lower:
+                is_afternoon_slot = bool(re.search(r"\b(?:\d{1,2}\s*pm|afternoon|afternoons)\b", slot_text))
+                if has_explicit_commit and not is_afternoon_slot:
+                    continue
+                unresolved_constraints.append(c)
+            elif "weekend" in c_lower:
+                is_weekend_slot = bool(re.search(r"\b(?:saturday|sunday|weekend)\b", slot_text))
+                if has_explicit_commit and not is_weekend_slot:
+                    continue
+                unresolved_constraints.append(c)
+            else:
+                unresolved_constraints.append(c)
+
+        has_access_constraints = bool(unresolved_constraints)
+        constraints_satisfied = bool(raw_constraints) and not has_access_constraints
 
         log_ok = (
             (log_r >= cfg.gate_min_logistical_readiness)
@@ -444,16 +472,17 @@ class MeetingConversionGateEngine:
             and not has_contact_restriction
             and not has_access_constraints
         ):
-            if not log_ok or log_r < cfg.gate_min_logistical_readiness or has_logistical_blocker:
+            if not log_ok or log_r < cfg.gate_min_logistical_readiness or has_logistical_blocker or constraints_satisfied:
                 log_ok = True
                 is_overridden6 = True
-                reason6 = f"[OVERRIDE: Explicit commitment detected: '{commit_slot or bundle.utterance_text}' outranks inferred logistical score] Logistical feasibility confirmed"
+                constraint_note = " (satisfies scheduling constraints)" if constraints_satisfied else ""
+                reason6 = f"[OVERRIDE: Explicit commitment detected: '{commit_slot or bundle.utterance_text}'{constraint_note} outranks inferred logistical score] Logistical feasibility confirmed"
 
         if not log_ok and not is_overridden6:
             if has_contact_restriction:
                 reason6 = f"Active contact/scheduling restriction ({comp.contact_preference}) impedes meeting logistics"
             elif has_access_constraints:
-                reason6 = f"Access constraints ({', '.join(current_state.decision_structure.access_constraints)}) require resolution"
+                reason6 = f"Access constraints ({', '.join(unresolved_constraints)}) require resolution"
             else:
                 reason6 = f"Logistical readiness deficit ({log_r:.1f} < {cfg.gate_min_logistical_readiness:.1f})"
         elif not is_overridden6:

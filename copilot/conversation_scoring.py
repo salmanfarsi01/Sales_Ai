@@ -193,7 +193,8 @@ class ConversationScoringEngine:
             logistical_pts -= 35.0
         if has_timing_block:
             logistical_pts -= 25.0
-        if has_access_constraints:
+        has_confirmed_meeting = any(f.fact_key == "confirmed_meeting_time" and f.status == "active" for f in current_state.facts) or bool(current_state.conversion_event and getattr(current_state.conversion_event, "status", "") == "confirmed")
+        if has_access_constraints and not has_confirmed_meeting:
             logistical_pts -= 15.0
         if comp.hard_boundary_active:
             logistical_pts = 0.0
@@ -202,7 +203,7 @@ class ConversationScoringEngine:
         # D. Decision Readiness: Authority identified, present, aligned
         dec = current_state.decision_structure
         has_absent_spouse_or_stakeholder = any(
-            s.role in ("spouse", "partner", "co-owner", "co_owner", "attorney") and s.presence == "absent"
+            s.role in ("spouse", "partner", "co-owner", "co_owner", "attorney", "wife", "husband") and s.presence == "absent"
             for s in dec.stakeholders
         )
 
@@ -211,7 +212,7 @@ class ConversationScoringEngine:
         for sf in spouse_facts:
             val_lower = sf.fact_value.lower()
             if any(w in val_lower for w in ["must be present", "handles the decisions", "consult", "wife handles", "husband handles", "talk to my wife"]):
-                spouse_on_call = any(s.role in ("spouse", "partner") and s.presence == "on_call" for s in dec.stakeholders)
+                spouse_on_call = any(s.role in ("spouse", "partner", "wife", "husband") and s.presence in ("on_call", "confirmed_attending") for s in dec.stakeholders)
                 if not spouse_on_call:
                     has_absent_spouse_or_stakeholder = True
 

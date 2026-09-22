@@ -198,10 +198,15 @@ def test_full_sim_muc323di_replay():
     assert "scheduling_constraint" in active_keys
     assert "confirmed_meeting_time" in active_keys
 
-    # 4. Decision structure verified
+    # 4. Decision structure verified (Client Principle #1: wife presence confirmed)
     ds = report.final_state.decision_structure
-    assert not ds.decision_maker_present
-    assert any(s.role == "wife" and s.presence == "absent" for s in ds.stakeholders)
+    assert ds.decision_maker_present
+    assert any(s.role == "wife" and s.presence == "confirmed_attending" for s in ds.stakeholders)
     assert ds.timeline_horizon == "sometime next year"
     assert ds.urgency_level == "low"
     assert "Mornings unavailable" in ds.access_constraints
+
+    # 5. Conversion gate verified open and push strength confirm_and_protect (Client Principles #1, #6, #9)
+    assert report.final_state.conversion_gate.is_open
+    assert report.final_state.conversion_gate.status == "open"
+    assert report.final_state.push_strength.state == "confirm_and_protect"

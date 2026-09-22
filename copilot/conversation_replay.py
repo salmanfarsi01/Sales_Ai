@@ -118,9 +118,19 @@ class ConversationReplayEngine:
         timeline: List[TurnReplayStep] = []
         prior_bundle: Optional[BehavioralSignalInputBundle] = None
 
+        is_synthetic_run = (source == "synthetic_simulation") or ("sim_" in call_sid.lower())
+
         for bundle in bundles:
+            # Throttle between synthetic batch turns to stay well within Groq RPM limits
+            if is_synthetic_run and len(bundles) > 1 and bundle.turn_id > 1:
+                import time
+                time.sleep(0.12)
+
             # Capture deep copy of state before processing this turn
             state_before = manager.current_state.model_copy(deep=True)
+            # Client Principle #10: Prune duplicate cumulative change history from intermediate step snapshots
+            # Turn changes are captured in step.state_changes, and complete call audit trail is in final_state.change_history
+            state_before.change_history = []
 
             # Evaluate materiality
             materiality = manager.materiality_filter.classify_turn(
@@ -136,6 +146,7 @@ class ConversationReplayEngine:
             # Process turn through state manager
             state_after_ref = manager.process_turn_bundle(bundle)
             state_after = state_after_ref.model_copy(deep=True)
+            state_after.change_history = []
 
             # Extract StateChangeRecord entries produced by this specific turn
             turn_changes = [

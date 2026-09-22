@@ -68,7 +68,7 @@ PersistentFactCategory = Literal[
 class DecisionStakeholder(BaseModel):
     name: Optional[str] = None
     role: str = Field(..., description="e.g. spouse, business_partner, attorney, co_owner")
-    presence: Literal["on_call", "absent", "unknown"] = "unknown"
+    presence: Literal["on_call", "absent", "confirmed_attending", "unknown"] = "unknown"
     notes: Optional[str] = None
     confidence: float = Field(1.0, ge=0.0, le=1.0)
 

@@ -25,7 +25,7 @@ from .behavioral_semantic import extract_structured_contact_preference, HARD_BOU
 from .conversation_facts import PersistentFactsManager
 from .conversation_objections import ObjectionLifecycleEngine, DECISION_TO_STAY_PATTERNS
 from .conversation_supersession import TruthSupersessionDetector
-from .conversation_materiality import MaterialityFilter, ABSENT_DECISION_MAKER_PATTERNS
+from .conversation_materiality import MaterialityFilter, ABSENT_DECISION_MAKER_PATTERNS, PRESENCE_CONFIRMATION_PATTERNS
 from .conversation_scoring import ConversationScoringEngine
 from .conversation_scoring_config import ConversationScoringConfig
 from .conversation_conversion_config import ConversionBlockingConfig, DEFAULT_CONVERSION_BLOCKING_CONFIG
@@ -692,8 +692,47 @@ class ConversationStateManager:
         text = bundle.utterance_text.lower().strip()
         result: Dict[str, Any] = {}
 
-        # 1. Direct absent decision maker patterns
-        if any(re.search(pat, text) for pat in ABSENT_DECISION_MAKER_PATTERNS):
+        # 1. Direct presence confirmation of co-decision maker / spouse (Client Principle #1)
+        if any(re.search(pat, text) for pat in PRESENCE_CONFIRMATION_PATTERNS):
+            existing = list(self.current_state.decision_structure.stakeholders)
+            target_role = "wife" if "wife" in text else ("husband" if "husband" in text else ("spouse" if "spouse" in text else ("partner" if "partner" in text else None)))
+
+            updated = False
+            new_stakeholders = []
+            for s in existing:
+                match_role = (
+                    (target_role and s.role in (target_role, "spouse", "partner", "co_decision_maker", "female_decision_maker" if target_role == "wife" else "male_decision_maker"))
+                    or (not target_role and s.is_decision_maker)
+                )
+                if match_role:
+                    s_up = s.model_copy(deep=True)
+                    s_up.presence = "confirmed_attending"
+                    s_up.notes = f"Confirmed attending by client: '{bundle.utterance_text[:60]}'"
+                    new_stakeholders.append(s_up)
+                    updated = True
+                else:
+                    new_stakeholders.append(s.model_copy(deep=True))
+
+            if not updated and target_role:
+                new_stakeholders.append(
+                    DecisionStakeholder(
+                        stakeholder_id=f"stk_{uuid.uuid4().hex[:6]}",
+                        role=target_role,
+                        is_decision_maker=True,
+                        presence="confirmed_attending",
+                        notes=f"Confirmed attending by client: '{bundle.utterance_text[:60]}'",
+                        confidence=0.90,
+                    )
+                )
+
+            result["stakeholders"] = new_stakeholders
+            # If no stakeholders remain absent, decision authority is present/aligned
+            has_absent = any(s.presence == "absent" for s in new_stakeholders)
+            if not has_absent:
+                result["decision_maker_present"] = True
+
+        # 2. Direct absent decision maker patterns
+        elif any(re.search(pat, text) for pat in ABSENT_DECISION_MAKER_PATTERNS):
             role = "co_decision_maker"
             if "husband" in text:
                 role = "husband"
@@ -913,7 +952,7 @@ class ConversationStateManager:
             })
 
         # 4. Spousal / Absent Decision Maker Involvement
-        if any(re.search(p, text_lower) for p in ABSENT_DECISION_MAKER_PATTERNS) and "spouse_involvement" not in existing_keys:
+        if any(re.search(p, text_lower) for p in ABSENT_DECISION_MAKER_PATTERNS) and not any(re.search(p, text_lower) for p in PRESENCE_CONFIRMATION_PATTERNS) and "spouse_involvement" not in existing_keys:
             updates.append({
                 "category": "decision_maker",
                 "fact_key": "spouse_involvement",
@@ -921,6 +960,18 @@ class ConversationStateManager:
                 "confidence": 0.85,
                 "notes": f"Spouse involvement declared by prospect: '{bundle.utterance_text[:60]}'",
             })
+
+        # 4b. Spouse / Decision Maker Presence Confirmation (Client Principle #1)
+        if any(re.search(p, text_lower) for p in PRESENCE_CONFIRMATION_PATTERNS):
+            active_spouse_f = next((f for f in self.current_state.facts if f.fact_key == "spouse_involvement" and f.status == "active"), None)
+            if active_spouse_f:
+                self.facts_manager.supersede_fact(
+                    old_fact_id=active_spouse_f.fact_id,
+                    new_fact_value="Spouse confirmed attending meeting",
+                    source_turn_id=bundle.turn_id,
+                    timestamp_ms=bundle.timestamp_ms,
+                    notes=f"Spouse confirmed attending: '{bundle.utterance_text[:60]}'",
+                )
 
         # 5. Tentative Timeline Horizon (e.g. Turn 4)
         if "timeline_horizon" not in existing_keys and any(re.search(p, text_lower) for p in [

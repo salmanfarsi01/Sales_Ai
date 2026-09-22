@@ -28,6 +28,15 @@ ABSENT_DECISION_MAKER_PATTERNS: List[str] = [
     r"\b(?:our|my)\s+(?:attorney|lawyer)\s+(?:must|needs?\s+to)\s+review\b",
 ]
 
+PRESENCE_CONFIRMATION_PATTERNS: List[str] = [
+    r"\b(?:my\s+)?(?:wife|husband|partner|spouse)\s+will\s+be\s+there\b",
+    r"\b(?:both\s+of\s+us|we\s+will\s+both)\s+be\s+there\b",
+    r"\b(?:she|he|they)\s+will\s+be\s+there\b",
+    r"\b(?:my\s+)?(?:wife|husband|partner|spouse)\s+(?:can|will)\s+(?:make\s+it|attend|join)\b",
+    r"\b(?:bringing|bring)\s+(?:my\s+)?(?:wife|husband|partner|spouse)\b",
+    r"\b(?:wife|husband|partner|spouse)\s+is\s+(?:on\s+board|aligned|agreed|available)\b",
+]
+
 MaterialityTarget = Literal[
     "dimensions",
     "facts",
@@ -216,6 +225,11 @@ class MaterialityFilter:
         if bundle.speaker_id == "client" and any(re.search(p, bundle.utterance_text.lower()) for p in tentative_timeline_patterns):
             forced_targets.add("facts")
             forced_reasons.append("Deterministic Override: client timeline or scheduling availability disclosure.")
+
+        # 5f. Stakeholder Presence Confirmation Overrides (Client Principle #1)
+        if bundle.speaker_id == "client" and any(re.search(p, bundle.utterance_text.lower()) for p in PRESENCE_CONFIRMATION_PATTERNS):
+            forced_targets.update(["decision_structure", "facts"])
+            forced_reasons.append("Deterministic Override: client confirmed stakeholder presence / attendance.")
 
         # 6. Behavioral & Acoustic Shifts (Client Principle #3: Dimension Stability & Materiality Gating)
         # Protect dimension sync: If upstream inference in bundle meaningfully diverges
@@ -584,13 +598,26 @@ class MaterialityFilter:
         if "openai/gpt-oss" in groq_model or "llama" in groq_model:
             groq_model = "qwen/qwen3.8-27b"
 
-        completion = client.chat.completions.create(
-            model=groq_model,
-            messages=[{"role": "user", "content": prompt}],
-            temperature=0.0,
-            max_tokens=200,
-            response_format={"type": "json_object"},
-        )
+        import time
+        max_retries = 2
+        completion = None
+        for attempt in range(max_retries):
+            try:
+                completion = client.chat.completions.create(
+                    model=groq_model,
+                    messages=[{"role": "user", "content": prompt}],
+                    temperature=0.0,
+                    max_tokens=200,
+                    response_format={"type": "json_object"},
+                )
+                break
+            except Exception as exc:
+                err_str = str(exc).lower()
+                if ("429" in err_str or "too many requests" in err_str or "rate_limit" in err_str) and attempt < max_retries - 1:
+                    LOGGER.info("Groq 429 burst rate limit encountered; backoff sleep 0.4s before retry: %s", exc)
+                    time.sleep(0.4)
+                else:
+                    raise
         parsed = json.loads(completion.choices[0].message.content.strip())
 
         is_mat = bool(parsed.get("is_material", False))
