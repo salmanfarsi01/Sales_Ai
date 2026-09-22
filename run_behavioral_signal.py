@@ -362,7 +362,7 @@ if __name__ == "__main__":
     print(f"  --> Dual Track:           http://{host}:{port}/api/test/analyze-two-tracks")
     print("=" * 65 + "\n")
 
-    reload_flag = os.getenv("UVICORN_RELOAD", "false").lower() in ("true", "1")
+    reload_flag = os.getenv("UVICORN_RELOAD", "true").lower() in ("true", "1")
     uvicorn.run(
         "run_behavioral_signal:app",
         host=host,

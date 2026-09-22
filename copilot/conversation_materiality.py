@@ -592,32 +592,19 @@ class MaterialityFilter:
             client = self.groq_client
         else:
             import groq
-            client = groq.Groq(api_key=api_key, timeout=self.timeout_seconds)
+            client = groq.Groq(api_key=api_key, timeout=self.timeout_seconds, max_retries=0)
 
         groq_model = os.getenv("GROQ_MODEL", "qwen/qwen3.8-27b")
         if "openai/gpt-oss" in groq_model or "llama" in groq_model:
             groq_model = "qwen/qwen3.8-27b"
 
-        import time
-        max_retries = 2
-        completion = None
-        for attempt in range(max_retries):
-            try:
-                completion = client.chat.completions.create(
-                    model=groq_model,
-                    messages=[{"role": "user", "content": prompt}],
-                    temperature=0.0,
-                    max_tokens=200,
-                    response_format={"type": "json_object"},
-                )
-                break
-            except Exception as exc:
-                err_str = str(exc).lower()
-                if ("429" in err_str or "too many requests" in err_str or "rate_limit" in err_str) and attempt < max_retries - 1:
-                    LOGGER.info("Groq 429 burst rate limit encountered; backoff sleep 0.4s before retry: %s", exc)
-                    time.sleep(0.4)
-                else:
-                    raise
+        completion = client.chat.completions.create(
+            model=groq_model,
+            messages=[{"role": "user", "content": prompt}],
+            temperature=0.0,
+            max_tokens=200,
+            response_format={"type": "json_object"},
+        )
         parsed = json.loads(completion.choices[0].message.content.strip())
 
         is_mat = bool(parsed.get("is_material", False))

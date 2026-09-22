@@ -124,7 +124,7 @@ class ConversationReplayEngine:
             # Throttle between synthetic batch turns to stay well within Groq RPM limits
             if is_synthetic_run and len(bundles) > 1 and bundle.turn_id > 1:
                 import time
-                time.sleep(0.12)
+                time.sleep(0.25)
 
             # Capture deep copy of state before processing this turn
             state_before = manager.current_state.model_copy(deep=True)

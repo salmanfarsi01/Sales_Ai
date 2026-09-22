@@ -169,7 +169,7 @@ class ObjectionDriverClassifier:
             client = self.groq_client
         else:
             import groq
-            client = groq.Groq(api_key=api_key, timeout=self.timeout_seconds)
+            client = groq.Groq(api_key=api_key, timeout=self.timeout_seconds, max_retries=0)
 
         groq_model = self.model
         if "openai/gpt-oss" in groq_model or "llama" in groq_model:
