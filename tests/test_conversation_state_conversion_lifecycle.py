@@ -544,3 +544,82 @@ def test_hedged_proposal_acceptance_and_gate_regression_muc5lyux():
     assert ev7.event_id == ev6.event_id
     assert ev7.supersedes_event_id == ev5.event_id
 
+
+def test_generalized_hedged_language_patterns():
+    """Verify generalized hedged language detection across diverse phrasings independent of any specific script:
+    1. Hedged expressions (maybe, possibly, let me check, let me think, tentative, might work, not 100% sure, hypotheticals)
+       must NEVER trigger explicit commitment override on MeetingConversionGateEngine.
+    2. Real commitments ('I could do Thursday at 4 PM', 'Thursday at 3 works', 'Friday morning works') must trigger explicit commitment.
+    3. In the state manager, hedged phrases produce TENTATIVE status with gate explicit_commitment_detected=False,
+       while firm commitments produce CONFIRMED with gate explicit_commitment_detected=True.
+    """
+    engine = MeetingConversionGateEngine()
+    manager = _setup_baseline_manager("CA_generalized_hedges")
+
+    hedged_phrases = [
+        "Maybe Friday could work.",
+        "Possibly next week.",
+        "Let me check with my calendar first.",
+        "Let me think about it.",
+        "Tentatively Tuesday afternoon.",
+        "Thursday might be able to work.",
+        "Not 100% sure, but Thursday could work.",
+        "What if we did Friday?",
+        "I doubt I can make Monday.",
+    ]
+
+    for idx, phrase in enumerate(hedged_phrases, start=10):
+        b = _create_turn_bundle(turn_id=idx, speaker_id="client", text=phrase)
+        has_commit, slot = engine.detect_explicit_commitment(b, manager.current_state)
+        assert has_commit is False, f"Hedged phrase '{phrase}' was wrongly classified as explicit commitment"
+        assert slot is None
+
+    firm_commitments = [
+        ("I could do Thursday at 4 PM", "Thursday At 4"),
+        ("Thursday at 3 works for me", "Thursday At 3"),
+        ("Friday morning works", "Friday Morning"),
+        ("Yes, let's meet tomorrow", "Tomorrow"),
+    ]
+
+    for idx, (phrase, expected_slot_substr) in enumerate(firm_commitments, start=30):
+        b = _create_turn_bundle(turn_id=idx, speaker_id="client", text=phrase)
+        has_commit, slot = engine.detect_explicit_commitment(b, manager.current_state)
+        assert has_commit is True, f"Firm commitment '{phrase}' was not detected as explicit commitment"
+        assert slot is not None and expected_slot_substr.lower() in slot.lower(), f"Expected '{expected_slot_substr}' in slot '{slot}' for '{phrase}'"
+
+    # End-to-end State Manager Verification
+    # Salesperson proposal
+    t_prop = _create_turn_bundle(
+        turn_id=50,
+        speaker_id="salesperson",
+        text="Would Friday work for a walkthrough?",
+        salesperson_strategy_tag="specific_slot_proposal",
+    )
+    s_prop = manager.process_turn_bundle(t_prop)
+    assert s_prop.conversion_event.status == ConversionEventStatus.PROPOSED
+    assert s_prop.conversion_event.start_at == "Friday"
+
+    # Prospect responds with generalized hedge: "Maybe Friday could work."
+    t_hedge = _create_turn_bundle(
+        turn_id=51,
+        speaker_id="client",
+        text="Maybe Friday could work.",
+        agreement=0.60,
+    )
+    s_hedge = manager.process_turn_bundle(t_hedge)
+    assert s_hedge.conversion_gate.explicit_commitment_detected is False
+    assert s_hedge.conversion_event.status == ConversionEventStatus.TENTATIVE
+    assert s_hedge.conversion_event.start_at == "Friday"
+
+    # Later prospect confirms firmly: "Friday at 2 works for me, let's lock it in."
+    t_firm = _create_turn_bundle(
+        turn_id=52,
+        speaker_id="client",
+        text="Friday at 2 works for me, let's lock it in.",
+        agreement=0.85,
+    )
+    s_firm = manager.process_turn_bundle(t_firm)
+    assert s_firm.conversion_gate.explicit_commitment_detected is True
+    assert s_firm.conversion_event.status == ConversionEventStatus.CONFIRMED
+    assert "Friday At 2" in s_firm.conversion_event.start_at
+

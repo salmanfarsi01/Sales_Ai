@@ -108,6 +108,25 @@ def is_decision_authority_statement(utterance_text: str) -> bool:
     return any(re.search(pat, clean_text) for pat in authority_patterns)
 
 
+def is_objection_concession_statement(utterance_text: str) -> bool:
+    """Detects whether an utterance is an explicit concession, resolution, or withdrawal of an objection,
+    which must not be misclassified as repeating or re-raising the objection.
+    """
+    clean = utterance_text.lower().strip()
+    concession_patterns = [
+        r"\b(?:don't|do\s+not|not)\s+(?:care|worried|concerned)\s+about\s+(?:the\s+)?(?:fee|commission|percentage|rate|price|timing)\b",
+        r"\b(?:commission|fee|pricing|timing|market)\s+(?:is\s+fine|isn't\s+(?:really\s+)?(?:an?|the)\s+issue|doesn't\s+matter|is\s+fair|is\s+okay|makes\s+sense)\b",
+        r"\b(?:fine|okay|happy)\s+with\s+(?:the\s+)?(?:commission|fee|rate|price|timing)\b",
+        r"\bnever\s+mind\s+about\s+(?:the\s+)?(?:fee|commission)\b",
+        r"\b(?:commission|fee)\s+isn't\s+(?:really\s+)?(?:an?|the)\s+issue\b",
+        r"\btiming\s+isn't\s+(?:the\s+biggest\s+|an?\s+)?issue\b",
+        r"\b(?:makes?\s+sense|fair\s+enough|okay\s+that\s+makes\s+sense)\b.*?\b(?:commission|timing|fee|pricing|rate|not\s+an\s+issue|isn't\s+the\s+biggest\s+issue|not\s+really\s+the\s+issue|isn't\s+really\s+the\s+issue)\b",
+        r"\bcommission\s+is\s+fair\b",
+        r"\bnot\s+a\s+problem\s+anymore\b",
+    ]
+    return any(re.search(p, clean) for p in concession_patterns)
+
+
 def classify_objection_label(utterance_text: str) -> Optional[str]:
     """Classifies the semantic category label for an objection utterance.
 
@@ -398,28 +417,30 @@ class ObjectionLifecycleEngine:
         # -------------------------------------------------------------------------
         # 3. Client Turn: Evaluate Objection Expression, Reframe Reaction, and Resolution
         # -------------------------------------------------------------------------
-        detected_category = classify_objection_label(bundle.utterance_text)
+        is_concession = is_objection_concession_statement(bundle.utterance_text)
+        detected_category = None if is_concession else classify_objection_label(bundle.utterance_text)
 
         # Primary Identity Resolution: Anchor to Behavioral Signal Engine's recurrence_id
         matched_obj: Optional[ObjectionRecord] = None
-        if bundle.recurrence_id:
-            matched_obj = self.get_objection_by_recurrence_id(bundle.recurrence_id)
+        if not is_concession:
+            if bundle.recurrence_id:
+                matched_obj = self.get_objection_by_recurrence_id(bundle.recurrence_id)
 
-        # Secondary Identity Resolution: Match by detected category or active focus
-        if not matched_obj and detected_category:
-            matched_obj = self.get_active_objection_by_category(detected_category)
-            if not matched_obj:
-                matched_obj = next(
-                    (o for o in reversed(self._objections) if o.canonical_category == detected_category and o.lifecycle_state in (ObjectionLifecycleState.DORMANT, "dormant", "resolved")),
-                    None,
-                )
+            # Secondary Identity Resolution: Match by detected category or active focus
+            if not matched_obj and detected_category:
+                matched_obj = self.get_active_objection_by_category(detected_category)
+                if not matched_obj:
+                    matched_obj = next(
+                        (o for o in reversed(self._objections) if o.canonical_category == detected_category and o.lifecycle_state in (ObjectionLifecycleState.DORMANT, "dormant", "resolved")),
+                        None,
+                    )
 
-        # Handle explicit recurrence signal from Behavioral Signal Engine
-        if not matched_obj and bundle.recurrence_type in ("same_objection_repeated", "concern_after_failed_reframe"):
-            if self.active_focus_objection_id:
-                matched_obj = self.get_objection_by_id(self.active_focus_objection_id)
-            elif self._objections:
-                matched_obj = next((o for o in reversed(self._objections) if o.lifecycle_state != "boundary"), None)
+            # Handle explicit recurrence signal from Behavioral Signal Engine
+            if not matched_obj and bundle.recurrence_type in ("same_objection_repeated", "concern_after_failed_reframe"):
+                if self.active_focus_objection_id:
+                    matched_obj = self.get_objection_by_id(self.active_focus_objection_id)
+                elif self._objections:
+                    matched_obj = next((o for o in reversed(self._objections) if o.lifecycle_state != "boundary"), None)
 
         # Decision-Authority Ingestion Check:
         # Statements expressing decision-authority constraints (spouse, co-owner, signing authority)
@@ -727,7 +748,7 @@ class ObjectionLifecycleEngine:
             # Check for FULL RESOLUTION (Scoped specifically to this targeted objection)
             # Requires forward behavioral commitment on this topic (agreement >= 0.75 or future_language >= 0.60)
             # OR explicit concession/reversal by prospect
-            concession_detected = bool(re.search(
+            concession_detected = is_concession or bool(re.search(
                 r"\b(?:timing|the\s+timing|fee|commission)\s+(?:isn't|is\s+not)\s+(?:the\s+biggest\s+|an?\s+)?issue\b",
                 bundle.utterance_text.lower(),
             )) or bool(re.search(

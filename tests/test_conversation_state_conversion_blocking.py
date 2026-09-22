@@ -599,3 +599,134 @@ def test_override_is_scoped_per_condition_access_constraints_blocks():
     assert gate.is_open is False
     assert "plausible_logistics" in gate.failed_conditions
 
+
+def test_point2_advance_via_blocker_clearance_and_regress_via_new_evidence():
+    """Client Point 2 End-to-End Stress Test:
+    Demonstrates both directions of dynamic gating:
+    1. ADVANCEMENT: Gate starts CLOSED due to an active target-blocking objection ('commission_fee' for 'signed_listing_agreement').
+       Upon salesperson reframe and prospect concession, the objection resolves and the gate ADVANCES from CLOSED to OPEN.
+    2. REGRESSION: Later in the conversation, new evidence surfaces (absent spouse on deed), causing decision_maker_aligned
+       to fail and the gate REGRESSES from OPEN to CLOSED.
+    Both transitions are verified with full audit history in change_history.
+    """
+    from copilot.conversation_state_models import DecisionStakeholder, ConversionEventStatus, ObjectionLifecycleState
+
+    manager = ConversationStateManager(call_sid="CA_point2_stress_test", conversion_target="signed_listing_agreement")
+
+    # Turn 1: Salesperson Opening
+    t1 = _create_turn_bundle(
+        turn_id=1,
+        speaker_id="salesperson",
+        text="Hi, thanks for meeting today — are you ready to finalize the listing agreement?",
+    )
+    s1 = manager.process_turn_bundle(t1)
+
+    # Turn 2: Client raises blocking commission objection
+    t2 = _create_turn_bundle(
+        turn_id=2,
+        speaker_id="client",
+        text="Your commission rate is 6%, which is way too high. I'm not signing any agreement at that fee.",
+        trust=0.70,
+        emotion_tension=0.20,
+        engagement=0.75,
+        agreement=0.40,
+    )
+    s2 = manager.process_turn_bundle(
+        t2,
+        decision_updates={
+            "primary_decision_maker": "Self (Owner)",
+            "decision_maker_present": True,
+            "stakeholders": [DecisionStakeholder(name="Self", role="owner", presence="on_call")],
+        },
+    )
+    gate2 = s2.conversion_gate
+
+    # 1. Commission fee objection is active and blocks signed_listing_agreement
+    assert gate2.is_open is False
+    assert "objections_resolved_or_partial" in gate2.failed_conditions
+    cond3_t2 = next(c for c in gate2.conditions if c.condition_name == "objections_resolved_or_partial")
+    assert cond3_t2.met is False
+    assert "commission_fee" in cond3_t2.reason
+
+    # Turn 3: Salesperson reframe
+    t3 = _create_turn_bundle(
+        turn_id=3,
+        speaker_id="salesperson",
+        text="Let's walk through your net proceeds after all marketing and staging costs, so you can see the real return you'll walk away with.",
+        salesperson_strategy_tag="financial_net_proceeds_reframe",
+    )
+    s3 = manager.process_turn_bundle(t3)
+
+    # Turn 4: Prospect concession clears the blocking objection
+    t4 = _create_turn_bundle(
+        turn_id=4,
+        speaker_id="client",
+        text="Okay, that breakdown makes sense, commission isn't really the issue then. That's fair.",
+        trust=0.75,
+        emotion_tension=0.15,
+        engagement=0.80,
+        agreement=0.70,
+    )
+    s4 = manager.process_turn_bundle(t4)
+    gate4 = s4.conversion_gate
+
+    # 2. Objection is resolved and Gate ADVANCES from CLOSED to OPEN
+    comm_obj = next((o for o in s4.objections if o.canonical_category == "commission_fee"), None)
+    assert comm_obj is not None
+    assert comm_obj.lifecycle_state in ("resolved", ObjectionLifecycleState.RESOLVED)
+
+    cond3_t4 = next(c for c in gate4.conditions if c.condition_name == "objections_resolved_or_partial")
+    assert cond3_t4.met is True
+    assert gate4.is_open is True
+    assert len(gate4.failed_conditions) == 0
+
+    # Verify audit change history recorded the advance
+    gate_open_change = next((c for c in s4.change_history if c.field_path == "conversion_gate" and c.triggering_turn_id == 4), None)
+    assert gate_open_change is not None
+    assert "transitioned to OPEN" in gate_open_change.reason
+
+    # Turn 5: Salesperson proposes signing appointment
+    t5 = _create_turn_bundle(
+        turn_id=5,
+        speaker_id="salesperson",
+        text="Great — would Thursday work for you to sign the listing agreement?",
+        salesperson_strategy_tag="specific_slot_proposal",
+    )
+    s5 = manager.process_turn_bundle(t5)
+
+    # Turn 6: Client confirms
+    t6 = _create_turn_bundle(
+        turn_id=6,
+        speaker_id="client",
+        text="Yes, Thursday at 3 works, let's do it.",
+        trust=0.80,
+        engagement=0.85,
+        agreement=0.80,
+    )
+    s6 = manager.process_turn_bundle(t6)
+    gate6 = s6.conversion_gate
+    assert gate6.is_open is True
+    assert gate6.explicit_commitment_detected is True
+
+    # Turn 7: Client discloses absent spouse on deed -> Gate REGRESSES from OPEN to CLOSED
+    t7 = _create_turn_bundle(
+        turn_id=7,
+        speaker_id="client",
+        text="Actually wait, my wife is on the deed and she would need to be part of this conversation before we sign anything.",
+        trust=0.75,
+        engagement=0.80,
+    )
+    s7 = manager.process_turn_bundle(t7)
+    gate7 = s7.conversion_gate
+
+    assert gate7.is_open is False
+    assert "decision_maker_aligned" in gate7.failed_conditions
+    cond5_t7 = next(c for c in gate7.conditions if c.condition_name == "decision_maker_aligned")
+    assert cond5_t7.met is False
+
+    # Verify audit change history recorded the regression
+    gate_close_change = next((c for c in s7.change_history if c.field_path == "conversion_gate" and c.triggering_turn_id == 7), None)
+    assert gate_close_change is not None
+    assert "transitioned to CLOSED" in gate_close_change.reason
+    assert "decision_maker_aligned" in gate_close_change.reason
+

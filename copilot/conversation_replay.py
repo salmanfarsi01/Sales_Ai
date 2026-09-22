@@ -97,6 +97,7 @@ class ConversationReplayEngine:
         initial_state: Optional[ConversationStateSnapshot] = None,
         save_report: bool = True,
         source: str = "live_call",
+        conversion_target: str = "appointment",
     ) -> ConversationStateReplayReport:
         """Replays an ordered list of turn bundles through ConversationStateManager.
 
@@ -111,6 +112,7 @@ class ConversationReplayEngine:
         manager = self.state_manager or ConversationStateManager(
             call_sid=call_sid,
             initial_snapshot=initial_state,
+            conversion_target=conversion_target,
         )
 
         timeline: List[TurnReplayStep] = []
@@ -436,6 +438,7 @@ class ConversationReplayEngine:
         call_sid: str,
         raw_turns: List[Dict[str, Any]],
         save_report: bool = True,
+        conversion_target: str = "appointment",
     ) -> ConversationStateReplayReport:
         """Helper to convert raw turn dicts into bundles and run replay.
 
@@ -520,6 +523,7 @@ class ConversationReplayEngine:
             bundles=bundles,
             save_report=save_report,
             source="synthetic_simulation",
+            conversion_target=conversion_target,
         )
 
     def get_conversion_event_history(self, call_sid: str) -> List[Dict[str, Any]]:
@@ -537,6 +541,7 @@ class ConversationReplayEngine:
 class ReplayDialogueRequest(BaseModel):
     """Request payload for dialogue simulation endpoint."""
     call_sid: Optional[str] = None
+    conversion_target: Optional[str] = "appointment"
     turns: List[Dict[str, Any]] = Field(default_factory=list)
 
 
@@ -595,7 +600,12 @@ def get_conversation_replay_router(
         if not req.turns:
             raise HTTPException(status_code=400, detail="Must supply non-empty list of turns")
         engine = ConversationReplayEngine(reports_dir=reports_dir)
-        report = engine.replay_dialogue_turns(call_sid=call_sid, raw_turns=req.turns, save_report=True)
+        report = engine.replay_dialogue_turns(
+            call_sid=call_sid,
+            raw_turns=req.turns,
+            save_report=True,
+            conversion_target=req.conversion_target or "appointment",
+        )
         return report.model_dump()
 
     return router
