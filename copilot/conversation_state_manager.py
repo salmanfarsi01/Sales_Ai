@@ -690,6 +690,7 @@ class ConversationStateManager:
             return None
 
         text = bundle.utterance_text.lower().strip()
+        result: Dict[str, Any] = {}
 
         # 1. Direct absent decision maker patterns
         if any(re.search(pat, text) for pat in ABSENT_DECISION_MAKER_PATTERNS):
@@ -720,13 +721,11 @@ class ConversationStateManager:
             if not any(s.role == role and s.presence == "absent" for s in existing):
                 existing.append(stakeholder)
 
-            return {
-                "decision_maker_present": False,
-                "stakeholders": existing,
-            }
+            result["decision_maker_present"] = False
+            result["stakeholders"] = existing
 
         # 2. Affirmative confirmation of prior salesperson inquiry about third-party stakeholder
-        if self.prior_bundle and self.prior_bundle.speaker_id == "salesperson":
+        elif self.prior_bundle and self.prior_bundle.speaker_id == "salesperson":
             prior_text_l = self.prior_bundle.utterance_text.lower()
             asked_stakeholder = any(w in prior_text_l for w in ["him involved", "her involved", "them involved", "husband", "wife", "partner", "spouse", "decision maker", "sign off"])
             is_affirmative = (
@@ -747,12 +746,42 @@ class ConversationStateManager:
                 if not any(s.role == role and s.presence == "absent" for s in existing):
                     existing.append(stakeholder)
 
-                return {
-                    "decision_maker_present": False,
-                    "stakeholders": existing,
-                }
+                result["decision_maker_present"] = False
+                result["stakeholders"] = existing
 
-        return None
+        # 3. Sole decision maker declaration (e.g. Turn 2)
+        elif any(re.search(p, text) for p in [
+            r"\b(?:i'm|i\s+am)\s+the\s+(?:one|sole\s+person)\s+(?:making|who\s+makes)\b",
+            r"\bno\s+one\s+else\s+needs?\s+to\s+sign\b",
+            r"\bi\s+make\s+the\s+decisions?\s+alone\b",
+        ]):
+            if not self.current_state.decision_structure.stakeholders:
+                result["decision_maker_present"] = True
+                result["primary_decision_maker"] = "sole_decision_maker"
+
+        # 4. Moving timeline horizon & urgency level (e.g. Turn 4)
+        if any(re.search(p, text) for p in [
+            r"\b(?:sometime\s+next\s+year|moving\s+next\s+year|look\s+at\s+moving|next\s+year)\b",
+        ]):
+            result["timeline_horizon"] = "sometime next year"
+        if any(re.search(p, text) for p in [
+            r"\bnothing\s+urgent\b",
+            r"\bnot\s+urgent\b",
+            r"\bno\s+rush\b",
+        ]):
+            result["urgency_level"] = "low"
+
+        # 5. Access and scheduling constraints (e.g. Turn 16)
+        if any(re.search(p, text) for p in [
+            r"\bmornings?\s+(?:don['’]?t|do\s+not)\s+(?:really\s+)?work\b",
+            r"\bnot\s+available\s+in\s+the\s+mornings?\b",
+        ]):
+            cur_constraints = list(self.current_state.decision_structure.access_constraints)
+            if "Mornings unavailable" not in cur_constraints:
+                cur_constraints.append("Mornings unavailable")
+                result["access_constraints"] = cur_constraints
+
+        return result or None
 
     def _extract_autonomous_fact_updates(
         self,
@@ -767,15 +796,27 @@ class ConversationStateManager:
         text_lower = bundle.utterance_text.lower().strip()
         existing_keys = {f.fact_key for f in self.current_state.facts if f.status == "active"}
 
-        # 1. Contact preference
-        if bundle.contact_preference != "none" and "contact_preference" not in existing_keys:
-            updates.append({
-                "category": "preference",
-                "fact_key": "contact_preference",
-                "fact_value": bundle.contact_preference,
-                "confidence": bundle.contact_preference_confidence or 0.85,
-                "notes": f"Communication preference declared: {bundle.contact_preference_details or bundle.contact_preference}",
-            })
+        # 1. Contact preference (from bundle metadata or explicit client statement)
+        if "contact_preference" not in existing_keys:
+            if bundle.contact_preference != "none":
+                updates.append({
+                    "category": "preference",
+                    "fact_key": "contact_preference",
+                    "fact_value": bundle.contact_preference,
+                    "confidence": bundle.contact_preference_confidence or 0.85,
+                    "notes": f"Communication preference declared: {bundle.contact_preference_details or bundle.contact_preference}",
+                })
+            elif any(re.search(p, text_lower) for p in [
+                r"\b(?:don't|do\s+not)\s+(?:start\s+)?texting\s+me\s+every\s+day\b",
+                r"\bavoid\s+texting\s+me\s+daily\b",
+            ]):
+                updates.append({
+                    "category": "preference",
+                    "fact_key": "contact_preference",
+                    "fact_value": "No daily texting",
+                    "confidence": 0.85,
+                    "notes": f"Communication preference declared: '{bundle.utterance_text[:60]}'",
+                })
 
         # 2. Confirmed meeting / appointment time
         # Case A: Prospect explicitly mentions day and time
@@ -785,6 +826,17 @@ class ConversationStateManager:
         )
         if time_day_match:
             new_val = time_day_match.group(0).strip().title()
+            # If earlier tentative meeting/walkthrough fact exists, supersede it directly
+            tentative_f = next((f for f in self.current_state.facts if f.fact_key in ("tentative_meeting_time", "walkthrough_timing") and f.status == "active"), None)
+            if tentative_f:
+                self.facts_manager.supersede_fact(
+                    old_fact_id=tentative_f.fact_id,
+                    new_fact_value=new_val,
+                    source_turn_id=bundle.turn_id,
+                    timestamp_ms=bundle.timestamp_ms,
+                    notes=f"Tentative walkthrough timing superseded by confirmed meeting '{new_val}'",
+                )
+
             if "confirmed_meeting_time" not in existing_keys:
                 updates.append({
                     "category": "timeline",
@@ -804,31 +856,51 @@ class ConversationStateManager:
                         notes=f"Meeting rescheduled to '{new_val}'",
                     )
         elif self.prior_bundle and self.prior_bundle.speaker_id == "salesperson":
-            # Case B: Salesperson proposed a day/time and prospect confirmed affirmatively
+            # Case B: Salesperson proposed a day/time and prospect confirmed affirmatively without hedging
             prior_text_lower = self.prior_bundle.utterance_text.lower()
             prop_match = re.search(
                 r"\b(monday|tuesday|wednesday|thursday|friday|saturday|sunday|tomorrow)\b.*?\b(?:at\s+)?(\d{1,2}(?::\d{2})?\s*(?:am|pm)?|one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve)\b",
                 prior_text_lower,
             )
+            hedged_patterns = [
+                r"\b(?:could|might)\s+work\b",
+                r"\b(?:could|might)\s+(?:be\s+able\s+to|possibly)\b",
+                r"\btentative(?:ly)?\b",
+                r"\bpossibly\b",
+                r"\blet\s+me\s+(?:check|see|think)\b",
+                r"\bnot\s+(?:100%|sure|certain)\b",
+                r"\bif\s+(?:that|it)\s+works\b",
+            ]
+            is_hedged_fact = any(re.search(pat, text_lower) for pat in hedged_patterns)
             is_affirmative = (
                 bundle.agreement_score >= 0.60
                 or any(re.search(rf"\b{aff}\b", text_lower) for aff in ["yeah", "yes", "definitely", "sure", "absolutely", "works", "perfect", "sounds good"])
             )
-            if prop_match and is_affirmative and "confirmed_meeting_time" not in existing_keys:
+            if prop_match and is_affirmative and not is_hedged_fact:
                 raw_time_str = prop_match.group(0).title()
                 norm_time = raw_time_str
                 for word, num in [("One", "1:00 PM"), ("Two", "2:00 PM"), ("Three", "3:00 PM"), ("Four", "4:00 PM"), ("Five", "5:00 PM")]:
                     if f"At {word}" in norm_time:
                         norm_time = norm_time.replace(f"At {word}", f"at {num}")
-                updates.append({
-                    "category": "timeline",
-                    "fact_key": "confirmed_meeting_time",
-                    "fact_value": norm_time,
-                    "confidence": 0.85,
-                    "notes": f"Prospect confirmed proposed time '{raw_time_str}' from salesperson proposal.",
-                })
 
+                tentative_f = next((f for f in self.current_state.facts if f.fact_key in ("tentative_meeting_time", "walkthrough_timing") and f.status == "active"), None)
+                if tentative_f:
+                    self.facts_manager.supersede_fact(
+                        old_fact_id=tentative_f.fact_id,
+                        new_fact_value=norm_time,
+                        source_turn_id=bundle.turn_id,
+                        timestamp_ms=bundle.timestamp_ms,
+                        notes=f"Tentative walkthrough timing superseded by confirmed meeting '{norm_time}'",
+                    )
 
+                if "confirmed_meeting_time" not in existing_keys:
+                    updates.append({
+                        "category": "timeline",
+                        "fact_key": "confirmed_meeting_time",
+                        "fact_value": norm_time,
+                        "confidence": 0.85,
+                        "notes": f"Prospect confirmed proposed time '{raw_time_str}' from salesperson proposal.",
+                    })
 
         # 3. Decision to Stay / Cancellation of sale
         if any(re.search(p, text_lower) for p in DECISION_TO_STAY_PATTERNS) and "decision_to_stay" not in existing_keys:
@@ -850,7 +922,49 @@ class ConversationStateManager:
                 "notes": f"Spouse involvement declared by prospect: '{bundle.utterance_text[:60]}'",
             })
 
+        # 5. Tentative Timeline Horizon (e.g. Turn 4)
+        if "timeline_horizon" not in existing_keys and any(re.search(p, text_lower) for p in [
+            r"\b(?:sometime\s+next\s+year|moving\s+next\s+year|look\s+at\s+moving\s+sometime\s+next\s+year|next\s+year)\b",
+        ]):
+            updates.append({
+                "category": "timeline",
+                "fact_key": "timeline_horizon",
+                "fact_value": "Sometime next year",
+                "confidence": 0.85,
+                "notes": f"Tentative moving timeline declared by prospect: '{bundle.utterance_text[:60]}'",
+            })
+
+        # 6. Tentative Meeting / Walkthrough Window (e.g. Turn 6, Turn 9)
+        if "confirmed_meeting_time" not in existing_keys and "tentative_meeting_time" not in existing_keys and any(re.search(p, text_lower) for p in [
+            r"\b(?:maybe\s+next\s+week|sometime\s+next\s+week|next\s+week\s+could\s+work|think\s+about\s+it)\b",
+            r"\b(monday|tuesday|wednesday|thursday|friday|saturday|sunday|tomorrow)\s+(?:could|might)\s+work\b",
+        ]):
+            day_match = re.search(r"\b(monday|tuesday|wednesday|thursday|friday|saturday|sunday|tomorrow)\b", text_lower)
+            day_str = f"{day_match.group(0).title()} (tentative)" if day_match else "Maybe next week (tentative)"
+            updates.append({
+                "category": "timeline",
+                "fact_key": "tentative_meeting_time",
+                "fact_value": day_str,
+                "confidence": 0.70,
+                "notes": f"Tentative meeting timing expressed by prospect: '{bundle.utterance_text[:60]}'",
+            })
+
+        # 7. Scheduling Constraints / Availability Restrictions (e.g. Turn 16)
+        if "scheduling_constraint" not in existing_keys and any(re.search(p, text_lower) for p in [
+            r"\bmornings?\s+(?:don['’]?t|do\s+not)\s+(?:really\s+)?work\b",
+            r"\bnot\s+available\s+in\s+the\s+mornings?\b",
+            r"\bafternoons?\s+(?:only|preferred|work\s+better)\b",
+        ]):
+            updates.append({
+                "category": "logistical",
+                "fact_key": "scheduling_constraint",
+                "fact_value": "Mornings unavailable / afternoons preferred",
+                "confidence": 0.85,
+                "notes": f"Scheduling constraint declared by prospect: '{bundle.utterance_text[:60]}'",
+            })
+
         return updates
+
 
     def get_conversion_event_history(self) -> List[ConversionEventObject]:
         """Returns the complete chronological history of conversion events (both superseded and active)."""

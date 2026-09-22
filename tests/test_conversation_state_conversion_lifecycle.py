@@ -471,3 +471,76 @@ def test_fact_supersession_is_automatic_deterministic_cascade_from_event_status(
     assert "Thursday At 4" in superseded_facts[0].fact_value
     assert superseded_facts[0].superseded_by_fact_id == active_facts_post[0].fact_id
 
+
+def test_hedged_proposal_acceptance_and_gate_regression_muc5lyux():
+    """Verify sim_muc5lyux exact behavior:
+    1. Turn 5: Salesperson proposes walkthrough on Thursday -> Event PROPOSED ('Thursday')
+    2. Turn 6: Client hedged acceptance ('Sure, Thursday could work.') ->
+       - Gate explicit_commitment_detected is False, commitment_slot is None
+       - Event status is TENTATIVE with concrete start_at='Thursday' (no generic placeholder)
+       - Fact tentative_meeting_time is recorded, confirmed_meeting_time is NOT created
+    3. Turn 7: Client adds absent decision maker -> Gate regresses to closed, event transitions to BLOCKED ('Thursday').
+    """
+    manager = _setup_baseline_manager("CA_muc5lyux_hedged")
+
+    # Turn 5: Salesperson proposal
+    t5 = _create_turn_bundle(
+        turn_id=5,
+        speaker_id="salesperson",
+        text="Great - would Thursday work for a walkthrough?",
+        salesperson_strategy_tag="specific_slot_proposal",
+    )
+    s5 = manager.process_turn_bundle(t5)
+    ev5 = s5.conversion_event
+    assert ev5 is not None
+    assert ev5.status == ConversionEventStatus.PROPOSED
+    assert ev5.start_at == "Thursday"
+    assert ev5.conversion_type == "property_walkthrough"
+
+    # Turn 6: Client hedged response
+    t6 = _create_turn_bundle(
+        turn_id=6,
+        speaker_id="client",
+        text="Sure, Thursday could work.",
+        agreement=0.60,
+        trust=0.75,
+    )
+    s6 = manager.process_turn_bundle(t6)
+    gate6 = s6.conversion_gate
+    ev6 = s6.conversion_event
+
+    # Gate must NOT register explicit commitment for hedged language
+    assert gate6.explicit_commitment_detected is False
+    assert gate6.commitment_slot is None
+
+    # Event must be TENTATIVE, not CONFIRMED, and must extract "Thursday"
+    assert ev6 is not None
+    assert ev6.status == ConversionEventStatus.TENTATIVE
+    assert ev6.start_at == "Thursday"
+    assert ev6.supersedes_event_id == ev5.event_id
+
+    # Facts: tentative recorded, confirmed not recorded
+    active_confirmed = [f for f in s6.facts if f.fact_key == "confirmed_meeting_time" and f.status == "active"]
+    assert len(active_confirmed) == 0
+    active_tentative = [f for f in s6.facts if f.fact_key == "tentative_meeting_time" and f.status == "active"]
+    assert len(active_tentative) == 1
+    assert "Thursday" in active_tentative[0].fact_value
+
+    # Turn 7: Absent decision maker regresses gate to closed
+    t7 = _create_turn_bundle(
+        turn_id=7,
+        speaker_id="client",
+        text="Actually wait, my wife would need to be part of this conversation before we go any further.",
+    )
+    s7 = manager.process_turn_bundle(t7)
+    gate7 = s7.conversion_gate
+    ev7 = s7.conversion_event
+
+    assert gate7.is_open is False
+    assert "decision_maker_aligned" in gate7.failed_conditions
+    assert ev7 is not None
+    assert ev7.status == ConversionEventStatus.BLOCKED
+    assert ev7.start_at == "Thursday"
+    assert ev7.event_id == ev6.event_id
+    assert ev7.supersedes_event_id == ev5.event_id
+

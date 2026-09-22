@@ -39,6 +39,13 @@ def infer_salesperson_strategy_from_text(text: str) -> Optional[str]:
     ]):
         return "fee_performance_guarantee"
 
+    # 4. Market Data / Walkthrough Reframe
+    if any(re.search(p, text_lower) for p in [
+        r"\b(?:walk\s+through\s+(?:what\s+)?the\s+market|see\s+the\s+actual\s+numbers?|market\s+looks?\s+like|look\s+at\s+the\s+(?:numbers|comps|market)|market\s+data)\b",
+        r"\bfeel\s+that\s+way\s+before\s+they\s+see\b",
+    ]):
+        return "market_data_walkthrough"
+
     return None
 
 
@@ -128,13 +135,10 @@ def extract_behavioral_bundle(
     strat_tag = salesperson_strategy_tag
     strat_source = salesperson_strategy_source
     if speaker_id == "salesperson" and (not strat_tag or strat_tag == "none"):
-        # Reframe strategies are assertional/explanatory moves, not questions
-        is_question = utterance_text.strip().endswith("?") or semantic_snapshot.question_type in ("clarifying", "diagnostic")
-        if not is_question:
-            inferred = infer_salesperson_strategy_from_text(utterance_text)
-            if inferred:
-                strat_tag = inferred
-                strat_source = "speech_heuristic"
+        inferred = infer_salesperson_strategy_from_text(utterance_text)
+        if inferred and semantic_snapshot.question_type != "clarifying":
+            strat_tag = inferred
+            strat_source = "speech_heuristic"
 
     return BehavioralSignalInputBundle(
         call_sid=inference_state.call_sid,

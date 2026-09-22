@@ -112,7 +112,7 @@ class TruthSupersessionDetector:
         ]
         if any(re.search(p, text_lower) for p in meeting_markers):
             matched_categories.add("timeline")
-            matched_keys.add("confirmed_meeting_time")
+            matched_keys.update(["confirmed_meeting_time", "tentative_meeting_time", "walkthrough_timing"])
 
         # Filter facts matching either the category domain or explicit fact key
         candidate_facts = [
@@ -341,6 +341,26 @@ class TruthSupersessionDetector:
                     confidence=0.94,
                 )
 
+            # Inverse: Initial sole-decision-maker declaration superseded by spouse involvement
+            was_sole_auth = any(w in fact_lower for w in ["sole", "alone", "self-authorized", "no one else"])
+            has_spouse_involvement = any(re.search(p, text_lower) for p in [
+                r"\b(?:wife|husband|spouse|partner)\b.*?\b(?:part\s+of\s+(?:this|the)\s+conversation|need\s+to\s+be|involved|consult|decision)\b",
+                r"\bwe\s+decide\s+together\b",
+                r"\bnot\s+my\s+decision\s+alone\b",
+            ])
+            if was_sole_auth and has_spouse_involvement:
+                return SupersessionDecision(
+                    has_supersession=True,
+                    target_fact_id=fact.fact_id,
+                    target_fact_key=fact.fact_key,
+                    relation="UPDATES",
+                    old_truth_summary=fact.fact_value,
+                    new_truth_value="Shared decision authority with spouse (wife absent stakeholder)",
+                    reasoning="Initial sole-decision-maker declaration superseded by requirement for spouse involvement.",
+                    relation_confidence=0.95,
+                    confidence=0.95,
+                )
+
         # -------------------------------------------------------------------------
         # 3. Timeline / Target Closing Supersession
         # -------------------------------------------------------------------------
@@ -400,7 +420,7 @@ class TruthSupersessionDetector:
         # -------------------------------------------------------------------------
         # 5. Scheduled Meeting / Appointment Supersession
         # -------------------------------------------------------------------------
-        if fact.fact_key == "confirmed_meeting_time":
+        if fact.fact_key in ("confirmed_meeting_time", "tentative_meeting_time", "walkthrough_timing"):
             from .conversation_conversion import detect_explicit_reversal_in_text
             is_rev, rev_reason = detect_explicit_reversal_in_text(candidate_text)
             if is_rev:
@@ -429,9 +449,9 @@ class TruthSupersessionDetector:
                         relation="UPDATES",
                         old_truth_summary=fact.fact_value,
                         new_truth_value=new_slot,
-                        reasoning=f"Meeting rescheduled from '{fact.fact_value}' to '{new_slot}'.",
-                        relation_confidence=0.90,
-                        confidence=0.90,
+                        reasoning=f"Meeting timing '{fact.fact_value}' superseded by confirmed meeting '{new_slot}'.",
+                        relation_confidence=0.92,
+                        confidence=0.92,
                     )
 
         return SupersessionDecision(

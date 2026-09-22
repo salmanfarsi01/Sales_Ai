@@ -94,7 +94,7 @@ class MeetingConversionGateEngine:
 
         text_lower = bundle.utterance_text.lower()
 
-        # Check for explicit negation or hypothetical framing
+        # Check for explicit negation, hypothetical framing, or hedged phrasing
         negation_patterns = [
             r"\b(?:doesn't|does\s+not|won't|will\s+not|can't|cannot|couldn't|could\s+not)\s+(?:work|make\s+it|do\s+it)\b",
             r"\b(?:not|never)\s+(?:works?|feasible|possible|available|good)\b",
@@ -112,12 +112,25 @@ class MeetingConversionGateEngine:
             r"\bunlikely\b",
             r"\bdoubt\s+(?:it|i\s+can)\b",
         ]
-        if any(re.search(pat, text_lower) for pat in negation_patterns) or any(re.search(pat, text_lower) for pat in hypothetical_patterns):
+        hedged_patterns = [
+            r"\b(?:could|might)\s+work\b",
+            r"\b(?:could|might)\s+(?:be\s+able\s+to|possibly)\b",
+            r"\btentative(?:ly)?\b",
+            r"\bpossibly\b",
+            r"\blet\s+me\s+(?:check|see|think)\b",
+            r"\bnot\s+(?:100%|sure|certain)\b",
+            r"\bif\s+(?:that|it)\s+works\b",
+        ]
+        if (
+            any(re.search(pat, text_lower) for pat in negation_patterns)
+            or any(re.search(pat, text_lower) for pat in hypothetical_patterns)
+            or any(re.search(pat, text_lower) for pat in hedged_patterns)
+        ):
             return False, None
 
-        # Day & time indicators
+        # Day & time indicators (day + clock time, day + period, or day alone)
         time_day_match = re.search(
-            r"\b(monday|tuesday|wednesday|thursday|friday|saturday|sunday|tomorrow)\b.*?\b(?:at\s+)?(\d{1,2}(?::\d{2})?\s*(?:am|pm)?|one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve)\b",
+            r"\b(monday|tuesday|wednesday|thursday|friday|saturday|sunday|tomorrow)\b(?:\s+(?:at\s+)?(?:\d{1,2}(?::\d{2})?\s*(?:am|pm)?|one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve)|(?:\s+(?:morning|afternoon|evening|noon)))?",
             text_lower,
         )
 
@@ -139,7 +152,7 @@ class MeetingConversionGateEngine:
         if prior_bundle and prior_bundle.speaker_id == "salesperson":
             prior_lower = prior_bundle.utterance_text.lower()
             prop_match = re.search(
-                r"\b(monday|tuesday|wednesday|thursday|friday|saturday|sunday|tomorrow)\b.*?\b(?:at\s+)?(\d{1,2}(?::\d{2})?\s*(?:am|pm)?|one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve)\b",
+                r"\b(monday|tuesday|wednesday|thursday|friday|saturday|sunday|tomorrow)\b(?:\s+(?:at\s+)?(?:\d{1,2}(?::\d{2})?\s*(?:am|pm)?|one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve)|(?:\s+(?:morning|afternoon|evening|noon)))?",
                 prior_lower,
             )
             is_affirmative = (
@@ -838,20 +851,31 @@ class MeetingConversionGateEngine:
                 return previous_event
 
         # ---------------------------------------------------------------------
+        # Walkthrough & Meeting Topic Detection
+        # ---------------------------------------------------------------------
+        walkthrough_patterns = [
+            r"\b(walkthrough|walk\s*through|walk\s+the\s+property|walk\s+the\s+house)\b",
+            r"\bcome\s+(by|over|see)\b",
+            r"\bstop\s+by\b",
+        ]
+        is_walkthrough = any(re.search(pat, text_lower) for pat in walkthrough_patterns)
+
+        # ---------------------------------------------------------------------
         # Salesperson Slot Proposal (State: PROPOSED)
         # ---------------------------------------------------------------------
         if bundle.speaker_id == "salesperson":
             prop_match = re.search(
-                r"\b(monday|tuesday|wednesday|thursday|friday|saturday|sunday|tomorrow)\b.*?\b(?:at\s+)?(\d{1,2}(?::\d{2})?\s*(?:am|pm)?|one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve)\b",
+                r"\b(monday|tuesday|wednesday|thursday|friday|saturday|sunday|tomorrow)\b(?:\s+(?:at\s+)?(?:\d{1,2}(?::\d{2})?\s*(?:am|pm)?|one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve)|(?:\s+(?:morning|afternoon|evening|noon)))?|(?:next\s+week|this\s+week|weekend)",
                 text_lower,
             )
             if prop_match and (previous_event is None or previous_event.status in (ConversionEventStatus.NOT_ATTEMPTED, ConversionEventStatus.ELIGIBLE)):
+                conv_type = "property_walkthrough" if is_walkthrough else "in_person_meeting"
                 return ConversionEventObject(
                     event_id=f"conv_{uuid.uuid4().hex[:8]}",
-                    conversion_type="in_person_meeting",
+                    conversion_type=conv_type,
                     status=ConversionEventStatus.PROPOSED,
                     start_at=prop_match.group(0).strip().title(),
-                    location_or_format="Scheduled Meeting",
+                    location_or_format="Property Address" if is_walkthrough else "Scheduled Meeting",
                     participants=["Agent", "Client"],
                     confirmation_confidence=0.50,
                     source_turn_ids=[bundle.turn_id],
@@ -885,14 +909,12 @@ class MeetingConversionGateEngine:
             )
 
         # ---------------------------------------------------------------------
-        # Spec Acceptance Test #2: Walkthrough confirmation
+        # Walkthrough & Meeting Confirmation / Tentative Agreements
         # ---------------------------------------------------------------------
-        walkthrough_patterns = [
-            r"\b(walkthrough|walk\s*through|walk\s+the\s+property|walk\s+the\s+house)\b",
-            r"\bcome\s+(by|over|see)\b",
-            r"\bstop\s+by\b",
+        meeting_patterns = [
+            r"\b(meet|meeting|consultation|call|schedule|calendar)\b",
         ]
-        is_walkthrough = any(re.search(pat, text_lower) for pat in walkthrough_patterns)
+        is_meeting_topic = any(re.search(pat, text_lower) for pat in meeting_patterns)
 
         # Explicit timing indicators in utterance or facts
         time_patterns = [
@@ -902,7 +924,6 @@ class MeetingConversionGateEngine:
         ]
         has_time = any(re.search(pat, text_lower) for pat in time_patterns)
 
-        # Confirming words
         confirm_patterns = [
             r"\b(?:that\s+works|works\s+for\s+me|this\s+works|it\s+works)\b",
             r"\b(?:sounds\s+good|sounds\s+fair|perfect|let's\s+do\s+it|deal|fine\s+with\s+me|see\s+you\s+then|i'll\s+be\s+there)\b",
@@ -914,30 +935,120 @@ class MeetingConversionGateEngine:
         has_explicit_commit, commit_slot = self.detect_explicit_commitment(bundle, current_state)
         is_confirming = any(re.search(pat, text_lower) for pat in confirm_patterns) or has_explicit_commit
 
-        if (is_walkthrough or (previous_event and previous_event.conversion_type == "property_walkthrough")) and bundle.speaker_id == "client":
-            if (is_confirming and (has_time or (previous_event and previous_event.start_at))) or (is_walkthrough and has_time and is_confirming):
-                time_match = re.search(r"\b(thursday|friday|monday|tuesday|wednesday|tomorrow)\s*(at\s*\d{1,2}(:\d{2})?\s*(am|pm)?)?", text_lower)
-                extracted_time = commit_slot or (time_match.group(0).strip().title() if time_match else None) or (previous_event.start_at if previous_event else None)
+        hedged_patterns = [
+            r"\b(?:could|might)\s+work\b",
+            r"\b(?:could|might)\s+(?:be\s+able\s+to|possibly)\b",
+            r"\bmaybe\b",
+            r"\bperhaps\b",
+            r"\btentative(?:ly)?\b",
+            r"\bpossibly\b",
+            r"\blet\s+me\s+(?:check|see|think)\b",
+            r"\bnot\s+(?:100%|sure|certain)\b",
+            r"\bif\s+(?:that|it)\s+works\b",
+        ]
+        is_hedged = any(re.search(pat, text_lower) for pat in hedged_patterns)
 
-                target_time = extracted_time or "Confirmed Time Slot"
+        time_slot_match = re.search(
+            r"\b(monday|tuesday|wednesday|thursday|friday|saturday|sunday|tomorrow)\b(?:\s+(?:at\s+)?(?:\d{1,2}(?::\d{2})?\s*(?:am|pm)?|one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve)|(?:\s+(?:morning|afternoon|evening|noon)))?|(?:next\s+week|this\s+week|weekend)",
+            text_lower,
+        )
+
+        # ---------------------------------------------------------------------
+        # Case 1: Hedged / Tentative Prospect Response -> TENTATIVE status
+        # ---------------------------------------------------------------------
+        if is_hedged and bundle.speaker_id == "client" and (has_time or is_confirming or previous_event):
+            tentative_slot = (
+                (time_slot_match.group(0).strip().title() if time_slot_match else None)
+                or (previous_event.start_at if previous_event else None)
+                or "Tentative Time Slot"
+            )
+            conv_type = previous_event.conversion_type if previous_event else ("property_walkthrough" if is_walkthrough else "in_person_meeting")
+
+            if previous_event and (
+                previous_event.status in (ConversionEventStatus.PROPOSED, ConversionEventStatus.ELIGIBLE, ConversionEventStatus.CANCELLED)
+                or (previous_event.status == ConversionEventStatus.TENTATIVE and previous_event.start_at and tentative_slot != previous_event.start_at)
+            ):
+                new_event = ConversionEventObject(
+                    event_id=f"conv_{uuid.uuid4().hex[:8]}",
+                    conversion_type=conv_type,
+                    status=ConversionEventStatus.TENTATIVE,
+                    start_at=tentative_slot,
+                    location_or_format="Property Address" if conv_type == "property_walkthrough" else "Scheduled Meeting",
+                    participants=["Client", "Agent"],
+                    confirmation_confidence=0.65,
+                    source_turn_ids=sorted(list(set(previous_event.source_turn_ids + [bundle.turn_id]))),
+                    blocking_items=[],
+                    followup_is_conversion=True,
+                    supersedes_event_id=previous_event.event_id,
+                    reversal_reason="rescheduled" if (previous_event.status == ConversionEventStatus.TENTATIVE and tentative_slot != previous_event.start_at) else None,
+                )
+                previous_event.superseded_by_event_id = new_event.event_id
+                previous_event.superseded_at_turn_id = bundle.turn_id
+                return new_event
+            elif previous_event and previous_event.status == ConversionEventStatus.TENTATIVE:
+                return ConversionEventObject(
+                    event_id=previous_event.event_id,
+                    conversion_type=conv_type,
+                    status=ConversionEventStatus.TENTATIVE,
+                    start_at=tentative_slot,
+                    location_or_format="Property Address" if conv_type == "property_walkthrough" else "Scheduled Meeting",
+                    participants=["Client", "Agent"],
+                    confirmation_confidence=0.65,
+                    source_turn_ids=sorted(list(set(previous_event.source_turn_ids + [bundle.turn_id]))),
+                    blocking_items=[],
+                    followup_is_conversion=True,
+                    supersedes_event_id=previous_event.supersedes_event_id,
+                    reversal_reason=previous_event.reversal_reason,
+                )
+            else:
+                return ConversionEventObject(
+                    event_id=f"conv_{uuid.uuid4().hex[:8]}",
+                    conversion_type=conv_type,
+                    status=ConversionEventStatus.TENTATIVE,
+                    start_at=tentative_slot,
+                    location_or_format="Property Address" if conv_type == "property_walkthrough" else "Scheduled Meeting",
+                    participants=["Client", "Agent"],
+                    confirmation_confidence=0.65,
+                    source_turn_ids=[bundle.turn_id],
+                    blocking_items=[],
+                    followup_is_conversion=True,
+                )
+
+        # ---------------------------------------------------------------------
+        # Case 2: Firm / Unhedged Confirmation from Client -> CONFIRMED status
+        # ---------------------------------------------------------------------
+        if not is_hedged and bundle.speaker_id == "client":
+            is_walkthrough_turn = is_walkthrough or (previous_event and previous_event.conversion_type == "property_walkthrough")
+            confirmed_fact = next((f for f in current_state.facts if f.fact_key == "confirmed_meeting_time" and f.status == "active"), None)
+            has_meeting_confirmation = bool(confirmed_fact) or is_meeting_topic or has_time or (previous_event and previous_event.start_at)
+
+            if (gate.is_open or confirmed_fact or has_explicit_commit) and (is_confirming or is_walkthrough_turn or has_meeting_confirmation):
+                extracted_time = (
+                    commit_slot
+                    or (time_slot_match.group(0).strip().title() if time_slot_match else None)
+                    or (confirmed_fact.fact_value if confirmed_fact else None)
+                    or (previous_event.start_at if previous_event else None)
+                    or "Confirmed Time Slot"
+                )
+                conv_type = "property_walkthrough" if is_walkthrough_turn else (previous_event.conversion_type if previous_event else "in_person_meeting")
 
                 if previous_event and (
                     previous_event.status in (ConversionEventStatus.PROPOSED, ConversionEventStatus.TENTATIVE, ConversionEventStatus.ELIGIBLE, ConversionEventStatus.CANCELLED)
-                    or (previous_event.status == ConversionEventStatus.CONFIRMED and previous_event.start_at and target_time != previous_event.start_at)
+                    or (previous_event.status == ConversionEventStatus.CONFIRMED and previous_event.start_at and extracted_time != previous_event.start_at)
                 ):
                     new_event = ConversionEventObject(
                         event_id=f"conv_{uuid.uuid4().hex[:8]}",
-                        conversion_type="property_walkthrough",
+                        conversion_type=conv_type,
                         status=ConversionEventStatus.CONFIRMED,
-                        start_at=target_time,
-                        location_or_format="Property Address",
+                        start_at=extracted_time,
+                        location_or_format="Property Address" if conv_type == "property_walkthrough" else "Scheduled Meeting",
                         participants=["Client", "Agent"],
                         confirmation_confidence=0.90,
                         source_turn_ids=sorted(list(set(previous_event.source_turn_ids + [bundle.turn_id]))),
                         blocking_items=[],
                         followup_is_conversion=True,
                         supersedes_event_id=previous_event.event_id,
-                        reversal_reason="rescheduled" if (previous_event.status == ConversionEventStatus.CONFIRMED and target_time != previous_event.start_at) else None,
+                        reversal_reason="rescheduled" if (previous_event.status == ConversionEventStatus.CONFIRMED and extracted_time != previous_event.start_at) else None,
                     )
                     previous_event.superseded_by_event_id = new_event.event_id
                     previous_event.superseded_at_turn_id = bundle.turn_id
@@ -945,10 +1056,10 @@ class MeetingConversionGateEngine:
                 elif previous_event and previous_event.status == ConversionEventStatus.CONFIRMED:
                     return ConversionEventObject(
                         event_id=previous_event.event_id,
-                        conversion_type="property_walkthrough",
+                        conversion_type=conv_type,
                         status=ConversionEventStatus.CONFIRMED,
-                        start_at=target_time,
-                        location_or_format="Property Address",
+                        start_at=extracted_time,
+                        location_or_format="Property Address" if conv_type == "property_walkthrough" else "Scheduled Meeting",
                         participants=["Client", "Agent"],
                         confirmation_confidence=0.90,
                         source_turn_ids=sorted(list(set(previous_event.source_turn_ids + [bundle.turn_id]))),
@@ -960,10 +1071,10 @@ class MeetingConversionGateEngine:
                 else:
                     return ConversionEventObject(
                         event_id=f"conv_{uuid.uuid4().hex[:8]}",
-                        conversion_type="property_walkthrough",
+                        conversion_type=conv_type,
                         status=ConversionEventStatus.CONFIRMED,
-                        start_at=target_time,
-                        location_or_format="Property Address",
+                        start_at=extracted_time,
+                        location_or_format="Property Address" if conv_type == "property_walkthrough" else "Scheduled Meeting",
                         participants=["Client", "Agent"],
                         confirmation_confidence=0.90,
                         source_turn_ids=[bundle.turn_id],
@@ -972,84 +1083,10 @@ class MeetingConversionGateEngine:
                     )
 
         # ---------------------------------------------------------------------
-        # Meeting Confirmation (General Consultation / Appointment)
-        # ---------------------------------------------------------------------
-        meeting_patterns = [
-            r"\b(meet|meeting|consultation|call|schedule|calendar)\b",
-        ]
-        is_meeting_topic = any(re.search(pat, text_lower) for pat in meeting_patterns)
-
-        confirmed_fact = next((f for f in current_state.facts if f.fact_key == "confirmed_meeting_time" and f.status == "active"), None)
-        has_meeting_confirmation = bool(confirmed_fact) or is_meeting_topic or has_time
-
-        if (gate.is_open or confirmed_fact) and is_confirming and has_meeting_confirmation:
-            time_match = re.search(
-                r"\b(monday|tuesday|wednesday|thursday|friday|saturday|sunday|tomorrow)\b.*?\b(?:at\s+)?(\d{1,2}(?::\d{2})?\s*(?:am|pm)?|one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve)\b",
-                text_lower,
-            )
-            extracted_slot = (
-                (time_match.group(0).strip().title() if time_match else None)
-                or (confirmed_fact.fact_value if confirmed_fact else None)
-                or (previous_event.start_at if previous_event else None)
-                or (has_time and "Confirmed Window")
-                or "Confirmed Time Slot"
-            )
-
-            if previous_event and (
-                previous_event.status in (ConversionEventStatus.PROPOSED, ConversionEventStatus.TENTATIVE, ConversionEventStatus.ELIGIBLE, ConversionEventStatus.CANCELLED)
-                or (previous_event.status == ConversionEventStatus.CONFIRMED and previous_event.start_at and extracted_slot != previous_event.start_at)
-            ):
-                new_event = ConversionEventObject(
-                    event_id=f"conv_{uuid.uuid4().hex[:8]}",
-                    conversion_type="in_person_meeting",
-                    status=ConversionEventStatus.CONFIRMED,
-                    start_at=extracted_slot,
-                    location_or_format="Scheduled Meeting",
-                    participants=["Client", "Agent"],
-                    confirmation_confidence=0.85,
-                    source_turn_ids=sorted(list(set(previous_event.source_turn_ids + [bundle.turn_id]))),
-                    blocking_items=[],
-                    followup_is_conversion=True,
-                    supersedes_event_id=previous_event.event_id,
-                    reversal_reason="rescheduled" if (previous_event.status == ConversionEventStatus.CONFIRMED and extracted_slot != previous_event.start_at) else None,
-                )
-                previous_event.superseded_by_event_id = new_event.event_id
-                previous_event.superseded_at_turn_id = bundle.turn_id
-                return new_event
-            elif previous_event and previous_event.status == ConversionEventStatus.CONFIRMED:
-                return ConversionEventObject(
-                    event_id=previous_event.event_id,
-                    conversion_type="in_person_meeting",
-                    status=ConversionEventStatus.CONFIRMED,
-                    start_at=extracted_slot,
-                    location_or_format="Scheduled Meeting",
-                    participants=["Client", "Agent"],
-                    confirmation_confidence=0.85,
-                    source_turn_ids=sorted(list(set(previous_event.source_turn_ids + [bundle.turn_id]))),
-                    blocking_items=[],
-                    followup_is_conversion=True,
-                    supersedes_event_id=previous_event.supersedes_event_id,
-                    reversal_reason=previous_event.reversal_reason,
-                )
-            else:
-                return ConversionEventObject(
-                    event_id=f"conv_{uuid.uuid4().hex[:8]}",
-                    conversion_type="in_person_meeting",
-                    status=ConversionEventStatus.CONFIRMED,
-                    start_at=extracted_slot,
-                    location_or_format="Scheduled Meeting",
-                    participants=["Client", "Agent"],
-                    confirmation_confidence=0.85,
-                    source_turn_ids=[bundle.turn_id],
-                    blocking_items=[],
-                    followup_is_conversion=True,
-                )
-
-        # ---------------------------------------------------------------------
         # If gate is open but no explicit confirmation turn yet, state is eligible
         # ---------------------------------------------------------------------
         if gate.is_open:
-            if previous_event and previous_event.status in (ConversionEventStatus.CONFIRMED, ConversionEventStatus.PROPOSED):
+            if previous_event and previous_event.status in (ConversionEventStatus.CONFIRMED, ConversionEventStatus.TENTATIVE, ConversionEventStatus.PROPOSED):
                 return previous_event
             return ConversionEventObject(
                 event_id=previous_event.event_id if previous_event else f"conv_{uuid.uuid4().hex[:8]}",
@@ -1068,22 +1105,25 @@ class MeetingConversionGateEngine:
         # Gate is closed
         # ---------------------------------------------------------------------
         if previous_event:
-            if previous_event.status in (ConversionEventStatus.CONFIRMED, ConversionEventStatus.CANCELLED):
+            if previous_event.status == ConversionEventStatus.CANCELLED:
                 return previous_event
-            return ConversionEventObject(
-                event_id=previous_event.event_id,
-                conversion_type=previous_event.conversion_type,
-                status=ConversionEventStatus.BLOCKED,
-                start_at=previous_event.start_at,
-                location_or_format=previous_event.location_or_format,
-                participants=previous_event.participants,
-                confirmation_confidence=previous_event.confirmation_confidence if previous_event.status == ConversionEventStatus.CONFIRMED else 0.20,
-                source_turn_ids=sorted(list(set(previous_event.source_turn_ids + [bundle.turn_id]))),
-                blocking_items=gate.blocking_reasons,
-                followup_is_conversion=previous_event.followup_is_conversion,
-                supersedes_event_id=previous_event.supersedes_event_id,
-                superseded_by_event_id=previous_event.superseded_by_event_id,
-                reversal_reason=previous_event.reversal_reason,
-            )
+            # If previous event was TENTATIVE, PROPOSED, or ELIGIBLE and gate is closed:
+            # Transition to BLOCKED because safety gate conditions are failing
+            if previous_event.status in (ConversionEventStatus.TENTATIVE, ConversionEventStatus.PROPOSED, ConversionEventStatus.ELIGIBLE):
+                return ConversionEventObject(
+                    event_id=previous_event.event_id,
+                    conversion_type=previous_event.conversion_type,
+                    status=ConversionEventStatus.BLOCKED,
+                    start_at=previous_event.start_at,
+                    location_or_format=previous_event.location_or_format,
+                    participants=previous_event.participants,
+                    confirmation_confidence=0.20,
+                    source_turn_ids=sorted(list(set(previous_event.source_turn_ids + [bundle.turn_id]))),
+                    blocking_items=gate.blocking_reasons,
+                    followup_is_conversion=previous_event.followup_is_conversion,
+                    supersedes_event_id=previous_event.supersedes_event_id,
+                    superseded_by_event_id=previous_event.superseded_by_event_id,
+                    reversal_reason=previous_event.reversal_reason,
+                )
 
         return None

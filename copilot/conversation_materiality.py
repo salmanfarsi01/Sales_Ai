@@ -9,7 +9,7 @@ from pydantic import BaseModel, Field
 
 from .conversation_state_contract import BehavioralSignalInputBundle
 from .conversation_state_models import ConversationStateSnapshot
-from .conversation_objections import CANONICAL_OBJECTION_PATTERNS, DECISION_TO_STAY_PATTERNS
+from .conversation_objections import CANONICAL_OBJECTION_PATTERNS, DECISION_TO_STAY_PATTERNS, classify_objection_label, is_decision_authority_statement
 from .behavioral_semantic import HARD_BOUNDARY_PATTERNS, SOFT_PREFERENCE_PATTERNS
 
 LOGGER = logging.getLogger("copilot.conversation_materiality")
@@ -154,6 +154,13 @@ class MaterialityFilter:
             forced_targets.add("objections")
             forced_reasons.append("Deterministic Override: salesperson_strategy_tag requires objections.")
 
+        # 3b. Client Canonical Objection Expression Overrides
+        if bundle.speaker_id == "client" and not is_decision_authority_statement(bundle.utterance_text):
+            obj_label = classify_objection_label(bundle.utterance_text)
+            if obj_label:
+                forced_targets.update(["objections", "dimensions"])
+                forced_reasons.append(f"Deterministic Override: client expressed canonical objection ({obj_label}).")
+
         # 4. Explicit Payload Fact Updates Overrides
         if has_explicit_fact_updates:
             forced_targets.add("facts")
@@ -192,10 +199,23 @@ class MaterialityFilter:
             r"\bnever\s+mind\s+about\s+(?:the\s+)?(?:fee|commission)\b",
             r"\bready\s+to\s+(?:sell|move\s+forward|list|go)\s+now\b",
             r"\bnot\s+worried\s+about\s+(?:timing|the\s+market|rates)\b",
+            r"\b(?:timing|market)\s+(?:isn't|is\s+not)\s+(?:the\s+biggest\s+|an?\s+)?issue\b",
+            r"\b(?:makes?\s+sense|fair\s+enough)\b.*?\b(?:timing|wait|now)\b",
+            r"\btiming\s+isn't\s+the\s+biggest\s+issue\b",
         ]
         if bundle.speaker_id == "client" and any(re.search(p, bundle.utterance_text.lower()) for p in objection_reversal_markers):
             forced_targets.update(["objections", "dimensions"])
             forced_reasons.append("Deterministic Override: client explicit objection reversal / withdrawal.")
+
+        # 5e. Client Tentative Timeline & Scheduling Disclosures
+        tentative_timeline_patterns = [
+            r"\b(?:sometime\s+next\s+year|moving\s+next\s+year|look\s+at\s+moving|next\s+year|nothing\s+urgent)\b",
+            r"\b(?:maybe\s+next\s+week|sometime\s+next\s+week|next\s+week\s+could\s+work|think\s+about\s+it)\b",
+            r"\b(?:mornings?\s+(?:don['’]?t|do\s+not)\s+(?:really\s+)?work|afternoons?\s+(?:only|preferred|work\s+better))\b",
+        ]
+        if bundle.speaker_id == "client" and any(re.search(p, bundle.utterance_text.lower()) for p in tentative_timeline_patterns):
+            forced_targets.add("facts")
+            forced_reasons.append("Deterministic Override: client timeline or scheduling availability disclosure.")
 
         # 6. Behavioral & Acoustic Shifts (Client Principle #3: Dimension Stability & Materiality Gating)
         # Protect dimension sync: If upstream inference in bundle meaningfully diverges

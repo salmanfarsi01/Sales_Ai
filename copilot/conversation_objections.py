@@ -74,6 +74,10 @@ CANONICAL_OBJECTION_PATTERNS: Dict[str, List[str]] = {
         r"\b(?:just\s+)?not\s+(?:completely\s+)?sure\b",
         r"\b(?:don['’]?t\s+think|not\s+thinking)\s+(?:it['’]?s\s+|it\s+is\s+)?(?:the\s+)?(?:right|good)\s+time\b",
         r"\b(?:too\s+much\s+(?:stress|clutter|work|hassle|packing)|overwhelm(?:ed|ing)?)\b",
+        r"\b(?:worried|concerned|nervous)\b.*?\b(?:right\s+move|good\s+idea|financially|sell(?:ing)?|mov(?:e|ing))\b",
+        r"\bnot\s+(?:really\s+)?(?:the\s+)?right\s+move\b",
+        r"\bworried\s+(?:this\s+)?(?:isn['’]?t|is\s+not)\b",
+        r"\bworried\b.*?\bfinancially\b",
     ],
 }
 
@@ -335,7 +339,7 @@ class ObjectionLifecycleEngine:
             if not target_obj and self.active_focus_objection_id:
                 target_obj = self.get_objection_by_id(self.active_focus_objection_id)
             if not target_obj:
-                target_obj = next((o for o in reversed(self._objections) if o.lifecycle_state in ("unresolved", "clarified", "partially_resolved", "reactivated")), None)
+                target_obj = next((o for o in reversed(self._objections) if o.lifecycle_state in ("active", "unresolved", "clarified", "partially_resolved", "reactivated", ObjectionLifecycleState.ACTIVE)), None)
 
             if target_obj:
                 self.active_focus_objection_id = target_obj.objection_id
@@ -464,7 +468,7 @@ class ObjectionLifecycleEngine:
 
                 # Dormant concern resurfacing -> Reactivated to ACTIVE
                 if matched_obj.lifecycle_state in (ObjectionLifecycleState.DORMANT, "dormant"):
-                    old_state = matched_obj.lifecycle_state
+                    old_state = getattr(matched_obj.lifecycle_state, "value", matched_obj.lifecycle_state)
                     matched_obj.lifecycle_state = ObjectionLifecycleState.ACTIVE
                     matched_obj.latest_statement = bundle.utterance_text
                     matched_obj.recurrence_count += 1
@@ -483,10 +487,10 @@ class ObjectionLifecycleEngine:
                             timestamp_ms=bundle.timestamp_ms,
                         )
                     )
-                # Client Principle #5: Previously RESOLVED objection returns -> REACTIVATED / ACTIVE
-                elif matched_obj.lifecycle_state == "resolved":
-                    old_state = matched_obj.lifecycle_state
-                    matched_obj.lifecycle_state = ObjectionLifecycleState.ACTIVE
+                # Client Principle #5: Previously RESOLVED objection returns -> REACTIVATED
+                elif matched_obj.lifecycle_state in (ObjectionLifecycleState.RESOLVED, "resolved"):
+                    old_state = getattr(matched_obj.lifecycle_state, "value", matched_obj.lifecycle_state)
+                    matched_obj.lifecycle_state = ObjectionLifecycleState.REACTIVATED
                     matched_obj.latest_statement = bundle.utterance_text
                     matched_obj.recurrence_count += 1
                     matched_obj.last_updated_turn_id = bundle.turn_id
@@ -497,7 +501,7 @@ class ObjectionLifecycleEngine:
                             state_version_after=next_version,
                             field_path=f"objections.{matched_obj.objection_id}.lifecycle_state",
                             old_value=old_state,
-                            new_value=ObjectionLifecycleState.ACTIVE.value,
+                            new_value=ObjectionLifecycleState.REACTIVATED.value,
                             triggering_turn_id=bundle.turn_id,
                             evidence_ids=bundle.contributing_evidence_ids,
                             reason=f"Resolved objection '{matched_obj.canonical_category}' reactivated by prospect (recurrence #{matched_obj.recurrence_count}).",
@@ -689,7 +693,7 @@ class ObjectionLifecycleEngine:
         is_stay_or_cancel = any(re.search(p, bundle.utterance_text.lower()) for p in DECISION_TO_STAY_PATTERNS)
         if is_stay_or_cancel:
             for active_o in list(self._objections):
-                if active_o.lifecycle_state in ("unresolved", "clarified", "partially_resolved", "reactivated"):
+                if active_o.lifecycle_state in ("active", "unresolved", "clarified", "partially_resolved", "reactivated", ObjectionLifecycleState.ACTIVE):
                     old_s = active_o.lifecycle_state
                     active_o.lifecycle_state = "superseded"
                     active_o.superseded_by_objection_id = "decision_to_stay"
@@ -719,18 +723,28 @@ class ObjectionLifecycleEngine:
             else self.get_objection_by_id(self.active_focus_objection_id)
         )
 
-        if target_obj and target_obj.lifecycle_state in ("unresolved", "clarified", "partially_resolved", "reactivated"):
+        if target_obj and target_obj.lifecycle_state in ("active", "unresolved", "clarified", "partially_resolved", "reactivated", ObjectionLifecycleState.ACTIVE):
             # Check for FULL RESOLUTION (Scoped specifically to this targeted objection)
             # Requires forward behavioral commitment on this topic (agreement >= 0.75 or future_language >= 0.60)
+            # OR explicit concession/reversal by prospect
+            concession_detected = bool(re.search(
+                r"\b(?:timing|the\s+timing|fee|commission)\s+(?:isn't|is\s+not)\s+(?:the\s+biggest\s+|an?\s+)?issue\b",
+                bundle.utterance_text.lower(),
+            )) or bool(re.search(
+                r"\b(?:that\s+makes\s+sense|fair\s+enough|okay\s+that\s+makes\s+sense)\b.*?\b(?:timing|market|fee|not\s+an\s+issue|isn't\s+the\s+biggest\s+issue)\b",
+                bundle.utterance_text.lower(),
+            ))
+
             is_scoped_resolution = (
                 bundle.agreement_score >= 0.75
                 or bundle.future_language_score >= 0.60
                 or (bundle.readiness.score >= 0.70 and bundle.agreement_score >= 0.65)
+                or concession_detected
             ) and bundle.boundary_score < 0.20
 
             if is_scoped_resolution:
-                old_state = target_obj.lifecycle_state
-                target_obj.lifecycle_state = "resolved"
+                old_state = getattr(target_obj.lifecycle_state, "value", target_obj.lifecycle_state)
+                target_obj.lifecycle_state = ObjectionLifecycleState.RESOLVED
                 target_obj.last_updated_turn_id = bundle.turn_id
                 target_obj.resolution_evidence = (
                     f"Turn {bundle.turn_id} showed prospect behavioral advance responding to '{target_obj.canonical_category}' "
@@ -755,7 +769,7 @@ class ObjectionLifecycleEngine:
                         state_version_after=next_version,
                         field_path=f"objections.{target_obj.objection_id}.lifecycle_state",
                         old_value=old_state,
-                        new_value="resolved",
+                        new_value=ObjectionLifecycleState.RESOLVED.value,
                         triggering_turn_id=bundle.turn_id,
                         evidence_ids=bundle.contributing_evidence_ids,
                         reason=f"Objection '{target_obj.canonical_category}' resolved: {target_obj.resolution_evidence}",
@@ -766,16 +780,19 @@ class ObjectionLifecycleEngine:
 
             # Check for PARTIAL RESOLUTION (Prospect Acceptance Required!)
             # Requires positive prospect acknowledgement (agreement >= 0.40) following an agent reframe,
-            # but without full forward resolution commitment.
+            # or process curiosity/openness, but without full forward resolution commitment.
             is_partial_acceptance = (
                 self.pending_reframe_objection_id == target_obj.objection_id
-                and bundle.agreement_score >= 0.40
+                and (
+                    bundle.agreement_score >= 0.40
+                    or any(w in bundle.utterance_text.lower() for w in ["really helpful", "that's helpful", "tell me more", "how does the", "makes sense"])
+                )
                 and bundle.boundary_score < 0.20
             )
 
             if is_partial_acceptance:
-                old_state = target_obj.lifecycle_state
-                target_obj.lifecycle_state = "partially_resolved"
+                old_state = getattr(target_obj.lifecycle_state, "value", target_obj.lifecycle_state)
+                target_obj.lifecycle_state = ObjectionLifecycleState.PARTIALLY_RESOLVED
                 target_obj.last_updated_turn_id = bundle.turn_id
                 strategy_used = self.pending_reframe_strategy or "agent reframe"
                 if self.pending_reframe_strategy:
@@ -797,7 +814,7 @@ class ObjectionLifecycleEngine:
                         state_version_after=next_version,
                         field_path=f"objections.{target_obj.objection_id}.lifecycle_state",
                         old_value=old_state,
-                        new_value="partially_resolved",
+                        new_value=ObjectionLifecycleState.PARTIALLY_RESOLVED.value,
                         triggering_turn_id=bundle.turn_id,
                         evidence_ids=bundle.contributing_evidence_ids,
                         reason=(
@@ -861,7 +878,7 @@ class ObjectionLifecycleEngine:
                 "reactivated",
             ):
                 if o.last_updated_turn_id < current_turn_id and (current_turn_id - o.last_updated_turn_id) >= self.dormancy_turn_threshold:
-                    old_s = o.lifecycle_state
+                    old_s = getattr(o.lifecycle_state, "value", o.lifecycle_state)
                     o.lifecycle_state = ObjectionLifecycleState.DORMANT
                     next_version += 1
                     changes.append(
