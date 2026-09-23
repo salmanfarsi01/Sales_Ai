@@ -1,0 +1,26 @@
+<USER_REQUEST>
+Good — that closes #2 and #3 cleanly, and the before/after diff on turns 15/16 matches exactly what the client asked for (no more objection-flavored reasoning, no more "objections" in affected_targets, zero objection lifecycle writes). The test_mixed_canonical_objection_with_soft_preference and test_explicit_meeting_resistance_remains_objection cases are the right guardrails — they prove you didn't just blanket-suppress objection detection, you actually disambiguated it.
+
+Two things worth double-checking before you move on, since they feed directly into #4/#5:
+
+Re-run the full 18-turn replay end-to-end, not just the unit tests on turns 15/16 in isolation. Turn 17's dormancy transition ("transitioned to DORMANT after 3 turns without mention") was counting from turn 14 (last objection mention) to turn 17. Since turns 15/16 no longer touch objections at all, that 3-turn gap should be unaffected — but confirm it, because if your dormancy counter was previously incrementing off of any turn touching objections.* fields rather than off the objection's own last_updated_turn_id, removing turns 15/16 from that set could silently change the count.
+Check momentum.family_scores.objection_movement across turns 15–18 in the new replay. Previously those turns were (incorrectly) counted as objection-dynamics turns; now that they're not, verify objection_movement isn't computed differently (e.g. dropping to a different value because it was implicitly using turn count/frequency of objections-tagged turns as an input). You want this fix to only remove noise, not accidentally change the momentum math ahead of tackling #5.
+
+If both check out, you're clear to move to #4 (dormancy logic) next, since it's the next-cheapest fix and has no schema dependency — then #1 (stage field, bigger addition) — then #5 (momentum weighting, which should key off the new stage field) — then #6 (header/report layer) last.
+</USER_REQUEST>
+<ADDITIONAL_METADATA>
+The current local time is: 2026-09-23T09:27:45+06:00.
+
+The user's current state is as follows:
+Active Document: c:\dev\Sales_Ai\run_behavioral_signal.py (LANGUAGE_PYTHON)
+Cursor is on line: 24
+Other open documents:
+- c:\dev\Sales_Ai\run_behavioral_signal.py (LANGUAGE_PYTHON)
+- c:\dev\Sales_Ai\reports\synthetic\conversation_state_sim_mucj0p5s.json (LANGUAGE_JSON)
+- c:\dev\clients_requirement(220826).md (LANGUAGE_MARKDOWN)
+- c:\dev\clients_requirement (220926).md (LANGUAGE_MARKDOWN)
+- c:\dev\Sales_Ai\reports\synthetic\conversation_state_sim_mucf8kl0.json (LANGUAGE_JSON)
+Running terminal commands:
+- Python .\run_behavioral_signal.py (in c:\dev\Sales_Ai, running for 17h5m18s)
+- ngrok http 5002 (in c:\dev\Sales_Ai, running for 16h18m33s)
+</ADDITIONAL_METADATA>

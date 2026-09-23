@@ -1,0 +1,41 @@
+<USER_REQUEST>
+The main finding: semantic features aren't actually being aggregated per window — they're being copied
+
+Look closely at contributing_utterance_ids across the five horizons: current_utterance has 1 utterance, last_5_10s has 3, last_20_30s has 6, last_60_90s has 11, full_call has 11. That's correct — the timing aggregation genuinely scales with each window's actual time span, exactly as Phase 5 was designed to do.
+
+But the semantic_features block attached to every single one of those five windows is byte-for-byte identical: specificity_score: 0.6, future_language_score: 0.3, boundary_score: 0, agreement_score: 0.1, same question_type, same confidence values, all five times. That's not five different aggregations reflecting five different sets of utterances — it's the single latest utterance's semantic snapshot, copy-pasted onto every window regardless of how many turns that window actually spans.
+
+Why this matters concretely: Spec 07 Section 8's entire premise is that the same underlying signal should read differently at different horizons — "one long pause is local evidence; repeated longer pauses across several minutes are a stronger pattern." That premise depends on semantic evidence (especially recurrence_type) actually accumulating across a window's utterances, not just reflecting whichever utterance happened most recently. As currently structured: if an objection got raised 4 turns ago and is still well within the last_60_90s window, the moment the next turn comes in without that objection, recurrence_type on every window resets to whatever that newest turn says — meaning a real, still-relevant recurring concern would vanish from the evidence the instant a new turn occurs, even though it's still temporally "within" the 60-90s window that's supposed to be tracking it.
+
+Direct question to send back: is semantic_features on each BehavioralEvidenceSnapshot meant to represent an aggregate of all contributing utterances in that window, or is it deliberately designed to only carry the triggering/latest utterance's classification, with recurrence tracked separately elsewhere (e.g., purely inside BaselineAndChangePointEngine's own state, independent of the evidence-frame snapshot)? If it's the latter by design, that's actually fine — but then contributing_utterance_ids scaling up to 11 while semantic_features stays frozen at 1 utterance's worth of data is a confusing mismatch in the object's own shape, and worth a comment explaining why. If it's a gap, this is worth fixing before Phase 5/6 can be trusted to actually deliver the multi-horizon behavior the spec describes.
+
+Three smaller things worth noting
+
+1. The lower utt_split=0.5 traded one problem for a smaller one. Turn 7 ("...sitting behind this") and Turn 8 ("case.") are clearly one sentence split awkwardly by a natural mid-sentence breath. Same with Turn 11 ("So") being its own turn before Turn 12's actual question. This fixed the "one giant 54-second turn" problem, but now produces occasional single-word fragment turns from normal breathing pauses, not genuine backchannels. Worth checking: are these 1-word fragments ("case.", "So") correctly caught by the short-turn guards (excluded from turn_length_words/speech_rate_wpm baseline pollution), and are they each triggering a separate Groq call for a meaningless one-word "turn" — burning latency/cost on fragments that don't need semantic classification at all?
+
+2. Real ASR error worth knowing about, not fixing: Turn 5 transcribed "We are not in Russia exactly" — the actual words spoken were almost certainly "we are not in a rush exactly." This is Deepgram mishearing, not a bug in your pipeline, but it's a good real-world reminder that semantic scoring is only as good as the transcript it receives — worth keeping an eye on whether stray misrecognitions like this ever accidentally inflate specificity_score (e.g., "Russia" reading as a named entity) in future tests.
+
+3. The baseline: calibrating (turn 12/3) label is misleading. You're already at 11 processed turns and 121 words — both well past the ≥3 turns and ≥15 words thresholds. The only reason it hasn't locked is elapsed_ms (54.4s) hasn't reached 60s yet. The label makes it look like turn count is the blocker, when it's actually just time. Worth changing the UI to show something like "calibrating — 54s/60s elapsed" so it's clear which of the three conditions is actually still pending.
+
+What looks correctly reasoned
+Trust 70%, Readiness 30% — sensible for a rapport-building disclosure phase with no commitment language yet
+Engagement 95%, driven by 100% talk share, 2.3 questions/min, and disclosed specifics — matches the content
+boundary_score: 0, acoustic_evidence: "unavailable" throughout — correct
+response_latency_ms: null — correctly absent, since there's no second speaker yet
+</USER_REQUEST>
+<ADDITIONAL_METADATA>
+The current local time is: 2026-09-12T10:21:51+06:00.
+
+The user's current state is as follows:
+Active Document: c:\dev\Sales_Ai\copilot\behavioral_baseline.py (LANGUAGE_PYTHON)
+Cursor is on line: 1
+Other open documents:
+- c:\dev\Sales_Ai\Behavioral_Signal_Engine_Implementation_Plan.md (LANGUAGE_MARKDOWN)
+- c:\dev\Sales_Ai\requirements.txt (LANGUAGE_UNSPECIFIED)
+- c:\dev\Sales_Ai\copilot\behavioral_baseline.py (LANGUAGE_PYTHON)
+- c:\dev\Sales_Ai\web\behavioral_test.html (LANGUAGE_HTML)
+- c:\dev\Sales_Ai\run_behavioral_signal.py (LANGUAGE_PYTHON)
+Running terminal commands:
+- python run_behavioral_signal.py
+ (in c:\dev\Sales_Ai, running for 6m18s)
+</ADDITIONAL_METADATA>

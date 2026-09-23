@@ -883,8 +883,14 @@ class ObjectionLifecycleEngine:
         timestamp_ms: int,
         current_version: int,
         contributing_evidence_ids: List[str],
+        state: Optional[Any] = None,
+        recent_bundles: Optional[List[Any]] = None,
     ) -> tuple[List[ObjectionRecord], List[StateChangeRecord], int]:
-        """Ages active or partially addressed concerns unmentioned for >= 3 turns into DORMANT."""
+        """Ages active or partially addressed concerns unmentioned for >= 3 turns into DORMANT
+        ONLY IF corroborating evidence exists (supersession, stage transition, behavioral resolution,
+        or blocker supersession). Silence alone is not resolution.
+        """
+        from .conversation_materiality import _get_dormancy_evidence
         changes: List[StateChangeRecord] = []
         next_version = current_version
         for o in self._objections:
@@ -898,21 +904,36 @@ class ObjectionLifecycleEngine:
                 "partially_resolved",
                 "reactivated",
             ):
-                if o.last_updated_turn_id < current_turn_id and (current_turn_id - o.last_updated_turn_id) >= self.dormancy_turn_threshold:
-                    old_s = getattr(o.lifecycle_state, "value", o.lifecycle_state)
-                    o.lifecycle_state = ObjectionLifecycleState.DORMANT
-                    next_version += 1
-                    changes.append(
-                        StateChangeRecord(
-                            state_version_before=next_version - 1,
-                            state_version_after=next_version,
-                            field_path=f"objections.{o.objection_id}.lifecycle_state",
-                            old_value=old_s,
-                            new_value=ObjectionLifecycleState.DORMANT.value,
-                            triggering_turn_id=current_turn_id,
-                            evidence_ids=contributing_evidence_ids,
-                            reason=f"Concern '{o.canonical_category}' transitioned to DORMANT after {current_turn_id - o.last_updated_turn_id} turns without mention.",
-                            timestamp_ms=timestamp_ms,
-                        )
+                delta = current_turn_id - o.last_updated_turn_id
+                # Pre-filter: delta >= threshold (unless superseded)
+                if delta < self.dormancy_turn_threshold and not getattr(o, "superseded_by_objection_id", None):
+                    continue
+
+                evidence = _get_dormancy_evidence(
+                    objection=o,
+                    state=state,
+                    current_turn_id=current_turn_id,
+                    recent_bundles=recent_bundles,
+                )
+                if evidence is None:
+                    # Silence is not resolution: stays in current lifecycle state
+                    continue
+
+                old_s = getattr(o.lifecycle_state, "value", o.lifecycle_state)
+                o.lifecycle_state = ObjectionLifecycleState.DORMANT
+                o.dormancy_evidence = evidence
+                next_version += 1
+                changes.append(
+                    StateChangeRecord(
+                        state_version_before=next_version - 1,
+                        state_version_after=next_version,
+                        field_path=f"objections.{o.objection_id}.lifecycle_state",
+                        old_value=old_s,
+                        new_value=ObjectionLifecycleState.DORMANT.value,
+                        triggering_turn_id=current_turn_id,
+                        evidence_ids=contributing_evidence_ids,
+                        reason=f"Concern '{o.canonical_category}' transitioned to DORMANT: {evidence.description} ({delta} turns since last mention).",
+                        timestamp_ms=timestamp_ms,
                     )
+                )
         return self._objections, changes, next_version

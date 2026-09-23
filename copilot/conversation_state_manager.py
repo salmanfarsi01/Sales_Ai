@@ -20,12 +20,20 @@ from .conversation_state_models import (
     DealDispositionType,
     DealDispositionRecord,
     ObjectionLifecycleState,
+    ObjectionRecord,
+    DormancyEvidence,
 )
 from .behavioral_semantic import extract_structured_contact_preference, HARD_BOUNDARY_PATTERNS
 from .conversation_facts import PersistentFactsManager
 from .conversation_objections import ObjectionLifecycleEngine, DECISION_TO_STAY_PATTERNS
 from .conversation_supersession import TruthSupersessionDetector
-from .conversation_materiality import MaterialityFilter, ABSENT_DECISION_MAKER_PATTERNS, PRESENCE_CONFIRMATION_PATTERNS
+from .conversation_materiality import (
+    MaterialityFilter,
+    MaterialityClassification,
+    ABSENT_DECISION_MAKER_PATTERNS,
+    PRESENCE_CONFIRMATION_PATTERNS,
+    _get_dormancy_evidence,
+)
 from .conversation_scoring import ConversationScoringEngine
 from .conversation_scoring_config import ConversationScoringConfig
 from .conversation_conversion_config import ConversionBlockingConfig, DEFAULT_CONVERSION_BLOCKING_CONFIG
@@ -68,6 +76,7 @@ class ConversationStateManager:
             blocking_config=self.blocking_config,
         )
         self.prior_bundle: Optional[BehavioralSignalInputBundle] = None
+        self._bundle_history: List[BehavioralSignalInputBundle] = []
         self.has_prospect_spoken: bool = False
         self._conversion_events: List[ConversionEventObject] = list(self.current_state.conversion_events)
         if self.current_state.conversion_event and not any(e.event_id == self.current_state.conversion_event.event_id for e in self._conversion_events):
@@ -78,6 +87,7 @@ class ConversationStateManager:
         if self.deal_disposition and not any(d.disposition_id == self.deal_disposition.disposition_id for d in self._deal_dispositions):
             self._deal_dispositions.append(self.deal_disposition)
         self.current_state.deal_dispositions = list(self._deal_dispositions)
+        self.last_materiality: Optional[MaterialityClassification] = None
 
     def process_turn_bundle(
         self,
@@ -91,6 +101,7 @@ class ConversationStateManager:
             self.conversion_target = conversion_target
         if bundle.speaker_id == "client":
             self.has_prospect_spoken = True
+        self._bundle_history.append(bundle)
         # Stale-write protection (Client Principle #9)
         # 1. Strictly reject turns with turn_id older than latest processed turn
         if bundle.turn_id < self.current_state.last_updated_turn_id:
@@ -117,6 +128,7 @@ class ConversationStateManager:
             has_explicit_fact_updates=bool(fact_updates),
             prior_bundle=self.prior_bundle,
         )
+        self.last_materiality = materiality
 
         changes: List[StateChangeRecord] = []
         old_version = self.current_state.state_version
@@ -125,7 +137,11 @@ class ConversationStateManager:
         dormancy_thresh = getattr(self.objections_engine, "dormancy_turn_threshold", 3)
         dormant_due = any(
             o.lifecycle_state in ("active", "partially_addressed", "unresolved", "reactivated", ObjectionLifecycleState.ACTIVE, ObjectionLifecycleState.PARTIALLY_ADDRESSED)
-            and (bundle.turn_id - o.last_updated_turn_id) >= dormancy_thresh
+            and (
+                (bundle.turn_id - o.last_updated_turn_id) >= dormancy_thresh
+                or getattr(o, "superseded_by_objection_id", None) is not None
+            )
+            and _get_dormancy_evidence(o, self.current_state, bundle.turn_id, self._bundle_history) is not None
             for o in self.current_state.objections
         )
 
@@ -299,6 +315,8 @@ class ConversationStateManager:
             timestamp_ms=bundle.timestamp_ms,
             current_version=next_version,
             contributing_evidence_ids=bundle.contributing_evidence_ids,
+            state=self.current_state,
+            recent_bundles=self._bundle_history,
         )
         self.current_state.objections = updated_objs
         changes.extend(dormant_changes)
@@ -613,6 +631,53 @@ class ConversationStateManager:
         self.prior_bundle = bundle
 
         return self.current_state
+
+    def _maybe_transition_dormant(
+        self,
+        objection: ObjectionRecord,
+        current_turn_id: int,
+        timestamp_ms: int = 0,
+        contributing_evidence_ids: Optional[List[str]] = None,
+        next_version: int = 1,
+    ) -> Optional[StateChangeRecord]:
+        """Evaluates whether an objection qualifies for dormancy transition based on Δturns and corroborating evidence.
+        Pre-filter: Δturns >= dormancy_turn_threshold (unless superseded immediately).
+        Requires corroborating evidence from _get_dormancy_evidence.
+        If no evidence exists, returns None (objection stays in its current lifecycle state).
+        """
+        delta = current_turn_id - objection.last_updated_turn_id
+        thresh = getattr(self.objections_engine, "dormancy_turn_threshold", 3)
+        if delta < thresh and not getattr(objection, "superseded_by_objection_id", None):
+            return None
+
+        evidence = _get_dormancy_evidence(
+            objection=objection,
+            state=self.current_state,
+            current_turn_id=current_turn_id,
+            recent_bundles=self._bundle_history,
+        )
+        if evidence is None:
+            return None  # stays in current lifecycle_state — no transition
+
+        old_s = getattr(objection.lifecycle_state, "value", objection.lifecycle_state)
+        objection.lifecycle_state = ObjectionLifecycleState.DORMANT
+        objection.dormancy_evidence = evidence
+
+        reason = (
+            f"Concern '{objection.canonical_category}' transitioned to DORMANT: "
+            f"{evidence.description} ({delta} turns since last mention)."
+        )
+        return StateChangeRecord(
+            state_version_before=next_version,
+            state_version_after=next_version + 1,
+            field_path=f"objections.{objection.objection_id}.lifecycle_state",
+            old_value=old_s,
+            new_value=ObjectionLifecycleState.DORMANT.value,
+            triggering_turn_id=current_turn_id,
+            evidence_ids=contributing_evidence_ids or [],
+            reason=reason,
+            timestamp_ms=timestamp_ms,
+        )
 
     def _compute_commitment(self, bundle: BehavioralSignalInputBundle) -> tuple[float, float]:
         """Client Feedback Issue #8: Computes explicit commitment score (0.0 to 1.0)

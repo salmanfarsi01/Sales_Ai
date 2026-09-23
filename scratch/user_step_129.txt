@@ -1,0 +1,21 @@
+<USER_REQUEST>
+Verifying the math
+Pause duration zero-value bug: (0.0 - 400.0) / 150.0 = -2.67 — confirmed correct, and this is a genuinely different failure mode than the WPM issue (a sentinel value being misread as a measurement, not a noisy-but-real measurement). Good catch that "0.0" meant "nothing to measure" internally while being indistinguishable from a real zero at the math layer.
+Turn-length drop: (2 - 12) / 4.2 = -2.38 — the doc states -2.35, close enough to be rounding, not a real discrepancy.
+Preserved hesitation case: (3500 - 600) / 200 = 14.5 — exact match to the stated result. Good that this was included as a test case specifically proving the fix didn't overcorrect into suppressing everything.
+Two follow-ups worth a quick answer
+
+1. Is turn_length_words treated consistently between baseline collection and anomaly detection? For speech_rate_wpm, short turns are explicitly excluded from both baseline sample collection and change-point checks. For turn_length_words, the fix only describes exempting short turns from triggering negative change-points — it doesn't say whether they're still fed into the running baseline mean/stddev calculation. This might be entirely correct as-is (short backchannels arguably are a real part of someone's natural turn-length distribution, unlike a WPM value that's mathematically invalid at low word counts) — but it's worth an explicit confirmation that this asymmetry (excluded for WPM, included for turn-length) was a deliberate distinction and not an inconsistency that slipped through.
+
+2. Does the emitted output object distinguish "pause not measured" from "pause measured as zero" for anyone reading the raw JSON? Internally, val <= 0.0 is now correctly excluded from baseline/anomaly math — but if avg_pause_duration_ms: 0.0 still appears verbatim in the evidence log or API response with no accompanying flag, a downstream consumer (your backend developer, a future dashboard, even Phase 6 scoring code written later by someone unfamiliar with this fix) could reasonably read that as "we measured a genuine zero-length pause" rather than "no pause occurred in this turn." This is the same distinction that motivated the acoustic_evidence = "unavailable" sentinel and is_estimated_timing flag elsewhere in this build — worth applying the same pattern here, e.g. a pause_measured: bool field, rather than leaving a bare 0.0 to be silently reinterpreted by whoever reads it next.
+</USER_REQUEST>
+<ADDITIONAL_METADATA>
+The current local time is: 2026-09-12T08:47:46+06:00.
+
+The user's current state is as follows:
+Active Document: c:\dev\Sales_Ai\Behavioral_Signal_Engine_Implementation_Plan.md (LANGUAGE_MARKDOWN)
+Cursor is on line: 1
+Other open documents:
+- c:\dev\Sales_Ai\Behavioral_Signal_Engine_Implementation_Plan.md (LANGUAGE_MARKDOWN)
+- c:\dev\Sales_Ai\requirements.txt (LANGUAGE_UNSPECIFIED)
+</ADDITIONAL_METADATA>

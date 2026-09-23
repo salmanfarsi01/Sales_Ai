@@ -129,7 +129,7 @@ def test_dormancy_aging_after_three_unaddressed_turns_and_reactivation():
     s2 = manager.process_turn_bundle(b2)
     assert s2.objections[0].lifecycle_state == ObjectionLifecycleState.ACTIVE  # 1 turn elapsed
 
-    b3 = _make_bundle(3, "client", "We were hoping to move by November.")
+    b3 = _make_bundle(3, "client", "We were hoping to move by November.", future_language=0.55)
     s3 = manager.process_turn_bundle(b3)
     assert s3.objections[0].lifecycle_state == ObjectionLifecycleState.ACTIVE  # 2 turns elapsed
 
@@ -376,7 +376,7 @@ def test_dormancy_threshold_configurable_and_provisional():
     assert s1.objections[0].lifecycle_state == ObjectionLifecycleState.ACTIVE
 
     # Turn 2: 1 turn elapsed
-    b2 = _make_bundle(2, "client", "Can you send me your bio?")
+    b2 = _make_bundle(2, "client", "Can you send me your bio?", future_language=0.55)
     s2 = manager.process_turn_bundle(b2)
     assert s2.objections[0].lifecycle_state == ObjectionLifecycleState.ACTIVE
 

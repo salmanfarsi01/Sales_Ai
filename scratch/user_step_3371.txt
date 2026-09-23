@@ -1,0 +1,99 @@
+<USER_REQUEST>
+onbehavioral signal on confidence is give 650% for last  3 script but in 1 flow also i have given convrsational state result 
+Trust
+0.50
+Tension
+0.00
+Valence
+0.00
+Engagement
+0.50
+Momentum
+0.50
+Readiness
+0.50
+Active Objections (0)
+None active
+Active Facts (0)
+None recorded
+2. Turn Evidence & Gating
+Agent Turn
+Utterance (Timestamp: 1200ms)
+"Perfect. And would you want him involved in that conversation?"
+Semantic & Behavioral Features
+Specificity: 0.00
+Agreement: 0.00
+Future Lang: 0.00
+Boundary: 0.00
+Materiality Filter (Gatekeeper)
+Status:
+MATERIAL
+Targets: [decision_structure]
+The utterance explicitly asks about the involvement of a third party ('him') in the conversation, which directly pertains to identifying stakeholders and their role in the decision-making process.
+3. Changes & Audit Trail
+1 change(s)
+conversion_gate
+- null
++ {"is_open":false,"status":"closed","conditions":[{"condition_name":"trust_not_collapsing","met":true,"score_or_value":{"trust":0.5,"tension":0},"threshold":{"min_trust":0.45,"max_tension":0.65},"reason":"Trust healthy (0.50 >= 0.45) and tension contained (0.00 <= 0.65)"},{"condition_name":"engagement_on_topic","met":true,"score_or_value":0.5,"threshold":0.5,"reason":"Engagement active and on-topic (0.50 >= 0.50)"},{"condition_name":"objections_resolved_or_partial","met":true,"score_or_value":0,"threshold":0,"reason":"No active objections raised (clean slate)"},{"condition_name":"clear_value_reason","met":false,"score_or_value":15,"threshold":50,"reason":"Vague conversational discourse (specificity=0.00 <= 0.45) lacks concrete value/problem justification"},{"condition_name":"decision_maker_aligned","met":true,"score_or_value":true,"threshold":true,"reason":"Decision authority present and aligned (self-authorized)"},{"condition_name":"plausible_logistics","met":true,"score_or_value":70,"threshold":40,"reason":"Logistical feasibility confirmed (70.0 >= 40.0)"},{"condition_name":"no_active_boundary","met":true,"score_or_value":0,"threshold":0.85,"reason":"No active compliance boundary"}],"failed_conditions":["clear_value_reason"],"blocking_reasons":["Vague conversational discourse (specificity=0.00 <= 0.45) lacks concrete value/problem justification"],"confidence":0.65}
+Reason: Meeting gate transitioned to CLOSED. Failed conditions: ['clear_value_reason'].
+4. State After (Vt)
+V2
+Meeting / Conversion Gate
+CLOSED
+Push Strength Recommendation
+two_window_choice
+Action: Structure conversation with low-pressure alternative choices to build alignment.
+Rationale: Meeting gate closed due to: clear_value_reason.
+7 Simultaneous Conditions
+✓
+trust_not_collapsing
+[object Object]
+Trust healthy (0.50 >= 0.45) and tension contained (0.00 <= 0.65)
+✓
+engagement_on_topic
+0.5
+Engagement active and on-topic (0.50 >= 0.50)
+✓
+objections_resolved_or_partial
+0
+No active objections raised (clean slate)
+✗
+clear_value_reason
+15
+Vague conversational discourse (specificity=0.00 <= 0.45) lacks concrete value/problem justification
+✓
+decision_maker_aligned
+true
+Decision authority present and aligned (self-authorized)
+✓
+plausible_logistics
+70
+Logistical feasibility confirmed (70.0 >= 40.0)
+✓
+no_active_boundary
+0
+No active compliance boundary
+Dimensions (V2)
+Trust
+0.50
+Tension
+0.00
+Valence
+0.00
+Engagement
+0.50
+Momentum
+0.50
+Readiness
+0.50 [evaluate the result also find out the inconsistence if we are getting at first analyse the script and then check the result if you can also see the the result in json for conversational state ]
+</USER_REQUEST>
+<ADDITIONAL_METADATA>
+The current local time is: 2026-09-17T10:40:52+06:00.
+
+The user's current state is as follows:
+Active Document: c:\dev\Sales_Ai\copilot\twilio_app.py (LANGUAGE_PYTHON)
+Cursor is on line: 48
+Other open documents:
+- c:\dev\Sales_Ai\copilot\twilio_app.py (LANGUAGE_PYTHON)
+- c:\dev\Sales_Ai\requirements.txt (LANGUAGE_UNSPECIFIED)
+</ADDITIONAL_METADATA>

@@ -8,7 +8,7 @@ from typing import Any, Dict, List, Literal, Optional, Set
 from pydantic import BaseModel, Field
 
 from .conversation_state_contract import BehavioralSignalInputBundle
-from .conversation_state_models import ConversationStateSnapshot
+from .conversation_state_models import ConversationStateSnapshot, DormancyEvidence, ObjectionRecord
 from .conversation_objections import CANONICAL_OBJECTION_PATTERNS, DECISION_TO_STAY_PATTERNS, classify_objection_label, is_decision_authority_statement
 from .behavioral_semantic import HARD_BOUNDARY_PATTERNS, SOFT_PREFERENCE_PATTERNS
 
@@ -36,6 +36,69 @@ PRESENCE_CONFIRMATION_PATTERNS: List[str] = [
     r"\b(?:bringing|bring)\s+(?:my\s+)?(?:wife|husband|partner|spouse)\b",
     r"\b(?:wife|husband|partner|spouse)\s+is\s+(?:on\s+board|aligned|agreed|available)\b",
 ]
+
+LOGISTICAL_SCHEDULING_PATTERNS: List[str] = [
+    r"\b(?:mornings?|afternoons?|evenings?|weekdays?|weekends?)\s+(?:don['’]?t|do\s+not|aren['’]?t|won['’]?t|can['’]?t|cannot)\s+(?:really\s+)?work\b",
+    r"\b(?:mornings?|afternoons?|evenings?|weekdays?|weekends?)\s+(?:only|preferred|work\s+better|suit\s+us\s+better)\b",
+    r"\b(?:only\s+free|only\s+available|better\s+for\s+us|doesn['’]?t\s+work|does\s+not\s+work)\b",
+    r"\bnot\s+available\s+in\s+the\s+(?:mornings?|afternoons?|evenings?)\b",
+    r"\bcan['’]?t\s+do\s+(?:mornings?|afternoons?|evenings?|mondays?|tuesdays?|wednesdays?|thursdays?|fridays?|saturdays?|sundays?)\b",
+    r"\b(?:sometime\s+next\s+year|moving\s+next\s+year|look\s+at\s+moving|next\s+year|nothing\s+urgent)\b",
+    r"\b(?:maybe\s+next\s+week|sometime\s+next\s+week|next\s+week\s+could\s+work|think\s+about\s+it)\b",
+    r"\b(?:earlier|later)\s+in\s+the\s+(?:day|week|month)\s+(?:works?|is\s+better)\b",
+    r"\b(?:thursday|friday|monday|tuesday|wednesday|saturday|sunday)\s+(?:at\s+\d{1,2}(?::\d{2})?\s*(?:am|pm)?|afternoon|morning|evening)\b",
+]
+
+EXPLICIT_MEETING_RESISTANCE_PATTERNS: List[str] = [
+    r"\b(?:don['’]?t|do\s+not|won['’]?t)\s+(?:want\s+to\s+)?meet\b",
+    r"\bno\s+(?:point|need|reason)\s+(?:in\s+)?meeting\b",
+    r"\bdon['’]?t\s+(?:come\s+over|bother)\b",
+    r"\bnot\s+(?:ready|interested\s+in)\s+meeting\b",
+    r"\bstop\s+trying\s+to\s+schedule\b",
+    r"\brefuse\s+to\s+meet\b",
+    r"\b(?:i['’]?m|we['’]?re)\s+too\s+busy\s+to\s+meet\b",
+    r"\bdon['’]?t\s+have\s+time\s+for\s+(?:this|a\s+meeting)\b",
+]
+
+SOFT_CONTACT_PREF_PATTERNS: List[str] = [
+    r"\bdon['’]?t\s+(?:start\s+)?text(?:ing)?\b",
+    r"\btext\s+or\s+email\b",
+    r"\bcall\s+me\s+(?:after|before|in\s+the\s+morning|afternoon)\b",
+    r"\bclinic\s+hours\b",
+    r"\bprefer\s+(?:text|email|call)\b",
+    r"\b(?:text|email|call)\s+(?:is\s+better|preferred|instead)\b",
+]
+
+
+def is_soft_contact_preference(text: str, bundle: BehavioralSignalInputBundle) -> bool:
+    """Detects soft boundary or communication cadence/channel preference (mutually exclusive with objection)."""
+    text_lower = text.lower()
+    if bundle.contact_preference != "none":
+        return True
+    if any(re.search(p, text_lower) for p in SOFT_CONTACT_PREF_PATTERNS):
+        return True
+    if isinstance(SOFT_PREFERENCE_PATTERNS, dict):
+        for pat_list in SOFT_PREFERENCE_PATTERNS.values():
+            if any(re.search(p, text_lower) for p in pat_list):
+                return True
+    elif isinstance(SOFT_PREFERENCE_PATTERNS, (list, set, tuple)):
+        if any(re.search(p, text_lower) for p in SOFT_PREFERENCE_PATTERNS):
+            return True
+    return False
+
+
+def has_explicit_meeting_resistance(text: str) -> bool:
+    """Detects active pushback/refusal against meeting (transforms scheduling constraint into objection)."""
+    text_lower = text.lower()
+    return any(re.search(p, text_lower) for p in EXPLICIT_MEETING_RESISTANCE_PATTERNS)
+
+
+def is_logistical_scheduling_constraint(text: str) -> bool:
+    """Detects logistical availability / scheduling constraints without explicit meeting resistance."""
+    text_lower = text.lower()
+    if has_explicit_meeting_resistance(text):
+        return False
+    return any(re.search(p, text_lower) for p in LOGISTICAL_SCHEDULING_PATTERNS)
 
 MaterialityTarget = Literal[
     "dimensions",
@@ -146,7 +209,7 @@ class MaterialityFilter:
             forced_reasons.append("Deterministic Override: boundary_score >= 0.70 (buffer below 0.80/0.85 firing thresholds) requires contact_compliance, objections, and dimensions.")
 
         # 2. Contact Preference Overrides
-        if bundle.contact_preference != "none":
+        if bundle.contact_preference != "none" or (bundle.speaker_id == "client" and is_soft_contact_preference(bundle.utterance_text, bundle)):
             forced_targets.update(["contact_compliance", "facts"])
             forced_reasons.append("Deterministic Override: upstream contact_preference requires contact_compliance and facts.")
 
@@ -221,9 +284,13 @@ class MaterialityFilter:
             r"\b(?:sometime\s+next\s+year|moving\s+next\s+year|look\s+at\s+moving|next\s+year|nothing\s+urgent)\b",
             r"\b(?:maybe\s+next\s+week|sometime\s+next\s+week|next\s+week\s+could\s+work|think\s+about\s+it)\b",
             r"\b(?:mornings?\s+(?:don['’]?t|do\s+not)\s+(?:really\s+)?work|afternoons?\s+(?:only|preferred|work\s+better))\b",
+            r"\bnot\s+available\s+in\s+the\s+mornings?\b",
         ]
-        if bundle.speaker_id == "client" and any(re.search(p, bundle.utterance_text.lower()) for p in tentative_timeline_patterns):
-            forced_targets.add("facts")
+        if bundle.speaker_id == "client" and (
+            any(re.search(p, bundle.utterance_text.lower()) for p in tentative_timeline_patterns)
+            or is_logistical_scheduling_constraint(bundle.utterance_text)
+        ):
+            forced_targets.update(["decision_structure", "facts"])
             forced_reasons.append("Deterministic Override: client timeline or scheduling availability disclosure.")
 
         # 5f. Stakeholder Presence Confirmation Overrides (Client Principle #1)
@@ -269,6 +336,65 @@ class MaterialityFilter:
             if forced_reasons:
                 result.reasoning = f"{result.reasoning} [{'; '.join(forced_reasons)}]".strip()
 
+        # Enforce mutual exclusivity for soft contact preferences and logistical scheduling constraints (Client Items #2 & #3)
+        if bundle.speaker_id == "client":
+            text_raw = bundle.utterance_text
+            text_l = text_raw.lower()
+            canonical_obj = classify_objection_label(text_raw)
+            hard_bound_words = any(re.search(p, text_l) for p in HARD_BOUNDARY_PATTERNS)
+            hard_bound = bundle.boundary_score >= 0.70 or hard_bound_words
+            has_resistance = has_explicit_meeting_resistance(text_raw)
+
+            pure_soft_pref = is_soft_contact_preference(text_raw, bundle) and not hard_bound and not canonical_obj
+            pure_sched_constraint = is_logistical_scheduling_constraint(text_raw) and not has_resistance and not canonical_obj
+
+            if pure_soft_pref or pure_sched_constraint:
+                # Ensure objections is purged from affected targets
+                result.affected_targets.discard("objections")
+
+                # If no genuine acoustic shift occurred (deltas < 0.08), purge spurious dimensions trigger
+                cur_dim = current_state.dimensions if current_state else None
+                if cur_dim:
+                    val_d = abs(bundle.emotion.expressed_valence - cur_dim.emotion_valence)
+                    ten_d = abs(bundle.emotion.tension_level - cur_dim.emotion_tension)
+                    tru_d = abs(bundle.trust.score - cur_dim.trust)
+                    rea_d = abs(bundle.readiness.score - cur_dim.readiness)
+                    eng_d = abs(bundle.engagement.score - cur_dim.engagement)
+                    if not any(d >= 0.08 for d in [val_d, ten_d, tru_d, rea_d, eng_d]):
+                        result.affected_targets.discard("dimensions")
+                        result.reasoning = re.sub(r"Acoustic/emotional shift detected[^;\]]+[;\]]?", "", result.reasoning).strip()
+
+                # Sanitize reasoning string: strip objection-flavored phrases
+                reason_clean = result.reasoning
+                objection_phrases = [
+                    "Contains active objection, canonical marker, or salesperson clarification/reframe.",
+                    "Objection dynamics impact readiness and momentum dimensions.",
+                    "Contains active objection",
+                    "canonical marker",
+                    "Objection dynamics impact readiness and momentum dimensions",
+                ]
+                for phrase in objection_phrases:
+                    reason_clean = reason_clean.replace(phrase, "")
+                reason_clean = re.sub(r"\s+", " ", reason_clean).strip()
+                reason_clean = re.sub(r"\[\s*;\s*", "[", reason_clean)
+                reason_clean = re.sub(r";\s*\]", "]", reason_clean)
+                reason_clean = re.sub(r"\[\s*\]", "", reason_clean).strip()
+                result.reasoning = reason_clean
+
+                if pure_soft_pref:
+                    result.affected_targets.add("contact_compliance")
+                    result.affected_targets.add("facts")
+                    if "Soft communication preference" not in result.reasoning:
+                        result.reasoning = (result.reasoning + " Soft communication preference: prospect specified contact cadence or channel preference.").strip()
+
+                if pure_sched_constraint:
+                    result.affected_targets.add("decision_structure")
+                    result.affected_targets.add("facts")
+                    if "Logistical scheduling constraint" not in result.reasoning:
+                        result.reasoning = (result.reasoning + " Logistical scheduling constraint: prospect declared availability constraint to coordinate meeting logistics.").strip()
+
+                result.reasoning = re.sub(r"[\s;]+$", "", result.reasoning.strip()).strip()
+
         return result
 
     def _classify_via_heuristic(
@@ -310,26 +436,26 @@ class MaterialityFilter:
         has_boundary_words = any(re.search(p, text_lower) for p in boundary_markers) or any(re.search(p, text_lower) for p in HARD_BOUNDARY_PATTERNS)
         # Protective gate buffer: triggers at 0.70 so downstream engines can evaluate at 0.80/0.85
         has_boundary_score = bundle.boundary_score >= 0.70
+        is_hard_boundary = has_boundary_words or has_boundary_score
 
-        pref_markers = [
-            r"\bdon't\s+(?:start\s+)?text(?:ing)?\b",
-            r"\btext\s+or\s+email\b",
-            r"\bcall\s+me\s+(?:after|before|in\s+the\s+morning|afternoon)\b",
-            r"\bclinic\s+hours\b",
-            r"\bprefer\s+(?:text|email|call)\b",
-        ]
-        has_pref_words = any(re.search(p, text_lower) for p in pref_markers) or any(re.search(p, text_lower) for p in SOFT_PREFERENCE_PATTERNS) or bundle.contact_preference != "none"
+        is_soft_pref = is_soft_contact_preference(text, bundle)
+        is_sched_constraint = is_logistical_scheduling_constraint(text)
+        has_canonical_obj = bool(bundle.speaker_id == "client" and classify_objection_label(text))
+        has_meeting_res = has_explicit_meeting_resistance(text)
 
-        if has_boundary_words or has_boundary_score or has_pref_words:
+        skip_objection_classification = False
+
+        if is_hard_boundary:
             targets.add("contact_compliance")
-            reasons.append("Contains contact boundary or communication channel preference.")
-            if has_pref_words:
-                targets.add("facts")
-                reasons.append("Communication preferences also update persistent channel facts.")
-            # Hard boundary also affects dimensions (collapsing readiness)
-            if has_boundary_score or has_boundary_words:
-                targets.add("dimensions")
-                reasons.append("Hard boundary impacts readiness/trust dimensions.")
+            reasons.append("Contains contact boundary (stop contact / legal threat).")
+            targets.add("dimensions")
+            reasons.append("Hard boundary impacts readiness/trust dimensions.")
+        elif is_soft_pref:
+            targets.add("contact_compliance")
+            targets.add("facts")
+            reasons.append("Soft communication preference: prospect specified contact cadence or channel preference.")
+            if not has_canonical_obj:
+                skip_objection_classification = True
 
         # ---------------------------------------------------------------------
         # 3. Decision Structure & Authority (Stakeholders, Title, Legal Signers)
@@ -413,59 +539,59 @@ class MaterialityFilter:
                 targets.add("facts")
                 reasons.append("Client confirms third-party stakeholder involvement inquired by agent.")
 
+        # Check if prospect stated a logistical scheduling constraint (Client Feedback #3)
+        if is_sched_constraint and not has_meeting_res:
+            targets.add("decision_structure")
+            targets.add("facts")
+            reasons.append("Logistical scheduling constraint: prospect declared availability constraint to coordinate meeting logistics.")
+            if not has_canonical_obj:
+                skip_objection_classification = True
+
         # ---------------------------------------------------------------------
         # 4. Objections & Reframe Strategies
         # ---------------------------------------------------------------------
-        has_active_objections = bool(
-            current_state
-            and any(
-                o.lifecycle_state in ("unresolved", "clarified", "partially_resolved", "active", "partially_addressed")
-                for o in current_state.objections
+        if not skip_objection_classification:
+            has_active_objections = bool(
+                current_state
+                and any(
+                    o.lifecycle_state in ("unresolved", "clarified", "partially_resolved", "active", "partially_addressed")
+                    for o in current_state.objections
+                )
             )
-        )
-        has_dormancy_aging_due = bool(
-            current_state
-            and any(
-                o.lifecycle_state in ("active", "partially_addressed", "unresolved", "clarified", "partially_resolved", "reactivated")
-                and (bundle.turn_id - o.last_updated_turn_id) >= 2
-                for o in current_state.objections
+            is_sched_rec = bool(
+                bundle.recurrence_type in ("scheduling_detail_repeated", "scheduling_repeated", "positive_echo")
+                or (bundle.recurrence_id and (bundle.recurrence_id.startswith("SCHED_") or "sched" in bundle.recurrence_id.lower()))
             )
-        )
-        is_sched_rec = bool(
-            bundle.recurrence_type in ("scheduling_detail_repeated", "scheduling_repeated", "positive_echo")
-            or (bundle.recurrence_id and (bundle.recurrence_id.startswith("SCHED_") or "sched" in bundle.recurrence_id.lower()))
-        )
-        has_objection_tag = bool(
-            (bundle.recurrence_id or bundle.recurrence_type in ("same_objection_repeated", "concern_after_failed_reframe"))
-            and not is_sched_rec
-        )
-        has_reframe_tag = bool(bundle.salesperson_strategy_tag)
-        has_canonical_match = any(
-            re.search(p, text_lower)
-            for p_list in CANONICAL_OBJECTION_PATTERNS.values()
-            for p in p_list
-        )
-        has_agent_clarification = (
-            bundle.speaker_id == "salesperson"
-            and bundle.question_type == "clarifying"
-            and has_active_objections
-        )
+            has_objection_tag = bool(
+                (bundle.recurrence_id or bundle.recurrence_type in ("same_objection_repeated", "concern_after_failed_reframe"))
+                and not is_sched_rec
+            )
+            has_reframe_tag = bool(bundle.salesperson_strategy_tag)
+            has_canonical_match = any(
+                re.search(p, text_lower)
+                for p_list in CANONICAL_OBJECTION_PATTERNS.values()
+                for p in p_list
+            )
+            has_agent_clarification = (
+                bundle.speaker_id == "salesperson"
+                and bundle.question_type == "clarifying"
+                and has_active_objections
+            )
 
-        if (
-            has_objection_tag
-            or has_reframe_tag
-            or has_canonical_match
-            or has_agent_clarification
-            or has_boundary_score
-            or has_boundary_words
-            or has_dormancy_aging_due
-            or (has_active_objections and (bundle.agreement_score > 0.35 or bundle.salesperson_strategy_tag))
-        ):
-            targets.add("objections")
-            reasons.append("Contains active objection, canonical marker, or salesperson clarification/reframe.")
-            # Objections affect readiness and engagement trends
-            targets.add("dimensions")
-            reasons.append("Objection dynamics impact readiness and momentum dimensions.")
+            if (
+                has_objection_tag
+                or has_reframe_tag
+                or has_canonical_match
+                or has_agent_clarification
+                or is_hard_boundary
+                or (has_meeting_res and bundle.speaker_id == "client")
+                or (has_active_objections and (bundle.agreement_score > 0.35 or bundle.salesperson_strategy_tag))
+            ):
+                targets.add("objections")
+                reasons.append("Contains active objection, canonical marker, or salesperson clarification/reframe.")
+                # Objections affect readiness and engagement trends
+                targets.add("dimensions")
+                reasons.append("Objection dynamics impact readiness and momentum dimensions.")
 
         # ---------------------------------------------------------------------
         # 5. Persistent Facts & Truth Supersession
@@ -579,7 +705,12 @@ class MaterialityFilter:
             f"4. AGENT INQUIRIES & PROPOSALS: Questions or scheduling proposals asked by the salesperson (e.g. 'Thursday at three still work?', 'Would you want him involved?', 'Who else makes decisions?') "
             f"are exploratory inquiries/proposals, NOT established deal facts. Do NOT mark decision_structure or facts for an agent inquiry alone; wait for prospect confirmation.\n"
             f"5. PROSPECT CONFIRMATIONS: If the salesperson previously proposed a meeting time or asked about involving a stakeholder, and the prospect affirmatively confirms "
-            f"('Yeah. Definitely.', 'Yes', 'Absolutely', 'Thursday works'), this prospect confirmation IS material for facts (and decision_structure if involving stakeholders).\n\n"
+            f"('Yeah. Definitely.', 'Yes', 'Absolutely', 'Thursday works'), this prospect confirmation IS material for facts (and decision_structure if involving stakeholders).\n"
+            f"6. SOFT CONTACT PREFERENCES: Communication channel/cadence preferences (e.g. 'Please don't text me every day', 'Call me after 5pm', 'Prefer email') "
+            f"MUST be marked for contact_compliance and facts, and MUST NEVER be marked for objections.\n"
+            f"7. LOGISTICAL SCHEDULING CONSTRAINTS: Statements expressing time-of-day, day-of-week, or availability constraints to coordinate meeting logistics "
+            f"(e.g. 'Mornings don't really work for us', 'Afternoons are better') MUST be marked for decision_structure and facts, and MUST NEVER be marked for objections "
+            f"unless accompanied by explicit refusal or resistance to meeting (e.g. 'I don't have time for this', 'Refuse to meet').\n\n"
             f"Respond with raw JSON containing:\n"
             f"- is_material: boolean\n"
             f"- affected_targets: list of strings from ['dimensions', 'facts', 'objections', 'decision_structure', 'contact_compliance']\n"
@@ -620,3 +751,167 @@ class MaterialityFilter:
             reasoning=parsed.get("reasoning", "LLM materiality classification"),
             confidence=float(parsed.get("confidence", 0.90)),
         )
+
+
+def _get_dormancy_evidence(
+    objection: ObjectionRecord,
+    state: ConversationStateSnapshot,
+    current_turn_id: int,
+    recent_bundles: Optional[List[BehavioralSignalInputBundle]] = None,
+) -> Optional[DormancyEvidence]:
+    """Evaluates whether corroborating evidence exists to age an unaddressed objection into DORMANT.
+    Per Client Principle 'Silence is not resolution', Δturns alone is a necessary pre-filter, but
+    NEVER sufficient alone without one of 4 corroborating evidence types (checked in order):
+    1. Supersession: o.superseded_by_objection_id is not None.
+    2. Stage-based supersession: state.conversation_stage moved past the objection's domain.
+    3. Behavioral resolution evidence: turns between o.last_updated_turn_id and current_turn_id
+       exhibit positive forward signals correlated with resolution (e.g. rising agreement,
+       future language, high readiness, or cooperative next steps).
+    4. Blocker supersession: another objection or blocker became primary (newer entry with higher
+       severity/recurrence, or dominant failed condition in conversion gate).
+
+    Returns None if no corroborating evidence exists -> objection stays in current lifecycle state.
+    """
+    if objection is None:
+        return None
+
+    # 1. Supersession — o.superseded_by_objection_id is not None.
+    # Strongest signal, immediate dormancy.
+    if objection.superseded_by_objection_id:
+        return DormancyEvidence(
+            evidence_type="supersession",
+            description=f"superseded by '{objection.superseded_by_objection_id}'",
+            turn_id=objection.superseded_at_turn_id or current_turn_id,
+            supporting_signals={"superseded_by_objection_id": objection.superseded_by_objection_id},
+        )
+
+    # 2. Stage-based supersession — check whether current stage has moved past the objection domain.
+    # (e.g. general_hesitation belongs to discovery/qualification; if stage is now scheduling
+    # or commitment_confirmed, that is structural evidence the conversation has moved on).
+    stage_val = getattr(state, "conversation_stage", None)
+    if stage_val is not None:
+        stage_str = stage_val.value if hasattr(stage_val, "value") else str(stage_val).lower()
+        DISCOVERY_DOMAINS = {
+            "general_hesitation",
+            "decision_to_stay",
+            "timing_market",
+            "discovery",
+            "qualification",
+        }
+        ADVANCED_STAGES = {
+            "scheduling",
+            "commitment_confirmed",
+            "next_steps",
+            "closed",
+            "contract",
+        }
+        FEE_DOMAINS = {
+            "commission_fee",
+            "price",
+            "representation_broker",
+        }
+        POST_NEGOTIATION_STAGES = {
+            "commitment_confirmed",
+            "next_steps",
+            "closed",
+            "contract",
+        }
+
+        cat = (objection.canonical_category or "").lower()
+        if (cat in DISCOVERY_DOMAINS and stage_str in ADVANCED_STAGES) or \
+           (cat in FEE_DOMAINS and stage_str in POST_NEGOTIATION_STAGES) or \
+           (stage_str in ("commitment_confirmed", "closed")):
+            return DormancyEvidence(
+                evidence_type="stage_transition",
+                description=f"superseded by stage transition into '{stage_str}'",
+                turn_id=current_turn_id,
+                supporting_signals={"stage": stage_str, "objection_category": objection.canonical_category},
+            )
+
+    # 3. Behavioral resolution evidence since last activity — look for signals correlated with
+    # resolution of the objection or its driver_layer.underlying_driver in turns between
+    # o.last_updated_turn_id and current_turn_id.
+    relevant_bundles: List[BehavioralSignalInputBundle] = []
+    if recent_bundles:
+        relevant_bundles = [
+            b for b in recent_bundles
+            if objection.last_updated_turn_id < b.turn_id <= current_turn_id and b.speaker_id == "client"
+        ]
+
+    for b in relevant_bundles:
+        # Check rising agreement / high agreement
+        if b.agreement_score >= 0.65:
+            return DormancyEvidence(
+                evidence_type="behavioral_resolution",
+                description=f"corroborated by prospect behavioral agreement (agreement_score {b.agreement_score:.2f} at turn {b.turn_id})",
+                turn_id=b.turn_id,
+                supporting_signals={"agreement_score": b.agreement_score, "turn_id": b.turn_id},
+            )
+        # Check strong future language (forward engagement)
+        if b.future_language_score >= 0.50:
+            return DormancyEvidence(
+                evidence_type="behavioral_resolution",
+                description=f"corroborated by forward future language (future_language_score {b.future_language_score:.2f} at turn {b.turn_id})",
+                turn_id=b.turn_id,
+                supporting_signals={"future_language_score": b.future_language_score, "turn_id": b.turn_id},
+            )
+        # Check high readiness on turn
+        r_score = getattr(b.readiness, "score", b.readiness) if hasattr(b, "readiness") else 0.0
+        if isinstance(r_score, (int, float)) and r_score >= 0.65:
+            return DormancyEvidence(
+                evidence_type="behavioral_resolution",
+                description=f"corroborated by elevated prospect readiness (readiness {r_score:.2f} at turn {b.turn_id})",
+                turn_id=b.turn_id,
+                supporting_signals={"readiness": float(r_score), "turn_id": b.turn_id},
+            )
+
+    # Also inspect state-level readiness/momentum if significantly elevated
+    if state is not None:
+        readiness_val = getattr(state.dimensions, "readiness", 0.0) if state.dimensions else 0.0
+        trust_val = getattr(state.dimensions, "trust", 0.0) if state.dimensions else 0.0
+        if readiness_val >= 0.70 and trust_val >= 0.60:
+            return DormancyEvidence(
+                evidence_type="behavioral_resolution",
+                description=f"corroborated by sustained high readiness ({readiness_val:.2f}) and trust ({trust_val:.2f})",
+                turn_id=current_turn_id,
+                supporting_signals={"readiness": readiness_val, "trust": trust_val},
+            )
+
+    # 4. Blocker supersession — another objection or blocker became primary
+    if state is not None:
+        # Check if a newer objection was raised that has active status and higher/equal recurrence or priority
+        for other_o in getattr(state, "objections", []):
+            if other_o.objection_id != objection.objection_id:
+                if other_o.first_turn_id > objection.last_updated_turn_id:
+                    other_state = getattr(other_o.lifecycle_state, "value", other_o.lifecycle_state)
+                    if other_state in ("active", "partially_addressed", "unresolved", "reactivated"):
+                        if other_o.recurrence_count >= objection.recurrence_count:
+                            return DormancyEvidence(
+                                evidence_type="blocker_supersession",
+                                description=f"superseded by newer primary objection '{other_o.canonical_category}'",
+                                turn_id=other_o.first_turn_id,
+                                supporting_signals={
+                                    "newer_objection_id": other_o.objection_id,
+                                    "newer_category": other_o.canonical_category,
+                                    "turn_id": other_o.first_turn_id,
+                                },
+                            )
+
+        # Check whether an active blocking condition dominates conversion_gate
+        if state.conversion_gate and state.conversion_gate.conditions:
+            for cond in state.conversion_gate.conditions:
+                if not cond.met and cond.condition_name != "objections_resolved_or_partial":
+                    if cond.condition_name in ("hard_boundary_clear", "decision_maker_confirmed", "trust_not_collapsing"):
+                        return DormancyEvidence(
+                            evidence_type="blocker_supersession",
+                            description=f"superseded by primary blocker condition '{cond.condition_name}'",
+                            turn_id=current_turn_id,
+                            supporting_signals={"condition_name": cond.condition_name, "reason": cond.reason},
+                        )
+
+    # No corroborating evidence -> returns None. Silence is not resolution.
+    return None
+
+
+get_dormancy_evidence = _get_dormancy_evidence
+

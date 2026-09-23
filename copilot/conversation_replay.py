@@ -162,7 +162,7 @@ class ConversationReplayEngine:
                 timestamp_ms=bundle.timestamp_ms,
                 state_before=state_before,
                 evidence_bundle=bundle.model_copy(deep=True),
-                materiality=materiality,
+                materiality=manager.last_materiality or materiality,
                 state_changes=turn_changes,
                 state_after=state_after,
             )

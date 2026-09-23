@@ -177,12 +177,13 @@ def test_full_sim_muc323di_replay():
         ch for ch in report.final_state.change_history
         if ch.field_path.endswith(".lifecycle_state")
     ]
-    assert [ch.triggering_turn_id for ch in lifecycle_changes] == [7, 12, 14, 17]
+    # Under Issue #4 ("Silence is not resolution"), Turn 17 without corroborating evidence
+    # preserves partially_resolved state rather than aging prematurely to dormant.
+    assert [ch.triggering_turn_id for ch in lifecycle_changes] == [7, 12, 14]
     assert [(ch.old_value, ch.new_value) for ch in lifecycle_changes] == [
         ("active", "resolved"),
         ("resolved", "reactivated"),
         ("reactivated", "partially_resolved"),
-        ("partially_resolved", "dormant"),
     ]
 
     # 2. Timeline truth supersession verified

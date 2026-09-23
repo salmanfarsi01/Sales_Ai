@@ -135,6 +135,18 @@ class StrategyAttemptOutcome(BaseModel):
     timestamp_ms: int = 0
 
 
+class DormancyEvidence(BaseModel):
+    evidence_type: Literal[
+        "supersession",
+        "stage_transition",
+        "behavioral_resolution",
+        "blocker_supersession",
+    ]
+    description: str
+    turn_id: int
+    supporting_signals: Dict[str, Any] = Field(default_factory=dict)
+
+
 class ObjectionRecord(BaseModel):
     objection_id: str = Field(default_factory=lambda: f"obj_{uuid.uuid4().hex[:8]}")
     recurrence_id: Optional[str] = Field(None, description="Anchored Behavioral Signal Engine recurrence tracking ID")
@@ -153,6 +165,7 @@ class ObjectionRecord(BaseModel):
     # Client Feedback No. 5 & No. 6 Extensions
     driver_layer: Optional[ObjectionDriverLayer] = None
     strategy_outcomes: List[StrategyAttemptOutcome] = Field(default_factory=list)
+    dormancy_evidence: Optional[DormancyEvidence] = None
 
     def get_failed_strategies(self) -> List[str]:
         """Returns list of strategy tags that failed (insufficient or rejected) on this objection."""
@@ -389,6 +402,7 @@ class ConversationStateSnapshot(BaseModel):
     conversion_events: List[ConversionEventObject] = Field(default_factory=list)
     deal_disposition: Optional[DealDispositionRecord] = None
     deal_dispositions: List[DealDispositionRecord] = Field(default_factory=list)
+    conversation_stage: Optional[str] = None
     overall_confidence: float = Field(0.75, ge=0.0, le=1.0)
     change_history: List[StateChangeRecord] = Field(default_factory=list)
 

@@ -1,0 +1,31 @@
+<USER_REQUEST>
+The self-correction here is the right move — flagging that the previous footnote was an unverified assumption rather than defending it is exactly the "good instinct" pattern noted earlier in this build. But it surfaces a live gap it doesn't actually close, and the skip explanation is fine as-is.
+
+The < 2.0 reconciliation — honest, but ends in an open decision, not a resolution.
+
+The audit trail is credible: it traces the discrepancy back to the original proposal text, shows the three guards that actually exist (<4.0 speech-rate skip, <4.0 change-point suppression, <3 semantic bypass), and states plainly that no <2.0 guard was ever committed. That's real verification, not another guess.
+
+But look at what it leaves standing: "single-word fragments... are currently appended to self.prospect_samples['turn_length_words'] during baseline calibration" — which is precisely the pollution the original <2.0 proposal existed to prevent. The response then offers "if isolated 1-word breath tokens should not pollute the mean... the intended guard would be [snippet]" — conditional, not implemented. That's a description of a fix, not a fix, and it's being handed back as if reconciliation-of-the-discrepancy and resolution-of-the-underlying-concern are the same deliverable. They aren't. The discrepancy is explained; the actual question it was standing in for — does a single "case." or "So" still drag down the prospect's mean turn-length baseline right now — is answered "yes, currently," with no decision on whether that's accepted or needs the guard added.
+
+The variance-floor defense (DEFAULT_FEATURE_STDDEV_FLOORS) is a real mitigation but answers the wrong half of the problem: a floor on stddev protects against artificially tight variance from an outlier, it does nothing to stop that outlier from shifting the mean itself. A run of a few one-word backchannels lowering the mean turn length is a distinct failure mode from variance collapse, and nothing shown here addresses it.
+
+Before this closes: is the missing <2.0 guard being added, or is single-word-turn mean-pollution an accepted, bounded risk (and if so, why — e.g., "these are rare enough in practice that N is large and the pull is negligible")? Either answer is fine; leaving it as "here's the snippet if you want it" is not a place to stop given the standard applied to everything else in this round.
+
+The skipped test — closed. fitz/PyMuPDF missing in the Windows venv, scoped to PDF ingestion, zero overlap with the behavioral/semantic pipeline under review, and the claim that every behavioral suite file ran with zero skips is checkable and specific rather than asserted. No concern here — this is the level of detail that should accompany every "it's fine, unrelated" dismissal in this conversation, and it does.
+</USER_REQUEST>
+<ADDITIONAL_METADATA>
+The current local time is: 2026-09-12T12:06:40+06:00.
+
+The user's current state is as follows:
+Active Document: c:\dev\Sales_Ai\copilot\behavioral_baseline.py (LANGUAGE_PYTHON)
+Cursor is on line: 1
+Other open documents:
+- c:\dev\Sales_Ai\copilot\calibration.py (LANGUAGE_PYTHON)
+- c:\dev\Sales_Ai\copilot\fastapi_app.py (LANGUAGE_PYTHON)
+- c:\dev\Sales_Ai\web\behavioral_test.html (LANGUAGE_HTML)
+- c:\dev\Sales_Ai\.env (LANGUAGE_UNSPECIFIED)
+- c:\dev\Sales_Ai\run_behavioral_signal.py (LANGUAGE_PYTHON)
+Running terminal commands:
+- python run_behavioral_signal.py
+ (in c:\dev\Sales_Ai, running for 1h51m7s)
+</ADDITIONAL_METADATA>

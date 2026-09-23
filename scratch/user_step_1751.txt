@@ -1,0 +1,64 @@
+<USER_REQUEST>
+client actually wants, in plain language
+
+Up to now, all your tests have shown a snapshot at one point in time — "here's the score right now." Your client is asking for something different: a play-by-play. They want to watch the numbers change turn by turn across one recording, side-by-side with the actual transcript, so they can personally check: "the prospect said X at this timestamp, and did the number move the way it should have?"
+
+This is basically them saying: "Stop showing us the answer. Show us your work."
+
+They've also very deliberately said: "we are testing whether the engine measures... correctly, not yet whether it makes the correct strategic sales decision." That's an important scope note — they're not asking "is the AI's sales advice good," they're asking "is the math and detection trustworthy." That's actually a lighter, more precise ask than testing the whole system end-to-end.
+
+The six specific scenarios they want in one recording
+
+They gave you a checklist. Your test script needs all six of these to happen in one continuous recording, not spread across separate tests:
+
+A noticeable pace change (fast → slow, or slow → fast)
+A pause or response gap longer than the person's own normal
+The same underlying concern, said twice, in different words
+A real question
+Specificity going up or down (vague → detailed, or detailed → vague)
+A clear boundary statement ("stop contacting me" or similar)
+A script that hits all six, clearly labeled
+
+Segment A — Baseline (speak at your normal pace, ~70-90 seconds)
+
+"We've been looking at homes for a couple months now. My husband and I aren't in a huge rush, but our current lease ends in about three months, so we do need to make a decision before then. We're mainly looking for something with at least three bedrooms and a bit of outdoor space, since we have two dogs. We toured a place two weeks ago that we both really liked, but it ended up going to another buyer before we could put an offer in."
+
+Segment B — [TEST 1: Pace change — speed
+<truncated 2851 bytes>
+not as immediately readable as a plain percentage) — worth checking if that's already computed somewhere or needs a small addition.
+
+Practically, what to hand your client
+
+For each meaningful turn, a row like this:
+
+Turn	Time	Text	WPM	Baseline WPM	Pace Δ%	Pause (ms)	Latency (ms)	Question?	Recurrence	Boundary	Specificity	Future Lang.	Confidence
+7	44.9s	"Okay so what would..."	210	145	+45%	0	—	evaluation	none	0.0	0.3	0.4	0.95
+9	61.2s	"Honestly, that commission..."	140	145	-3%	4800	4800	none	none	0.0	0.2	0.0	0.90
+10	66.0s	"I hear you, but..."	138	145	-5%	0	1900	none	same_objection_repeated (count: 2)	0.0	0.2	0.0	0.85
+13	88.0s	"Please don't contact..."	—	—	—	—	—	none	none	1.0	0.0	0.0	0.95
+
+Plus, right alongside it, the full transcript with every utterance's start/end timestamp — which your engine already outputs — so they can literally read the transcript and the table in parallel and check each row against what was actually said.
+
+What you actually need to do
+Record the script above in one take
+Pull the full JSON your engine already produces
+Reformat it into a row-per-turn table like above (this is mostly relabeling/reorganizing data you already have, not building new features)
+If "% change from baseline" isn't already an explicit field, add that one small calculation
+</USER_REQUEST>
+<ADDITIONAL_METADATA>
+The current local time is: 2026-09-13T08:56:06+06:00.
+
+The user's current state is as follows:
+Active Document: c:\dev\Sales_Ai\copilot\behavioral_evidence.py (LANGUAGE_PYTHON)
+Cursor is on line: 1
+Other open documents:
+- c:\dev\Sales_Ai\requirements.txt (LANGUAGE_UNSPECIFIED)
+- c:\dev\Sales_Ai\copilot\behavioral_baseline.py (LANGUAGE_PYTHON)
+- c:\dev\Sales_Ai\copilot\calibration.py (LANGUAGE_PYTHON)
+- c:\dev\Sales_Ai\.env (LANGUAGE_UNSPECIFIED)
+- c:\dev\Sales_Ai\copilot\behavioral_evidence.py (LANGUAGE_PYTHON)
+Running terminal commands:
+- python run_behavioral_signal.py
+ (in c:\dev\Sales_Ai, running for 17h39m50s)
+- ngrok http 5002 (in c:\dev\Sales_Ai, running for 17h3m3s)
+</ADDITIONAL_METADATA>

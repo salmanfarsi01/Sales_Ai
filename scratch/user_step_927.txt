@@ -1,0 +1,32 @@
+<USER_REQUEST>
+What's missing from this answer
+
+Four things were claimed as done, and none of them come with the mechanism behind them:
+
+1. Semantic aggregation across horizons — this was the core architectural question: does semantic_features on each window now represent an actual aggregate of that window's contributing utterances, or still just the latest one? The test name (test_semantic_aggregation_preserves_objections_across_horizons) suggests something changed, but I need to see what. Specifically:
+
+If a recurrence_type was detected 4 turns ago and is still within the last_60_90s window, does that window's snapshot now correctly still reflect it, even after newer non-recurring turns arrive? What's the actual aggregation rule — most-severe-wins? Most-recent-relevant-match wins? A list of all recurrence events in-window rather than one value?
+Are specificity_score/future_language_score/agreement_score now genuinely averaged or otherwise combined across all contributing utterances per window, or still copied from one utterance? These were flat-identical across all five windows last time — show me they're not anymore.
+
+2. "Breath-pause stitching" — this is a new concept that wasn't part of the request. I flagged that Turn 7/8 ("...sitting behind this" / "case.") looked like one sentence awkwardly split by a breath, and asked whether short fragments were correctly excluded from baseline pollution — I did not ask for turns to be re-merged. If utterance segmentation logic is now stitching turns back together based on some breath-detection heuristic, that's a meaningful, undiscussed change to Phase 1/segmentation behavior with its own failure modes (what if a stitching heuristic incorrectly merges two genuinely separate turns, or leaves a real short backchannel merged into the wrong turn?). This needs its own explanation before I'd accept it, not a passing mention buried in a bullet list.
+
+3. "Short-fragment LLM bypass" — this directly answers something I asked about (are one-word fragments burning a Groq call unnecessarily), but again with zero detail. What's the actual threshold? Is it the same <4 words guard already established for baseline pollution, reused here, or a new separate threshold? What semantic values does a bypassed fragment get — extraction_mode: "heuristic_offline", a new mode, or does the field go missing entirely? This matters because whatever a bypassed turn returns still needs to plug into the aggregation logic from item 1.
+
+4. UI calibration indicator — the fix I suggested was showing elapsed time as the blocking condition instead of turn count. Confirm this was actually changed to show something like "54s/60s elapsed," not just acknowledged.
+</USER_REQUEST>
+<ADDITIONAL_METADATA>
+The current local time is: 2026-09-12T10:28:14+06:00.
+
+The user's current state is as follows:
+Active Document: c:\dev\Sales_Ai\copilot\behavioral_baseline.py (LANGUAGE_PYTHON)
+Cursor is on line: 1
+Other open documents:
+- c:\dev\Sales_Ai\run_behavioral_signal.py (LANGUAGE_PYTHON)
+- c:\dev\Sales_Ai\tests\test_call_pipeline_unit.py (LANGUAGE_PYTHON)
+- c:\dev\Sales_Ai\copilot\calibration.py (LANGUAGE_PYTHON)
+- c:\dev\Sales_Ai\copilot\fastapi_app.py (LANGUAGE_PYTHON)
+- c:\dev\Sales_Ai\.env (LANGUAGE_UNSPECIFIED)
+Running terminal commands:
+- python run_behavioral_signal.py
+ (in c:\dev\Sales_Ai, running for 12m40s)
+</ADDITIONAL_METADATA>
