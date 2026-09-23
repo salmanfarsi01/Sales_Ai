@@ -889,29 +889,31 @@ class ConversationStateManager:
             result["stakeholders"] = existing
 
         # 2. Affirmative confirmation of prior salesperson inquiry about third-party stakeholder
-        elif self.prior_bundle and self.prior_bundle.speaker_id == "salesperson":
-            prior_text_l = self.prior_bundle.utterance_text.lower()
-            asked_stakeholder = any(w in prior_text_l for w in ["him involved", "her involved", "them involved", "husband", "wife", "partner", "spouse", "decision maker", "sign off"])
-            is_affirmative = (
+        elif (
+            self.prior_bundle
+            and self.prior_bundle.speaker_id == "salesperson"
+            and any(w in self.prior_bundle.utterance_text.lower() for w in ["him involved", "her involved", "them involved", "husband", "wife", "partner", "spouse", "decision maker", "sign off"])
+            and (
                 bundle.agreement_score >= 0.60
                 or any(re.search(rf"\b{aff}\b", text) for aff in ["yeah", "yes", "definitely", "sure", "absolutely", "correct", "of course"])
             )
-            if asked_stakeholder and is_affirmative:
-                role = "male_decision_maker" if "him" in prior_text_l else ("female_decision_maker" if "her" in prior_text_l else "co_decision_maker")
-                stakeholder = DecisionStakeholder(
-                    stakeholder_id=f"stk_{uuid.uuid4().hex[:6]}",
-                    role=role,
-                    is_decision_maker=True,
-                    presence="absent",
-                    notes=f"Confirmed stakeholder involvement in response to agent inquiry: '{bundle.utterance_text[:60]}'",
-                    confidence=0.80,
-                )
-                existing = list(self.current_state.decision_structure.stakeholders)
-                if not any(s.role == role and s.presence == "absent" for s in existing):
-                    existing.append(stakeholder)
+        ):
+            prior_text_l = self.prior_bundle.utterance_text.lower()
+            role = "male_decision_maker" if "him" in prior_text_l else ("female_decision_maker" if "her" in prior_text_l else "co_decision_maker")
+            stakeholder = DecisionStakeholder(
+                stakeholder_id=f"stk_{uuid.uuid4().hex[:6]}",
+                role=role,
+                is_decision_maker=True,
+                presence="absent",
+                notes=f"Confirmed stakeholder involvement in response to agent inquiry: '{bundle.utterance_text[:60]}'",
+                confidence=0.80,
+            )
+            existing = list(self.current_state.decision_structure.stakeholders)
+            if not any(s.role == role and s.presence == "absent" for s in existing):
+                existing.append(stakeholder)
 
-                result["decision_maker_present"] = False
-                result["stakeholders"] = existing
+            result["decision_maker_present"] = False
+            result["stakeholders"] = existing
 
         # 3. Sole decision maker declaration (e.g. Turn 2)
         elif any(re.search(p, text) for p in [

@@ -9,6 +9,8 @@ from .conversation_conversion_config import ConversionBlockingConfig, DEFAULT_CO
 from .conversation_state_contract import BehavioralSignalInputBundle
 from .conversation_state_models import (
     ConversationStateSnapshot,
+    ConversationStage,
+    ConversionEventStatus,
     DecisionStructure,
     DimensionScores,
     ContactComplianceState,
@@ -89,20 +91,43 @@ class ConversationScoringEngine:
         has_absent_stakeholder = any(s.presence == "absent" for s in dec.stakeholders)
         if has_primary and dec.decision_maker_present and not has_absent_stakeholder:
             dec_score = 95.0
+        elif has_primary and not has_absent_stakeholder:
+            dec_score = 75.0
         elif has_primary:
-            dec_score = 65.0
+            dec_score = 55.0
         else:
             dec_score = 40.0
 
         # 6. Future / Operational Behavior (15%)
+        # Evaluates calendar language, scheduled appointments, and operational timeline targets
         future_pts = bundle.future_language_score * 100.0
         has_closing_target = any(f.fact_key in ("target_closing", "move_in_date") for f in current_state.facts if f.status == "active")
-        future_score = round(0.6 * future_pts + (40.0 if has_closing_target else 15.0), 1)
+        has_confirmed_meeting = (
+            bool(current_state.conversion_event and getattr(current_state.conversion_event, "status", "") in ("confirmed", ConversionEventStatus.CONFIRMED))
+            or any(f.fact_key == "confirmed_meeting_time" and f.status == "active" for f in current_state.facts)
+        )
+        has_tentative_meeting = any(f.fact_key == "tentative_meeting_time" and f.status == "active" for f in current_state.facts)
+
+        if has_confirmed_meeting:
+            future_score = round(80.0 + (0.2 * future_pts), 1)
+        elif has_tentative_meeting or getattr(current_state, "conversation_stage", None) == ConversationStage.SCHEDULING:
+            future_score = round(45.0 + (0.35 * future_pts), 1)
+        elif has_closing_target:
+            future_score = round(0.6 * future_pts + 40.0, 1)
+        else:
+            future_score = round(0.6 * future_pts + 15.0, 1)
         future_score = min(100.0, max(0.0, future_score))
 
         # 7. Commitment Behavior (10%)
+        # Consumes explicit commitment dimension (what they have agreed to, 0-100)
+        # or confirmed meeting fact, blended with conversational pacing and turn agreement.
         pacing_pts = dims.pacing * 100.0
-        commit_score = round(0.6 * agreement_factor + 0.4 * pacing_pts, 1)
+        effective_commitment = max(dims.commitment, 1.0 if has_confirmed_meeting else 0.0)
+        commit_pts = effective_commitment * 100.0
+        if commit_pts > 0.0:
+            commit_score = round(0.6 * commit_pts + 0.25 * agreement_factor + 0.15 * pacing_pts, 1)
+        else:
+            commit_score = round(0.6 * agreement_factor + 0.4 * pacing_pts, 1)
         commit_score = min(100.0, max(0.0, commit_score))
 
         # Composite Weighted Momentum Score

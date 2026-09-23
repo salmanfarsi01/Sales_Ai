@@ -2,6 +2,7 @@ import pytest
 from copilot.conversation_state_manager import ConversationStateManager
 from copilot.conversation_state_contract import BehavioralSignalInputBundle, DimensionScore, EmotionState
 from copilot.conversation_state_models import (
+    ConversationStage,
     ConversationStateSnapshot,
     ObjectionLifecycleState,
     ObjectionRecord,
@@ -177,6 +178,58 @@ def test_stage_based_supersession_corroborates_dormancy():
 
     change = next(c for c in s4.change_history if "lifecycle_state" in c.field_path and c.new_value == "dormant")
     assert "Concern 'general_hesitation' transitioned to DORMANT: superseded by stage transition into 'scheduling' (3 turns since last mention)." in change.reason
+
+
+def test_stage_based_supersession_corroborates_dormancy_natural_progression():
+    """Signal 2: Stage-based supersession — end-to-end natural progression.
+    Verifies that an unaddressed ACTIVE objection transitions to DORMANT when
+    conversation_stage naturally moves past its domain (into scheduling) through
+    normal turns, with zero manual state overrides.
+    """
+    manager = ConversationStateManager(call_sid="CA_natural_stage_dormancy")
+
+    # Turn 1: Client raises early timing hesitation -> ACTIVE objection
+    b1 = _create_bundle(1, "client", "Honestly, we are not sure this is the right time anymore.")
+    s1 = manager.process_turn_bundle(b1)
+    assert len(s1.objections) == 1
+    assert s1.objections[0].lifecycle_state == ObjectionLifecycleState.ACTIVE
+
+    # Turn 2: Non-reframe neutral question (no strategy attempted)
+    b2 = _create_bundle(2, "salesperson", "Tell me a bit about the house condition.")
+    s2 = manager.process_turn_bundle(b2)
+    assert s2.objections[0].lifecycle_state == ObjectionLifecycleState.ACTIVE
+
+    # Turn 3: Neutral property disclosure
+    b3 = _create_bundle(3, "client", "It has three bedrooms and two baths.")
+    s3 = manager.process_turn_bundle(b3)
+    assert s3.objections[0].lifecycle_state == ObjectionLifecycleState.ACTIVE
+
+    # Turn 4: General walkthrough discussion
+    b4 = _create_bundle(4, "salesperson", "Let us look at your net proceeds after all costs.")
+    s4 = manager.process_turn_bundle(b4)
+    assert s4.objections[0].lifecycle_state == ObjectionLifecycleState.ACTIVE
+
+    # Turn 5: Salesperson proposes scheduling walkthrough -> stage transitions to SCHEDULING
+    b5 = _create_bundle(5, "salesperson", "Would sometime next week work for a walkthrough?")
+    s5 = manager.process_turn_bundle(b5)
+    assert s5.conversation_stage == ConversationStage.SCHEDULING
+
+    # Turn 6: Client responds to scheduling ask (delta = 6 - 1 = 5 >= 3)
+    # Since stage is now 'scheduling', the unaddressed ACTIVE discovery objection
+    # is corroborated for dormancy by stage-based supersession!
+    b6 = _create_bundle(6, "client", "Maybe next week could work, let me think about it.")
+    s6 = manager.process_turn_bundle(b6)
+
+    dormant_objs = s6.get_dormant_objections()
+    assert len(dormant_objs) == 1
+    d_obj = dormant_objs[0]
+    assert d_obj.lifecycle_state == ObjectionLifecycleState.DORMANT
+    assert d_obj.dormancy_evidence is not None
+    assert d_obj.dormancy_evidence.evidence_type == "stage_transition"
+    assert "scheduling" in d_obj.dormancy_evidence.description
+
+    change = next(c for c in s6.change_history if "lifecycle_state" in c.field_path and c.new_value == "dormant")
+    assert "Concern 'general_hesitation' transitioned to DORMANT: superseded by stage transition into 'scheduling'" in change.reason
 
 
 def test_behavioral_resolution_corroborates_dormancy():
