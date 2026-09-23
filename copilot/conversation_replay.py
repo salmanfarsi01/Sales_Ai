@@ -187,6 +187,10 @@ class ConversationReplayEngine:
             "active_blockers": final_state.readiness.active_blocker_caps if final_state.readiness else [],
         }
 
+        # Issue #6 Presentation Enrichment (Single Source of Truth)
+        from .conversation_presentation import build_conversion_presentation
+        conv_summary.update(build_conversion_presentation(final_state))
+
         # Tag and isolate synthetic dialogue simulations from live call recordings
         is_synthetic = (source == "synthetic_simulation") or ("sim_" in call_sid.lower())
         if is_synthetic:
@@ -353,7 +357,11 @@ class ConversationReplayEngine:
         if target.exists():
             try:
                 data = json.loads(target.read_text(encoding="utf-8"))
-                return ConversationStateReplayReport.model_validate(data)
+                report = ConversationStateReplayReport.model_validate(data)
+                if "deal_milestone_status" not in report.conversion_summary:
+                    from .conversation_presentation import build_conversion_presentation
+                    report.conversion_summary.update(build_conversion_presentation(report.final_state))
+                return report
             except Exception as exc:
                 LOGGER.error("Error loading replay report for %s: %s", safe_sid, exc)
 
@@ -361,7 +369,11 @@ class ConversationReplayEngine:
         if synth_target.exists():
             try:
                 data = json.loads(synth_target.read_text(encoding="utf-8"))
-                return ConversationStateReplayReport.model_validate(data)
+                report = ConversationStateReplayReport.model_validate(data)
+                if "deal_milestone_status" not in report.conversion_summary:
+                    from .conversation_presentation import build_conversion_presentation
+                    report.conversion_summary.update(build_conversion_presentation(report.final_state))
+                return report
             except Exception as exc:
                 LOGGER.error("Error loading synthetic replay report for %s: %s", safe_sid, exc)
 
@@ -392,6 +404,7 @@ class ConversationReplayEngine:
                         "source",
                         "synthetic_simulation" if ("sim_" in sid.lower() or "synthetic" in str(p)) else "live_call",
                     )
+                    gate_display = conv.get("milestone_label") or conv.get("deal_milestone_status") or conv.get("gate_status", "closed")
                     items.append({
                         "call_sid": sid,
                         "filename": p.name,
@@ -402,7 +415,7 @@ class ConversationReplayEngine:
                         "run_count": content.get("run_count", 1),
                         "archived_runs_count": len(content.get("archived_versions", [])),
                         "total_turns": content.get("total_turns", 0),
-                        "gate_status": conv.get("gate_status", "closed"),
+                        "gate_status": gate_display,
                         "push_strength": conv.get("push_strength", "protect_and_shorten"),
                         "momentum_score": conv.get("momentum_score", 50.0),
                         "readiness_score": conv.get("readiness_score", 50.0),

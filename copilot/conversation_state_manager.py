@@ -1165,3 +1165,18 @@ class ConversationStateManager:
             if d.superseded_by_id is None:
                 return d
         return self.deal_disposition
+
+    def get_deal_milestone_status(self) -> str:
+        """Returns the high-level deal milestone status (Issue #6)."""
+        from .conversation_presentation import compute_deal_milestone_status
+        return compute_deal_milestone_status(self.current_state)
+
+    def get_open_concerns(self) -> List[Dict[str, Any]]:
+        """Returns live objections requiring agent awareness in the pre-call dossier (Issue #6)."""
+        from .conversation_presentation import compute_open_concerns
+        return compute_open_concerns(self.current_state)
+
+    def get_conversion_presentation(self) -> Dict[str, Any]:
+        """Returns complete presentation dictionary for API serialization (Issue #6)."""
+        from .conversation_presentation import build_conversion_presentation
+        return build_conversion_presentation(self.current_state)

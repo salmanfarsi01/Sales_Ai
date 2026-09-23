@@ -677,9 +677,10 @@
       <span class="kpi-label">Call SID</span>
       <span class="kpi-value mono" id="kpiCallSid">No Call Loaded</span>
     </div>
-    <div class="kpi-item">
-      <span class="kpi-label">Final Conversion Gate</span>
+    <div class="kpi-item" style="min-width: 220px;">
+      <span class="kpi-label">Final Conversion Milestone</span>
       <span class="kpi-value" id="kpiGate"><span class="badge badge-muted">—</span></span>
+      <div id="kpiOpenConcerns" style="margin-top: 4px;"></div>
     </div>
     <div class="kpi-item">
       <span class="kpi-label">Final Push Recommendation</span>
@@ -1055,11 +1056,51 @@
 
       document.getElementById('kpiCallSid').innerHTML = `${currentReport.call_sid || '—'} ${sourceBadge} ${runBadge}`;
 
-      // Gate badge
+      // Milestone & Gate badge (Issue #6 Single Source of Truth)
+      const ce = conv.conversion_event || finalState.conversion_event || (finalState.conversion_events && finalState.conversion_events.length > 0 ? finalState.conversion_events[finalState.conversion_events.length - 1] : null);
+      const ceConfirmed = ce && (ce.status === 'confirmed' || ce.status === 'CONFIRMED');
+      const ceTentative = ce && (ce.status === 'tentative' || ce.status === 'TENTATIVE');
       const gateOpen = conv.gate_is_open;
-      document.getElementById('kpiGate').innerHTML = gateOpen
-        ? '<span class="badge badge-open">OPEN (Ready to Close)</span>'
-        : '<span class="badge badge-closed">CLOSED (' + (conv.failed_conditions ? conv.failed_conditions.length : 0) + ' blocking)</span>';
+
+      // Determine milestone
+      const milestone = conv.deal_milestone_status || (
+        ceConfirmed ? 'appointment_confirmed' :
+        (ceTentative ? 'appointment_tentative' :
+        (gateOpen ? 'ready_to_close' :
+        (conv.gate_status === 'closed' ? 'blocked' : 'pursuing')))
+      );
+
+      // Determine label
+      const milestoneLabel = conv.milestone_label || (
+        milestone === 'appointment_confirmed' ? `APPOINTMENT CONFIRMED — ${(ce && ce.start_at) || 'confirmed'}` :
+        (milestone === 'appointment_tentative' ? `TENTATIVE — ${(ce && ce.start_at) || 'time pending'}` :
+        (milestone === 'ready_to_close' ? 'OPEN (Ready to Close)' :
+        (milestone === 'blocked' ? 'BLOCKED' : 'PURSUING')))
+      );
+
+      const milestoneBadgeClass = (milestone === 'appointment_confirmed' || milestone === 'ready_to_close')
+        ? 'badge-open'
+        : (milestone === 'appointment_tentative' ? 'badge-push' : 'badge-closed');
+
+      let gateHtml = `<span class="badge ${milestoneBadgeClass}" style="font-weight:700;">${escapeHtml(milestoneLabel)}</span>`;
+
+      // Open concerns dossier line
+      const openConcernsSummary = conv.open_concerns_summary !== undefined ? conv.open_concerns_summary : (function() {
+        const liveStates = new Set(['active', 'unresolved', 'partially_resolved', 'partially_addressed', 'reactivated']);
+        const liveObjs = (finalState.objections || []).filter(o => liveStates.has(o.lifecycle_state));
+        if (liveObjs.length === 0) return '';
+        const parts = liveObjs.map(o => {
+          const cat = o.canonical_category === 'general_hesitation' ? 'financial net proceeds / general hesitation' : (o.canonical_category || 'concern').replace(/_/g, ' ');
+          const st = (o.lifecycle_state === 'partially_resolved' || o.lifecycle_state === 'partially_addressed') ? 'partially resolved' : o.lifecycle_state;
+          return `${cat} — ${st}`;
+        });
+        return `Open Concerns: ${liveObjs.length} (${parts.join('; ')})`;
+      })();
+
+      if (openConcernsSummary) {
+        gateHtml += `<div id="kpiOpenConcerns" style="font-size: 11px; color: #9A3412; background: #FFEDD5; border: 1px solid #FED7AA; border-radius: 4px; padding: 2px 6px; margin-top: 4px; font-weight: 500; line-height: 1.3;">${escapeHtml(openConcernsSummary)}</div>`;
+      }
+      document.getElementById('kpiGate').innerHTML = gateHtml;
 
       // Push badge
       document.getElementById('kpiPush').innerHTML = `<span class="badge badge-push">${conv.push_strength || '—'}</span>`;
@@ -1159,10 +1200,19 @@
       }
       const pillsEl = document.getElementById('selectedTurnSnapshotPills');
       if (pillsEl && sAfter) {
+        const turnCe = sAfter.conversion_event;
+        const turnCeConfirmed = turnCe && (turnCe.status === 'confirmed' || turnCe.status === 'CONFIRMED');
+        const turnCeTentative = turnCe && (turnCe.status === 'tentative' || turnCe.status === 'TENTATIVE');
         const turnGateOpen = sAfter.conversion_gate ? sAfter.conversion_gate.is_open : false;
         const turnPush = sAfter.push_strength ? sAfter.push_strength.state : '—';
+        const turnMilestone = turnCeConfirmed
+          ? `APPOINTMENT CONFIRMED — ${turnCe.start_at || 'confirmed'}`
+          : (turnCeTentative
+              ? `TENTATIVE — ${turnCe.start_at || 'time pending'}`
+              : (turnGateOpen ? 'Turn Gate: OPEN' : 'Turn Gate: CLOSED'));
+        const turnMilestoneClass = (turnCeConfirmed || turnGateOpen) ? 'badge-open' : (turnCeTentative ? 'badge-push' : 'badge-closed');
         pillsEl.innerHTML = `
-          <span class="badge ${turnGateOpen ? 'badge-open' : 'badge-closed'}">Turn Gate: ${turnGateOpen ? 'OPEN' : 'CLOSED'}</span>
+          <span class="badge ${turnMilestoneClass}">${escapeHtml(turnMilestone)}</span>
           <span class="badge badge-push">Turn Push: ${escapeHtml(turnPush)}</span>
         `;
       }
