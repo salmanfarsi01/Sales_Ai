@@ -19,6 +19,8 @@ from .conversation_state_models import (
     ConversionEventObject,
     DealDispositionType,
     DealDispositionRecord,
+    ConversationStage,
+    StageHistoryRecord,
     ObjectionLifecycleState,
     ObjectionRecord,
     DormancyEvidence,
@@ -38,6 +40,7 @@ from .conversation_scoring import ConversationScoringEngine
 from .conversation_scoring_config import ConversationScoringConfig
 from .conversation_conversion_config import ConversionBlockingConfig, DEFAULT_CONVERSION_BLOCKING_CONFIG
 from .conversation_conversion import MeetingConversionGateEngine
+from .conversation_stage import ConversationStageEngine
 
 LOGGER = logging.getLogger("copilot.conversation_state_manager")
 
@@ -75,6 +78,16 @@ class ConversationStateManager:
             config=scoring_config,
             blocking_config=self.blocking_config,
         )
+        self.stage_engine = ConversationStageEngine()
+        if not self.current_state.stage_history:
+            self.current_state.stage_history = [
+                StageHistoryRecord(
+                    stage=self.current_state.conversation_stage,
+                    entered_turn_id=0,
+                    trigger_reason="Initial call setup",
+                    confidence=1.0,
+                )
+            ]
         self.prior_bundle: Optional[BehavioralSignalInputBundle] = None
         self._bundle_history: List[BehavioralSignalInputBundle] = []
         self.has_prospect_spoken: bool = False
@@ -145,9 +158,18 @@ class ConversationStateManager:
             for o in self.current_state.objections
         )
 
-        # If turn is non-material (no targets affected, no manual decision/fact updates, and no dormancy aging due),
+        # Check if conversation_stage would transition
+        stage_check, _ = self.stage_engine.evaluate_stage(
+            bundle=bundle,
+            state=self.current_state,
+            materiality=materiality,
+            prior_bundle=self.prior_bundle,
+        )
+        stage_transition_due = (stage_check != self.current_state.conversation_stage)
+
+        # If turn is non-material (no targets affected, no manual decision/fact updates, no dormancy aging, and no stage transition due),
         # preserve state version and dimension stability entirely without mutating state.
-        if not materiality.is_material and not decision_updates and not fact_updates and not dormant_due:
+        if not materiality.is_material and not decision_updates and not fact_updates and not dormant_due and not stage_transition_due:
             self.current_state.last_updated_turn_id = bundle.turn_id
             self.current_state.last_updated_timestamp_ms = bundle.timestamp_ms
             self.prior_bundle = bundle
@@ -615,6 +637,44 @@ class ConversationStateManager:
         has_dim_change = any(c.field_path.startswith("dimensions") for c in changes)
         if "dimensions" in materiality.affected_targets and not has_dim_change:
             materiality.affected_targets.discard("dimensions")
+
+        # 10. Evaluate Conversation Stage & Track Stage History (Client Principle #1)
+        new_stage, stage_reason = self.stage_engine.evaluate_stage(
+            bundle=bundle,
+            state=self.current_state,
+            materiality=materiality,
+            prior_bundle=self.prior_bundle,
+        )
+        old_stage = self.current_state.conversation_stage
+        if new_stage != old_stage:
+            if self.current_state.stage_history and self.current_state.stage_history[-1].exited_turn_id is None:
+                self.current_state.stage_history[-1].exited_turn_id = bundle.turn_id
+            self.current_state.stage_history.append(
+                StageHistoryRecord(
+                    stage=new_stage,
+                    entered_turn_id=bundle.turn_id,
+                    trigger_reason=stage_reason,
+                    confidence=1.0,
+                )
+            )
+            self.current_state.conversation_stage = new_stage
+            next_version += 1
+            old_val_str = old_stage.value if hasattr(old_stage, "value") else str(old_stage)
+            new_val_str = new_stage.value if hasattr(new_stage, "value") else str(new_stage)
+            changes.append(
+                StateChangeRecord(
+                    state_version_before=next_version - 1,
+                    state_version_after=next_version,
+                    field_path="conversation_stage",
+                    old_value=old_val_str,
+                    new_value=new_val_str,
+                    triggering_turn_id=bundle.turn_id,
+                    evidence_ids=bundle.contributing_evidence_ids,
+                    reason=f"Conversation stage transitioned from '{old_val_str}' to '{new_val_str}': {stage_reason}",
+                    confidence=1.0,
+                    timestamp_ms=bundle.timestamp_ms,
+                )
+            )
 
         # Update metadata
         self.current_state.last_updated_turn_id = bundle.turn_id

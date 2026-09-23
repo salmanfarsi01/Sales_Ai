@@ -788,45 +788,51 @@ def _get_dormancy_evidence(
     # 2. Stage-based supersession — check whether current stage has moved past the objection domain.
     # (e.g. general_hesitation belongs to discovery/qualification; if stage is now scheduling
     # or commitment_confirmed, that is structural evidence the conversation has moved on).
-    stage_val = getattr(state, "conversation_stage", None)
-    if stage_val is not None:
-        stage_str = stage_val.value if hasattr(stage_val, "value") else str(stage_val).lower()
-        DISCOVERY_DOMAINS = {
-            "general_hesitation",
-            "decision_to_stay",
-            "timing_market",
-            "discovery",
-            "qualification",
-        }
-        ADVANCED_STAGES = {
-            "scheduling",
-            "commitment_confirmed",
-            "next_steps",
-            "closed",
-            "contract",
-        }
-        FEE_DOMAINS = {
-            "commission_fee",
-            "price",
-            "representation_broker",
-        }
-        POST_NEGOTIATION_STAGES = {
-            "commitment_confirmed",
-            "next_steps",
-            "closed",
-            "contract",
-        }
+    # Note: Per Client Principle 'An appointment booking is not an objection resolution',
+    # a partially_resolved objection (e.g. hesitation discussed in depth) is NOT superseded
+    # simply by moving into scheduling or commitment_confirmed. The meeting was booked to address it!
+    # Therefore, stage-based supersession only applies to unaddressed/active objections.
+    obj_state_val = getattr(objection.lifecycle_state, "value", objection.lifecycle_state)
+    if obj_state_val not in ("partially_resolved", "partially_addressed"):
+        stage_val = getattr(state, "conversation_stage", None)
+        if stage_val is not None:
+            stage_str = stage_val.value if hasattr(stage_val, "value") else str(stage_val).lower()
+            DISCOVERY_DOMAINS = {
+                "general_hesitation",
+                "decision_to_stay",
+                "timing_market",
+                "discovery",
+                "qualification",
+            }
+            ADVANCED_STAGES = {
+                "scheduling",
+                "commitment_confirmed",
+                "next_steps",
+                "closed",
+                "contract",
+            }
+            FEE_DOMAINS = {
+                "commission_fee",
+                "price",
+                "representation_broker",
+            }
+            POST_NEGOTIATION_STAGES = {
+                "commitment_confirmed",
+                "next_steps",
+                "closed",
+                "contract",
+            }
 
-        cat = (objection.canonical_category or "").lower()
-        if (cat in DISCOVERY_DOMAINS and stage_str in ADVANCED_STAGES) or \
-           (cat in FEE_DOMAINS and stage_str in POST_NEGOTIATION_STAGES) or \
-           (stage_str in ("commitment_confirmed", "closed")):
-            return DormancyEvidence(
-                evidence_type="stage_transition",
-                description=f"superseded by stage transition into '{stage_str}'",
-                turn_id=current_turn_id,
-                supporting_signals={"stage": stage_str, "objection_category": objection.canonical_category},
-            )
+            cat = (objection.canonical_category or "").lower()
+            if (cat in DISCOVERY_DOMAINS and stage_str in ADVANCED_STAGES) or \
+               (cat in FEE_DOMAINS and stage_str in POST_NEGOTIATION_STAGES) or \
+               (stage_str in ("commitment_confirmed", "closed")):
+                return DormancyEvidence(
+                    evidence_type="stage_transition",
+                    description=f"superseded by stage transition into '{stage_str}'",
+                    turn_id=current_turn_id,
+                    supporting_signals={"stage": stage_str, "objection_category": objection.canonical_category},
+                )
 
     # 3. Behavioral resolution evidence since last activity — look for signals correlated with
     # resolution of the objection or its driver_layer.underlying_driver in turns between

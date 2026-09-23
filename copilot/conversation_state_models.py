@@ -54,6 +54,30 @@ class DealDispositionRecord(BaseModel):
     superseded_by_id: Optional[str] = None
     superseded_at_turn_id: Optional[int] = None
 
+
+class ConversationStage(str, Enum):
+    DISCOVERY = "discovery"
+    DECISION_RESOLUTION = "decision_resolution"
+    OBJECTION_HANDLING = "objection_handling"
+    VALUE_WALKTHROUGH = "value_walkthrough"
+    SCHEDULING = "scheduling"
+    COMMITMENT_CONFIRMED = "commitment_confirmed"
+
+    def __eq__(self, other: Any) -> bool:
+        val = getattr(other, "value", other)
+        return str(self.value) == str(val)
+
+    def __hash__(self) -> int:
+        return hash(self.value)
+
+
+class StageHistoryRecord(BaseModel):
+    stage: ConversationStage
+    entered_turn_id: int
+    exited_turn_id: Optional[int] = None
+    trigger_reason: str
+    confidence: float = Field(1.0, ge=0.0, le=1.0)
+
 PersistentFactCategory = Literal[
     "logistical",
     "decision_maker",
@@ -402,7 +426,8 @@ class ConversationStateSnapshot(BaseModel):
     conversion_events: List[ConversionEventObject] = Field(default_factory=list)
     deal_disposition: Optional[DealDispositionRecord] = None
     deal_dispositions: List[DealDispositionRecord] = Field(default_factory=list)
-    conversation_stage: Optional[str] = None
+    conversation_stage: ConversationStage = ConversationStage.DISCOVERY
+    stage_history: List[StageHistoryRecord] = Field(default_factory=list)
     overall_confidence: float = Field(0.75, ge=0.0, le=1.0)
     change_history: List[StateChangeRecord] = Field(default_factory=list)
 
