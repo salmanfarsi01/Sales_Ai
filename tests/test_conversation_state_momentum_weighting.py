@@ -203,3 +203,48 @@ def test_decision_structure_clarity_transitional_tier_scores_75():
     t2 = _make_bundle(2, "client", "Understood.")
     mom = engine.compute_momentum(t2, snap)
     assert mom.family_scores["decision_structure_clarity"] == 75.0
+
+
+def test_future_operational_behavior_immediate_turn_update_on_conversion_upgrade_and_downgrade():
+    """Verify that future_operational_behavior and commitment_behavior immediately reflect
+    conversion_event status changes on the EXACT SAME TURN (both upgrade to confirmed and downgrade to tentative),
+    eliminating the 1-turn lag where Turn 7 stayed at 15.0 and Turn 9 stayed at 80.0."""
+    import json
+    with open("reports/synthetic/conversation_state_sim_mucj0p5s.json") as f:
+        data = json.load(f)
+
+    mgr = ConversationStateManager(call_sid="sim_lag_verification_test")
+    snaps = []
+    for t in data["timeline"]:
+        eb = BehavioralSignalInputBundle(**t["evidence_bundle"])
+        snap = mgr.process_turn_bundle(eb)
+        snaps.append(snap.model_copy(deep=True))
+
+    # Turn 6: Tentative pre-confirmation floor
+    snap6 = snaps[5]
+    assert snap6.momentum.family_scores["future_operational_behavior"] == 15.0
+
+    # Turn 7: UPGRADE case - timing objection resolved, conversion_event transitions to CONFIRMED.
+    # MUST immediately reflect confirmed tier (>= 80.0) on Turn 7 itself, NOT lag until Turn 8!
+    snap7 = snaps[6]
+    assert snap7.conversion_event is not None
+    assert str(snap7.conversion_event.status).lower().endswith("confirmed")
+    assert snap7.momentum.family_scores["future_operational_behavior"] >= 80.0
+    assert snap7.momentum.family_scores["commitment_behavior"] >= 80.0
+
+    # Turn 9: DOWNGRADE case - prospect expresses hesitation ("Maybe next week... let me think"),
+    # conversion_event downgrades to TENTATIVE.
+    # MUST immediately drop to tentative tier (45.0) on Turn 9 itself, NOT lag until Turn 10!
+    snap9 = snaps[8]
+    assert snap9.conversion_event is not None
+    assert str(snap9.conversion_event.status).lower().endswith("tentative")
+    assert snap9.momentum.family_scores["future_operational_behavior"] == 45.0
+    assert snap9.momentum.family_scores["commitment_behavior"] <= 65.0
+
+    # Turn 18: CONFIRMATION case - final appointment confirmed.
+    snap18 = snaps[17]
+    assert snap18.conversion_event is not None
+    assert str(snap18.conversion_event.status).lower().endswith("confirmed")
+    assert snap18.momentum.family_scores["future_operational_behavior"] >= 80.0
+    assert snap18.momentum.family_scores["commitment_behavior"] >= 80.0
+

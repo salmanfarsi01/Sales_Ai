@@ -633,6 +633,18 @@ class ConversationStateManager:
                 )
             )
 
+        # Refresh Momentum & Readiness so same-turn conversion events, commitment updates,
+        # and deterministic fact cascades are immediately reflected without a 1-turn lag.
+        if self.scoring_engine._momentum_history:
+            self.scoring_engine._momentum_history.pop()
+        self.current_state.momentum = self.scoring_engine.compute_momentum(bundle, self.current_state)
+        self.current_state.readiness = self.scoring_engine.compute_readiness(
+            bundle,
+            self.current_state,
+            conversion_target=self.conversion_target,
+            blocking_config=self.blocking_config,
+        )
+
         # Inconsistency Guard: Prune dimensions from materiality affected_targets if no dimension change materialized
         has_dim_change = any(c.field_path.startswith("dimensions") for c in changes)
         if "dimensions" in materiality.affected_targets and not has_dim_change:
