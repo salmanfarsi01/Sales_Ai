@@ -83,11 +83,12 @@ class LLMResponseGateway:
         )
 
         # Block 3: Verified Knowledge Facts (Spec 11 §8)
-        if facts:
-            facts_lines = [f"- [{f.source_id}] {f.topic}: {f.text} (Status: {f.verification_status})" for f in facts]
+        verified_facts = [f for f in facts if f.verification_status == "verified"]
+        if verified_facts:
+            facts_lines = [f"- [{f.source_id}] {f.topic}: {f.text} (Authority: {f.authority_level})" for f in verified_facts]
             facts_text = "\n".join(facts_lines)
         else:
-            facts_text = "- No external facts required for this conversational moment."
+            facts_text = "- No verified external facts available for this conversational moment."
 
         block3 = (
             "### BLOCK 3: VERIFIED KNOWLEDGE\n"
@@ -112,7 +113,18 @@ class LLMResponseGateway:
             f"- Mode: Concise, conversational, spoken delivery\n"
         )
 
-        # Block 6: Generation Directives
+        # Block 6: Generation Directives with Explicit Fact-Absence Fallback Guard (Spec 01 §11)
+        missing_evidence = (decision.primary_action in (StrategicAction.QUANTIFY, StrategicAction.SOCIAL_PROOF) or decision.retrieval_needed) and not verified_facts
+
+        fallback_directive = ""
+        if missing_evidence:
+            fallback_directive = (
+                "5. FACT UNAVAILABILITY GUARD (CRITICAL): The requested proof point, statistic, or number is NOT verified in Block 3. "
+                "Do NOT fabricate, estimate, or invent any specific numbers, percentages, dollar figures, testimonials, or claims about other clients. "
+                "Do NOT make any assertions regarding prior customer outcomes. "
+                "Instead, formulate a truthful line focusing entirely on the prospect's own situation without citing external results.\n"
+            )
+
         block6 = (
             "### BLOCK 6: MANDATORY GENERATION DIRECTIVES\n"
             "Generate the exact word-for-word line the salesperson should say right now.\n"
@@ -121,6 +133,7 @@ class LLMResponseGateway:
             "2. Do NOT include coaching labels like 'Acknowledge:' or 'Tip:'.\n"
             "3. Do NOT invent unverified facts, credentials, or numbers.\n"
             f"4. Maximum length is {decision.max_prompt_words} words.\n"
+            f"{fallback_directive}"
         )
 
         return f"{block1}\n{block2}\n{block3}\n{block4}\n{block5}\n{block6}"
@@ -133,28 +146,45 @@ class LLMResponseGateway:
         recent_turns: Optional[List[Dict[str, str]]] = None,
     ) -> Prompt:
         """Executes LLM language construction adhering to the strategic decision contract."""
+        working_decision = decision
+        verified_facts = [f for f in facts if f.verification_status == "verified"]
+
+        # Spec 01 §9: Social proof requires credible verified evidence; never fabricated.
+        # If no verified evidence exists, reroute away from SOCIAL_PROOF to avoid false claims.
+        if decision.primary_action == StrategicAction.SOCIAL_PROOF and not verified_facts:
+            working_decision = decision.model_copy(deep=True)
+            working_decision.primary_action = StrategicAction.VALIDATE
+            working_decision.reason_codes.append("UNVERIFIED_SOCIAL_PROOF_REROUTED_TO_VALIDATE")
+            working_decision.do_not_do.extend(["fabricate_client_results", "claim_prior_customer_outcomes"])
+            working_decision.strategic_objective = "Validate prospect situation directly without unverified external claims"
+
+        if working_decision.secondary_action == StrategicAction.SOCIAL_PROOF and not verified_facts:
+            if working_decision is decision:
+                working_decision = decision.model_copy(deep=True)
+            working_decision.secondary_action = None
+
         context = self.assemble_context(
-            decision=decision,
+            decision=working_decision,
             snapshot=snapshot,
             facts=facts,
             recent_turns=recent_turns,
         )
 
         if self.generator_func:
-            raw_text = self.generator_func(context, decision.max_prompt_words)
+            raw_text = self.generator_func(context, working_decision.max_prompt_words)
         else:
-            raw_text = self._call_llm(context, decision)
+            raw_text = self._call_llm(context, working_decision)
 
-        cleaned_text = self._clean_and_truncate(raw_text, decision.max_prompt_words)
+        cleaned_text = self._clean_and_truncate(raw_text, working_decision.max_prompt_words)
 
         return Prompt(
-            decision_id=decision.decision_id,
-            source_state_version=decision.source_state_version,
+            decision_id=working_decision.decision_id,
+            source_state_version=working_decision.source_state_version,
             text=cleaned_text,
-            strategic_action=decision.primary_action,
-            strategic_objective=decision.strategic_objective,
-            max_prompt_words=decision.max_prompt_words,
-            confidence=decision.confidence,
+            strategic_action=working_decision.primary_action,
+            strategic_objective=working_decision.strategic_objective,
+            max_prompt_words=working_decision.max_prompt_words,
+            confidence=working_decision.confidence,
         )
 
     def _call_llm(self, context: str, decision: StrategicDecision) -> str:
@@ -186,7 +216,7 @@ class LLMResponseGateway:
                 return "Perfect, I have Thursday at three confirmed on my calendar. I will see you both then."
             return "I completely understand where you're coming from."
         elif action == StrategicAction.VALIDATE:
-            return "That makes complete sense, and a lot of sellers have that exact same concern."
+            return "That makes complete sense—let's focus directly on what matters most for your specific situation."
         elif action == StrategicAction.REFRAME:
             return "What matters most isn't just the fee percentage, but what you walk away with in your pocket."
         elif action == StrategicAction.DE_RISK:
@@ -195,6 +225,10 @@ class LLMResponseGateway:
             if decision.secondary_action == StrategicAction.QUESTION:
                 return "Would Thursday at two or Friday morning work better for a brief walkthrough?"
             return "Let's schedule a twenty minute walkthrough so we can review the exact numbers in person."
+        elif action == StrategicAction.QUANTIFY:
+            return "When we sit down together, we can walk through the exact net sheet numbers side by side."
+        elif action == StrategicAction.SOCIAL_PROOF:
+            return "Let's focus on what matters for your specific situation."
         elif action == StrategicAction.QUESTION:
             return "What would be the most important outcome for you if you were to make a move?"
         elif action == StrategicAction.EDUCATE:
