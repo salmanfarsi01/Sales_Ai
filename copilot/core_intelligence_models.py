@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import uuid
 from enum import Enum
-from typing import Any, Dict, List, Literal, Optional
+from typing import Any, Dict, List, Literal, Optional, Union
 from pydantic import BaseModel, Field
 
 from .conversation_state_models import PushStrengthState
@@ -33,6 +33,26 @@ class StrategicAction(str, Enum):
         return hash(self.value)
 
 
+class Spec01ObjectionLadderStage(str, Enum):
+    """Spec 01 Section 6 canonical 6-level objection depth ladder."""
+    SURFACE_OBJECTION = "surface_objection"
+    UNDERLYING_CONCERN = "underlying_concern"
+    FIRST_PUSHBACK = "first_pushback"
+    REPEATED_RESISTANCE = "repeated_resistance"
+    PARTIAL_RESOLUTION = "partial_resolution"
+    RESOLVED = "resolved"
+
+
+class RequiredFactScope(BaseModel):
+    """Spec 11 Section 8 scoped, verifiable fact retrieval contract."""
+    fact_id: str = Field(default_factory=lambda: f"fact_req_{uuid.uuid4().hex[:8]}")
+    topic: str
+    entity_scope: Optional[str] = None
+    required_evidence_type: str = "general_proof"
+    verification_required: bool = True
+    min_confidence: float = 0.80
+
+
 class StrategicDecision(BaseModel):
     decision_id: str = Field(default_factory=lambda: f"dec_{uuid.uuid4().hex[:10]}")
     call_id: str
@@ -46,7 +66,7 @@ class StrategicDecision(BaseModel):
     do_not_do: List[str] = Field(default_factory=list)
     what_to_protect: List[str] = Field(default_factory=list)
     question_allowed: bool = True
-    required_facts: List[str] = Field(default_factory=list)
+    required_facts: List[Union[str, RequiredFactScope]] = Field(default_factory=list)
     retrieval_needed: bool = False
     playbook_influence: Optional[Dict[str, Any]] = None
     calibration_influence: Optional[Dict[str, Any]] = None
@@ -54,6 +74,7 @@ class StrategicDecision(BaseModel):
     max_prompt_words: int = 24
     expires_on_state_change: bool = True
     confidence: float = Field(0.85, ge=0.0, le=1.0)
+    confidence_breakdown: Dict[str, float] = Field(default_factory=dict)
     created_at_ms: int = 0
 
 
@@ -69,6 +90,7 @@ class StrategicInterpretationContext(BaseModel):
     readiness_score: float = 0.0
     momentum_trend: str = "stable"
     trust_score: float = 0.0
+    cross_metric_penalties: List[str] = Field(default_factory=list)
 
 
 class DecisionEvaluationResult(BaseModel):

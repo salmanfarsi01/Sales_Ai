@@ -3,7 +3,7 @@ from __future__ import annotations
 import logging
 from typing import Any, Dict, List, Optional
 
-from .core_intelligence_models import StrategicAction, StrategicDecision
+from .core_intelligence_models import StrategicAction, StrategicDecision, RequiredFactScope
 
 LOGGER = logging.getLogger("copilot.core_strategy_modifiers")
 
@@ -63,16 +63,43 @@ class StrategyModifierPipeline:
         }
 
     def _evaluate_retrieval_need(self, decision: StrategicDecision) -> None:
-        # Knowledge retrieval is triggered conditionally only if specific factual evidence is needed
-        if decision.primary_action in (StrategicAction.QUANTIFY, StrategicAction.SOCIAL_PROOF):
+        # Knowledge retrieval is triggered conditionally only if specific factual evidence is needed (Spec 11 §8)
+        if decision.primary_action == StrategicAction.QUANTIFY:
             decision.retrieval_needed = True
-            if decision.primary_action == StrategicAction.QUANTIFY:
-                decision.required_facts = ["market_comps", "commission_roi"]
-            else:
-                decision.required_facts = ["verified_testimonials", "case_studies"]
+            decision.required_facts = [
+                RequiredFactScope(
+                    topic="market_comps",
+                    required_evidence_type="market_comps",
+                    verification_required=True,
+                    min_confidence=0.85,
+                ),
+                RequiredFactScope(
+                    topic="commission_roi_calculation",
+                    required_evidence_type="roi_calculator",
+                    verification_required=True,
+                    min_confidence=0.80,
+                ),
+            ]
+        elif decision.primary_action == StrategicAction.SOCIAL_PROOF:
+            decision.retrieval_needed = True
+            decision.required_facts = [
+                RequiredFactScope(
+                    topic="verified_client_case_study",
+                    required_evidence_type="case_study",
+                    verification_required=True,
+                    min_confidence=0.90,
+                ),
+            ]
         elif decision.primary_action == StrategicAction.EDUCATE and "market" in decision.strategic_objective.lower():
             decision.retrieval_needed = True
-            decision.required_facts = ["local_market_trends"]
+            decision.required_facts = [
+                RequiredFactScope(
+                    topic="local_market_inventory_and_pricing_trends",
+                    required_evidence_type="market_trends",
+                    verification_required=True,
+                    min_confidence=0.85,
+                ),
+            ]
         else:
             decision.retrieval_needed = False
             decision.required_facts = []

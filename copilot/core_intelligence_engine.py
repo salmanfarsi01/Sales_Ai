@@ -16,13 +16,14 @@ from .core_intelligence_models import (
     StrategicDecision,
     StrategicInterpretationContext,
     DecisionEvaluationResult,
+    Spec01ObjectionLadderStage,
 )
 
 LOGGER = logging.getLogger("copilot.core_intelligence_engine")
 
 
 class PitchProXCoreIntelligenceEngine:
-    """Core intelligence engine that interprets ConversationState and generates StrategicDecision."""
+    """Core intelligence engine interpreting ConversationState and generating StrategicDecision."""
 
     def __init__(self, lead_type: str = "general"):
         self.lead_type = lead_type
@@ -36,29 +37,47 @@ class PitchProXCoreIntelligenceEngine:
     ) -> DecisionEvaluationResult:
         context = self._build_context(snapshot)
 
-        # 1. Compliance and Hard Boundary Gate
+        # 1. Compliance and Hard Boundary Gate (Spec 01 §10, Spec 09 §7)
         if context.hard_boundary_active:
-            return self._build_boundary_decision(snapshot, context, turn_timestamp_ms)
+            eval_res = self._build_boundary_decision(snapshot, context, turn_timestamp_ms)
+            self._apply_cross_metric_consistency_rules(snapshot, eval_res.decision, eval_res.context)
+            self._finalize_decision_confidence(snapshot, eval_res.decision, eval_res.context)
+            return eval_res
 
-        # 2. Confirmed Conversion Protection Gate
+        # 2. Confirmed Conversion Protection Gate (Item 9: confirm_and_protect)
         if context.conversion_confirmed or context.push_strength_state == "confirm_and_protect":
-            return self._build_confirm_protect_decision(snapshot, context, turn_timestamp_ms)
+            eval_res = self._build_confirm_protect_decision(snapshot, context, turn_timestamp_ms)
+            self._apply_cross_metric_consistency_rules(snapshot, eval_res.decision, eval_res.context)
+            self._finalize_decision_confidence(snapshot, eval_res.decision, eval_res.context)
+            return eval_res
 
-        # 3. Active Objection Lifecycle and Branching Progression
+        # 3. Active Objection Lifecycle and Spec 01 §6 6-Level Depth Ladder
         unresolved_objections = snapshot.get_unresolved_objections()
         if unresolved_objections:
-            return self._build_objection_decision(snapshot, context, unresolved_objections, turn_timestamp_ms)
+            eval_res = self._build_objection_decision(snapshot, context, unresolved_objections, turn_timestamp_ms)
+            self._apply_cross_metric_consistency_rules(snapshot, eval_res.decision, eval_res.context)
+            self._finalize_decision_confidence(snapshot, eval_res.decision, eval_res.context)
+            return eval_res
 
-        # 4. Multi-Stakeholder and Absent Decision Maker Gate
+        # 4. Multi-Stakeholder and Absent Decision Maker Gate (Spec 09 §3)
         if not context.decision_maker_present:
-            return self._build_absent_stakeholder_decision(snapshot, context, turn_timestamp_ms)
+            eval_res = self._build_absent_stakeholder_decision(snapshot, context, turn_timestamp_ms)
+            self._apply_cross_metric_consistency_rules(snapshot, eval_res.decision, eval_res.context)
+            self._finalize_decision_confidence(snapshot, eval_res.decision, eval_res.context)
+            return eval_res
 
-        # 5. Conversion Gate and Push Strength Alignment
+        # 5. Conversion Gate and Push Strength Alignment (Spec 09 §6, §7)
         if context.meeting_gate_open:
-            return self._build_meeting_gate_decision(snapshot, context, turn_timestamp_ms)
+            eval_res = self._build_meeting_gate_decision(snapshot, context, turn_timestamp_ms)
+            self._apply_cross_metric_consistency_rules(snapshot, eval_res.decision, eval_res.context)
+            self._finalize_decision_confidence(snapshot, eval_res.decision, eval_res.context)
+            return eval_res
 
         # 6. Stage-Specific and Discovery Fallback Strategy
-        return self._build_stage_default_decision(snapshot, context, turn_timestamp_ms)
+        eval_res = self._build_stage_default_decision(snapshot, context, turn_timestamp_ms)
+        self._apply_cross_metric_consistency_rules(snapshot, eval_res.decision, eval_res.context)
+        self._finalize_decision_confidence(snapshot, eval_res.decision, eval_res.context)
+        return eval_res
 
     def _build_context(self, snapshot: ConversationStateSnapshot) -> StrategicInterpretationContext:
         unresolved = snapshot.get_unresolved_objections()
@@ -99,6 +118,86 @@ class PitchProXCoreIntelligenceEngine:
             momentum_trend=mom_trend,
             trust_score=snapshot.dimensions.trust * 100.0,
         )
+
+    def _apply_cross_metric_consistency_rules(
+        self,
+        snapshot: ConversationStateSnapshot,
+        decision: StrategicDecision,
+        context: StrategicInterpretationContext,
+    ) -> None:
+        """Enforces Spec 10 Section 8 cross-metric consistency checks."""
+        # Rule 1: Trust high but repeated boundary language -> Boundary wins, lower trust confidence
+        if context.hard_boundary_active and context.trust_score > 60.0:
+            context.cross_metric_penalties.append("BOUNDARY_OVERRIDES_HIGH_TRUST")
+            if "COMPLIANCE_PRIORITY" not in decision.reason_codes:
+                decision.reason_codes.append("COMPLIANCE_PRIORITY")
+
+        # Rule 2: Positive valence but momentum falling -> Do not treat friendliness as progress
+        if snapshot.dimensions.emotion_valence > 0.20 and context.momentum_trend in ("stalling", "regressing"):
+            context.cross_metric_penalties.append("FRIENDLINESS_IS_NOT_PROGRESS")
+            if "premature_close" not in decision.do_not_do:
+                decision.do_not_do.append("premature_close")
+            if "CROSS_METRIC_VALENCE_MOMENTUM_MISMATCH" not in decision.reason_codes:
+                decision.reason_codes.append("CROSS_METRIC_VALENCE_MOMENTUM_MISMATCH")
+
+        # Rule 3: Engagement high but objection unresolved -> Continue strategy, do not close blindly
+        if snapshot.dimensions.engagement > 0.65 and context.active_objections:
+            context.cross_metric_penalties.append("HIGH_ENGAGEMENT_WITH_UNRESOLVED_OBJECTION")
+            if "premature_close" not in decision.do_not_do:
+                decision.do_not_do.append("premature_close")
+            if "OBJECTION_PREVENTS_BLIND_CLOSE" not in decision.reason_codes:
+                decision.reason_codes.append("OBJECTION_PREVENTS_BLIND_CLOSE")
+
+        # Rule 4: Pacing alignment high but prospect annoyed/negative -> Pacing does not erase negative sentiment
+        if snapshot.dimensions.pacing > 0.70 and snapshot.dimensions.emotion_valence < -0.20:
+            context.cross_metric_penalties.append("PACING_DOES_NOT_ERASE_NEGATIVE_VALENCE")
+            if "ignore_negative_sentiment" not in decision.do_not_do:
+                decision.do_not_do.append("ignore_negative_sentiment")
+
+        # Rule 5: Readiness high but authority/logistics blocked -> Apply blocker cap
+        if context.readiness_score > 70.0 and not context.decision_maker_present:
+            context.cross_metric_penalties.append("READINESS_CAPPED_BY_ABSENT_AUTHORITY")
+            if "press_for_single_party_commitment" not in decision.do_not_do:
+                decision.do_not_do.append("press_for_single_party_commitment")
+
+    def _finalize_decision_confidence(
+        self,
+        snapshot: ConversationStateSnapshot,
+        decision: StrategicDecision,
+        context: StrategicInterpretationContext,
+    ) -> None:
+        """Dynamically computes decision confidence per Spec 10 Section 2 and Section 6."""
+        breakdown: Dict[str, float] = {}
+
+        # Base confidence from relevant state subsystem
+        if decision.primary_action in (StrategicAction.COMMITMENT_CLOSE,):
+            base = snapshot.conversion_gate.confidence if snapshot.conversion_gate else 0.80
+            breakdown["base_source"] = base
+        elif context.active_objections:
+            primary_obj = snapshot.get_unresolved_objections()[-1]
+            base = primary_obj.confidence
+            breakdown["base_source"] = base
+        elif context.hard_boundary_active:
+            base = 1.0
+            breakdown["base_source"] = base
+        else:
+            base = snapshot.overall_confidence
+            breakdown["base_source"] = base
+
+        # Trust and engagement confidence weights
+        trust_conf = snapshot.dimensions.trust_confidence
+        breakdown["trust_confidence"] = trust_conf
+
+        # Cross-metric consistency penalty deduction
+        penalties_count = len(context.cross_metric_penalties)
+        penalty_deduction = penalties_count * 0.05
+        breakdown["cross_metric_penalty"] = -penalty_deduction
+
+        final_conf = max(0.40, min(1.0, (base * 0.70) + (trust_conf * 0.30) - penalty_deduction))
+        breakdown["final_confidence"] = round(final_conf, 3)
+
+        decision.confidence = round(final_conf, 3)
+        decision.confidence_breakdown = breakdown
 
     def _build_boundary_decision(
         self,
@@ -168,30 +267,50 @@ class PitchProXCoreIntelligenceEngine:
         do_not_do.extend(failed_strategies)
         what_to_protect = ["trust", "rapport"]
 
-        if recurrence == 1:
+        # Spec 01 Section 6 Canonical 6-Level Objection Ladder Logic
+        # Ladder: Surface -> Underlying -> First pushback -> Repeated resistance -> Partial resolution -> Resolved
+        if primary_obj.lifecycle_state in (ObjectionLifecycleState.PARTIALLY_ADDRESSED, "partially_resolved", "clarified"):
+            ladder_stage = Spec01ObjectionLadderStage.PARTIAL_RESOLUTION
+            primary_action = StrategicAction.ACKNOWLEDGE
+            secondary_action = StrategicAction.CLARIFY
+            objective = f"Acknowledge partial alignment and narrow remaining concern on {category}."
+            reason_codes = ["OBJECTION_PARTIAL_RESOLUTION", f"LADDER_{ladder_stage.value.upper()}"]
+            max_words = 22
+        elif recurrence == 1:
+            ladder_stage = Spec01ObjectionLadderStage.SURFACE_OBJECTION
             primary_action = StrategicAction.VALIDATE
             secondary_action = StrategicAction.CLARIFY
             objective = f"Validate concern regarding {category} and clarify underlying intent."
-            reason_codes = ["OBJECTION_SURFACE_INITIAL", f"CATEGORY_{category.upper()}"]
+            reason_codes = ["OBJECTION_SURFACE_INITIAL", f"LADDER_{ladder_stage.value.upper()}", f"CATEGORY_{category.upper()}"]
             max_words = 22
+        elif recurrence == 2 and primary_obj.driver_layer:
+            ladder_stage = Spec01ObjectionLadderStage.UNDERLYING_CONCERN
+            primary_action = StrategicAction.MIRROR
+            secondary_action = StrategicAction.REFRAME
+            objective = f"Mirror underlying driver ({primary_obj.driver_layer.underlying_driver}) and reframe strategic target."
+            reason_codes = ["OBJECTION_UNDERLYING_DRIVER", f"LADDER_{ladder_stage.value.upper()}"]
+            max_words = 26
         elif recurrence == 2:
+            ladder_stage = Spec01ObjectionLadderStage.FIRST_PUSHBACK
             if "commission" in category or "fee" in category or "financial" in category:
                 primary_action = StrategicAction.REFRAME
                 secondary_action = StrategicAction.QUANTIFY
                 objective = "Reframe commission cost into net financial proceeds comparison."
-                reason_codes = ["OBJECTION_PUSHBACK_SHIFT_ANGLE", "NET_PROCEEDS_REFRAME"]
+                reason_codes = ["OBJECTION_FIRST_PUSHBACK_SHIFT_ANGLE", "NET_PROCEEDS_REFRAME"]
             elif "timing" in category or "market" in category:
                 primary_action = StrategicAction.EDUCATE
                 secondary_action = StrategicAction.FUTURE_PACE
                 objective = "Educate on market timing dynamics and illustrate future scenario."
-                reason_codes = ["OBJECTION_PUSHBACK_SHIFT_ANGLE", "MARKET_TIMING_EDUCATION"]
+                reason_codes = ["OBJECTION_FIRST_PUSHBACK_SHIFT_ANGLE", "MARKET_TIMING_EDUCATION"]
             else:
                 primary_action = StrategicAction.DIFFERENTIATE
                 secondary_action = StrategicAction.CLARIFY
                 objective = f"Differentiate approach and isolate primary reservation on {category}."
-                reason_codes = ["OBJECTION_PUSHBACK_SHIFT_ANGLE", "DIFFERENTIATE_APPROACH"]
+                reason_codes = ["OBJECTION_FIRST_PUSHBACK_SHIFT_ANGLE", "DIFFERENTIATE_APPROACH"]
+            reason_codes.append(f"LADDER_{ladder_stage.value.upper()}")
             max_words = 26
         else:
+            ladder_stage = Spec01ObjectionLadderStage.REPEATED_RESISTANCE
             primary_action = StrategicAction.DE_RISK
             if "social_proof" not in failed_strategies:
                 secondary_action = StrategicAction.SOCIAL_PROOF
@@ -199,7 +318,7 @@ class PitchProXCoreIntelligenceEngine:
                 secondary_action = StrategicAction.QUESTION
 
             objective = f"De-risk commitment regarding persistent {category} objection without repeating failed strategies."
-            reason_codes = ["OBJECTION_REPEATED_PROGRESSION_BRANCH", "DE_RISK_PERSISTENT_CONCERN"]
+            reason_codes = ["OBJECTION_REPEATED_RESISTANCE_BRANCH", f"LADDER_{ladder_stage.value.upper()}"]
             max_words = 24
 
         decision = StrategicDecision(
@@ -217,7 +336,7 @@ class PitchProXCoreIntelligenceEngine:
             retrieval_needed=False,
             urgency="immediate",
             max_prompt_words=max_words,
-            confidence=0.88,
+            confidence=primary_obj.confidence,
             created_at_ms=turn_timestamp_ms,
         )
         return DecisionEvaluationResult(decision=decision, context=context)
@@ -246,7 +365,7 @@ class PitchProXCoreIntelligenceEngine:
             retrieval_needed=False,
             urgency="immediate",
             max_prompt_words=24,
-            confidence=0.90,
+            confidence=snapshot.decision_structure.confidence,
             created_at_ms=turn_timestamp_ms,
         )
         return DecisionEvaluationResult(decision=decision, context=context)
@@ -270,6 +389,8 @@ class PitchProXCoreIntelligenceEngine:
             objective = "Directly propose and secure confirmed property walkthrough."
             reason_codes = ["MEETING_GATE_OPEN", "DIRECT_ASK"]
 
+        gate_conf = snapshot.conversion_gate.confidence if snapshot.conversion_gate else 0.90
+
         decision = StrategicDecision(
             call_id=snapshot.call_sid,
             source_state_version=snapshot.state_version,
@@ -285,7 +406,7 @@ class PitchProXCoreIntelligenceEngine:
             retrieval_needed=False,
             urgency="immediate",
             max_prompt_words=22,
-            confidence=0.92,
+            confidence=gate_conf,
             created_at_ms=turn_timestamp_ms,
         )
         return DecisionEvaluationResult(decision=decision, context=context)
@@ -355,7 +476,7 @@ class PitchProXCoreIntelligenceEngine:
             retrieval_needed=False,
             urgency="immediate",
             max_prompt_words=max_words,
-            confidence=0.85,
+            confidence=snapshot.overall_confidence,
             created_at_ms=turn_timestamp_ms,
         )
         return DecisionEvaluationResult(decision=decision, context=context)
