@@ -1,0 +1,62 @@
+<USER_REQUEST>
+On to #4 — dormancy logic. Here's the spec in the same shape as #2/#3:
+
+Problem restated
+
+last_updated_turn_id on the objection only advances when something writes to the objection record. Since turns 15/16 no longer write to objections (correctly, per #2/#3), the dormancy check has nothing else feeding it except elapsed turn count. That's exactly the client's complaint: "Silence is not resolution" — a 3-turn gap with zero corroborating evidence shouldn't be sufficient by itself.
+
+Fix: require corroborating evidence, not just Δturns
+
+In copilot/conversation_materiality.py:
+
+Add a function _get_dormancy_evidence(o: Objection, current_state, current_turn_id) -> DormancyEvidence | None that checks, in order:
+
+Supersession — o.superseded_by_objection_id is not None. Strongest signal, immediate dormancy regardless of turn count.
+Stage-based supersession — if you've landed #1 (conversation_stage) by then, check whether current_state.conversation_stage has moved past the domain the objection belongs to (e.g. general_hesitation belongs to discovery/decision_resolution; if stage is now scheduling or commitment_confirmed, that's structural evidence the conversation moved on). If you haven't landed #1 yet, skip this check for now and add it later — don't block #4 on #1.
+Behavioral resolution evidence since last activity — look at evidence_bundle for turns between o.last_updated_turn_id and current_turn_id for signals correlated with the objection's driver_layer.underlying_driver (e.g. rising agreement_score, future_language_score, or readiness on turns that reference the same topic domain, even if they weren't classified as objection turns). This is the "prospect behaviorally demonstrates resolution" case from the feedback.
+Blocker supersession — another objection or blocker became primary (check current_state.objections for a newer entry with higher severity/recurrence, or check whether a different blocking condition now dominates conversion_gate.failed_conditions).
+
+Turn count alone (Δturns 
+<truncated 388 bytes>
+
+    ...
+
+Returns None if no corroborating evidence exists — in which case the objection stays in its current lifecycle state (partially_resolved stays partially_resolved), not dormant.
+
+In copilot/conversation_state_manager.py:
+
+Wherever you currently call the dormancy transition (likely something like _maybe_transition_dormant(objection, current_turn_id)), change it to:
+
+python
+def _maybe_transition_dormant(self, objection, current_turn_id):
+    delta = current_turn_id - objection.last_updated_turn_id
+    if delta < self.dormancy_turn_threshold:
+        return
+    evidence = _get_dormancy_evidence(objection, self.current_state, current_turn_id)
+    if evidence is None:
+        return  # stays in current lifecycle_state — no transition
+    objection.lifecycle_state = "dormant"
+    objection.dormancy_evidence = evidence  # new field, for the reason string
+
+Reason string generator: update it to cite the evidence type explicitly instead of turn count alone, e.g.:
+
+"Concern 'general_hesitation' transitioned to DORMANT: superseded by stage transition into 'scheduling' (3 turns since last mention)."
+
+Never emit the old bare "after N turns without mention" phrasing again — turn count should only appear as a supporting clause alongside the actual evidence.
+</USER_REQUEST>
+<ADDITIONAL_METADATA>
+The current local time is: 2026-09-23T09:41:18+06:00.
+
+The user's current state is as follows:
+Active Document: c:\dev\Sales_Ai\run_behavioral_signal.py (LANGUAGE_PYTHON)
+Cursor is on line: 24
+Other open documents:
+- c:\dev\clients_requirement(220826).md (LANGUAGE_MARKDOWN)
+- c:\dev\clients_requirement (220926).md (LANGUAGE_MARKDOWN)
+- c:\dev\Sales_Ai\reports\synthetic\conversation_state_sim_mucf8kl0.json (LANGUAGE_JSON)
+- c:\dev\Sales_Ai\requirements.txt (LANGUAGE_UNSPECIFIED)
+- c:\dev\Sales_Ai\run_behavioral_signal.py (LANGUAGE_PYTHON)
+Running terminal commands:
+- Python .\run_behavioral_signal.py (in c:\dev\Sales_Ai, running for 17h18m51s)
+- ngrok http 5002 (in c:\dev\Sales_Ai, running for 16h32m6s)
+</ADDITIONAL_METADATA>

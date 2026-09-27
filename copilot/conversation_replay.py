@@ -16,6 +16,8 @@ from .conversation_state_models import (
 )
 from .conversation_materiality import MaterialityClassification
 from .conversation_state_manager import ConversationStateManager
+from .core_intelligence_models import StrategicDecision
+from .core_decision_manager import CoreDecisionManager
 
 LOGGER = logging.getLogger("copilot.conversation_replay")
 
@@ -36,6 +38,7 @@ class TurnReplayStep(BaseModel):
     materiality: MaterialityClassification
     state_changes: List[StateChangeRecord] = Field(default_factory=list)
     state_after: ConversationStateSnapshot
+    strategic_decision: Optional[StrategicDecision] = None
 
 
 class ConversationStateReplayReport(BaseModel):
@@ -117,6 +120,7 @@ class ConversationReplayEngine:
 
         timeline: List[TurnReplayStep] = []
         prior_bundle: Optional[BehavioralSignalInputBundle] = None
+        decision_manager = CoreDecisionManager(call_sid=call_sid)
 
         is_synthetic_run = (source == "synthetic_simulation") or ("sim_" in call_sid.lower())
 
@@ -155,6 +159,13 @@ class ConversationReplayEngine:
                 if c.triggering_turn_id == bundle.turn_id
             ]
 
+            eval_result = decision_manager.evaluate_state(
+                snapshot=state_after,
+                turn_speaker=bundle.speaker_id,
+                turn_text=bundle.utterance_text,
+                turn_timestamp_ms=bundle.timestamp_ms,
+            )
+
             step = TurnReplayStep(
                 turn_id=bundle.turn_id,
                 speaker_id=bundle.speaker_id,
@@ -165,6 +176,7 @@ class ConversationReplayEngine:
                 materiality=manager.last_materiality or materiality,
                 state_changes=turn_changes,
                 state_after=state_after,
+                strategic_decision=eval_result.decision,
             )
             timeline.append(step)
             prior_bundle = bundle
