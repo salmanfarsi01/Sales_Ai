@@ -374,7 +374,11 @@ def test_unverified_social_proof_reroutes_to_validate_without_claims():
         assert kw not in direct_sp_fallback.lower(), f"Claim keyword '{kw}' found in fallback: {direct_sp_fallback}"
     assert direct_sp_fallback == "Let's focus on what matters for your specific situation."
 
-    # 5. Original decision must remain immutable
+    # 5. Original decision must remain completely untouched (immutability check)
     assert orig_decision.primary_action == StrategicAction.SOCIAL_PROOF
+    assert orig_decision.secondary_action == StrategicAction.QUESTION
+    assert orig_decision.strategic_objective == "Share neighborhood sales success story"
+    assert "UNVERIFIED_SOCIAL_PROOF_REROUTED_TO_VALIDATE" not in orig_decision.reason_codes
+    assert "claim_prior_customer_outcomes" not in orig_decision.do_not_do
 
 
