@@ -259,6 +259,7 @@ class ContactPreference(BaseModel):
     allowed: bool = True
     cadence: Optional[Literal["reduced", "specific_times", "no_preference"]] = None
     prohibited_behavior: Optional[str] = None  # e.g. "daily texting"
+    time_restriction: Optional[str] = None  # e.g. "no calls before 10am"
     boundary_strength: Literal["preference", "hard_restriction"] = "preference"
     source_turn_id: int
     confidence: float = 1.0
@@ -275,6 +276,8 @@ class ContactComplianceState(BaseModel):
     boundary_suspected_turn_id: Optional[int] = None
     hard_boundary_retracted: bool = False
     retraction_turn_id: Optional[int] = None
+    contact_not_before: Optional[str] = Field(default=None, description="Temporal hold until specific day/time (e.g. 'Thursday')")
+    contact_not_before_turn_id: Optional[int] = None
     # Backward compatibility scalar fields
     contact_preference: Literal["none", "reduced_frequency", "channel_restriction", "timing_restriction"] = "none"
     contact_preference_details: Optional[str] = None
@@ -331,7 +334,9 @@ class MomentumBreakdown(BaseModel):
 
 class ReadinessBreakdown(BaseModel):
     """Multi-dimensional readiness breakdown with explainable blocker caps (Phase 6)."""
-    readiness_score: Optional[float] = Field(default=None, description="Final capped readiness score on 0-100 scale, or None if insufficient evidence")
+    readiness_score: Optional[float] = Field(default=None, description="Final capped readiness score on 0-100 scale, or None if insufficient evidence or below coverage threshold")
+    readiness_partial: Optional[float] = Field(default=None, description="Calculated partial score across measured dimensions, available even when overall score is unpublished due to low coverage")
+    coverage: float = Field(default=0.0, ge=0.0, le=1.0, description="Proportion of dimension weight measured (0.0 to 1.0)")
     uncapped_score: Optional[float] = Field(default=None, description="Readiness score before applying blocker caps")
     emotional_readiness: Optional[float] = Field(default=None)
     logical_readiness: Optional[float] = Field(default=None)
@@ -340,7 +345,7 @@ class ReadinessBreakdown(BaseModel):
     active_blocker_caps: List[str] = Field(default_factory=list)
     capped_reason: Optional[str] = None
     confidence: float = Field(0.0, ge=0.0, le=1.0)
-    insufficient_evidence: bool = Field(default=False, description="True if baseline lacks prospect-originated evidence (unknown readiness)")
+    insufficient_evidence: bool = Field(default=False, description="True if baseline lacks prospect-originated evidence (unknown readiness) or below coverage threshold")
     evidence_turn_ids: List[int] = Field(default_factory=list)
 
 

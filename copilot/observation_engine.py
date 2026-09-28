@@ -58,15 +58,40 @@ _GUARDRAIL_EXEMPLARS: Dict[str, List[str]] = {
         "ignore what you said about not contacting you",
     ],
     "violating_contact_preference": [
+        # Cadence violations (e.g. daily texting)
         "i will text you every single day",
+        "i will text you every day",
         "i will call you daily",
         "expect texts from me every morning",
         "i am going to message you all the time",
+        # Channel violations (e.g. email only -> rep calling or offering phone calls)
+        "i will call you tomorrow",
+        "i'll call you tomorrow",
+        "let me call you tomorrow",
+        "expect a call from me tomorrow",
+        "i will give you a call tomorrow",
+        "i will call you on your phone",
+        "let me give you a quick phone call",
+        # Timing restrictions (e.g. no calls before 10am / mornings unavailable)
+        "i will call you tomorrow morning",
+        "i will call you at eight am",
+        "calling you first thing in the morning",
     ],
     "prohibited_daily_texting": [
         "i will text you every day",
         "expect a daily text message",
         "texting you daily with updates",
+    ],
+    "prohibited_phone_calls": [
+        "i will call you tomorrow",
+        "let me call you tomorrow",
+        "i will give you a call",
+        "expect a phone call from me",
+    ],
+    "prohibited_morning_calls": [
+        "i will call you tomorrow morning",
+        "calling you first thing in the morning",
+        "i will call you at eight am",
     ],
 }
 

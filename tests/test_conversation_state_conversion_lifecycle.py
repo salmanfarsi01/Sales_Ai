@@ -209,12 +209,11 @@ def test_trigger_b_explicit_reversal_cancels_without_boundary():
 
     # All records exist in history
     history = manager.get_conversion_event_history()
-    assert len(history) == 3
-    assert history[0].status == ConversionEventStatus.ELIGIBLE
-    assert history[1].status == ConversionEventStatus.CONFIRMED
-    assert history[1].superseded_by_event_id == ev_cancelled.event_id
-    assert history[2].status == ConversionEventStatus.CANCELLED
-    assert history[2].supersedes_event_id == ev_confirmed.event_id
+    assert len(history) == 2
+    assert history[0].status == ConversionEventStatus.CONFIRMED
+    assert history[0].superseded_by_event_id == ev_cancelled.event_id
+    assert history[1].status == ConversionEventStatus.CANCELLED
+    assert history[1].supersedes_event_id == ev_confirmed.event_id
 
 
 def test_trigger_b_adversarial_negations_and_hypotheticals_do_not_cancel():
@@ -299,24 +298,22 @@ def test_full_lifecycle_chain_proposed_confirmed_cancelled():
     assert ev_canc.status == ConversionEventStatus.CANCELLED
     assert ev_canc.supersedes_event_id == ev_conf.event_id
 
-    # Verify complete chain in history (ELIGIBLE -> PROPOSED -> CONFIRMED -> CANCELLED)
+    # Verify complete chain in history (PROPOSED -> CONFIRMED -> CANCELLED)
     history = manager.get_conversion_event_history()
-    assert len(history) == 4
+    assert len(history) == 3
 
-    assert history[0].status == ConversionEventStatus.ELIGIBLE
+    assert history[0].status == ConversionEventStatus.PROPOSED
+    assert history[0].superseded_by_event_id == ev_conf.event_id
+    assert history[0].superseded_at_turn_id == 3
 
-    assert history[1].status == ConversionEventStatus.PROPOSED
-    assert history[1].superseded_by_event_id == ev_conf.event_id
-    assert history[1].superseded_at_turn_id == 3
+    assert history[1].status == ConversionEventStatus.CONFIRMED
+    assert history[1].supersedes_event_id == ev_prop.event_id
+    assert history[1].superseded_by_event_id == ev_canc.event_id
+    assert history[1].superseded_at_turn_id == 4
 
-    assert history[2].status == ConversionEventStatus.CONFIRMED
-    assert history[2].supersedes_event_id == ev_prop.event_id
-    assert history[2].superseded_by_event_id == ev_canc.event_id
-    assert history[2].superseded_at_turn_id == 4
-
-    assert history[3].status == ConversionEventStatus.CANCELLED
-    assert history[3].supersedes_event_id == ev_conf.event_id
-    assert history[3].superseded_by_event_id is None
+    assert history[2].status == ConversionEventStatus.CANCELLED
+    assert history[2].supersedes_event_id == ev_conf.event_id
+    assert history[2].superseded_by_event_id is None
 
 
 def test_reschedule_supersession_links_prior_confirmed_event():
@@ -354,12 +351,11 @@ def test_reschedule_supersession_links_prior_confirmed_event():
     assert ev_fri.reversal_reason == "rescheduled"
 
     history = manager.get_conversion_event_history()
-    assert len(history) == 3
-    assert history[0].status == ConversionEventStatus.ELIGIBLE
-    assert history[1].event_id == ev_thur.event_id
-    assert history[1].superseded_by_event_id == ev_fri.event_id
-    assert history[2].event_id == ev_fri.event_id
-    assert history[2].supersedes_event_id == ev_thur.event_id
+    assert len(history) == 2
+    assert history[0].event_id == ev_thur.event_id
+    assert history[0].superseded_by_event_id == ev_fri.event_id
+    assert history[1].event_id == ev_fri.event_id
+    assert history[1].supersedes_event_id == ev_thur.event_id
 
 
 def test_replay_service_get_conversion_event_history(tmp_path):

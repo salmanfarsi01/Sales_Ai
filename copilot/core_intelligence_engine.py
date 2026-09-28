@@ -41,6 +41,8 @@ class PitchProXCoreIntelligenceEngine:
         # 1. Compliance and Hard Boundary Gate (Spec 01 §10, Spec 09 §7)
         if context.hard_boundary_active:
             eval_res = self._build_boundary_decision(snapshot, context, turn_timestamp_ms)
+        elif snapshot.contact_compliance and snapshot.contact_compliance.contact_not_before and snapshot.contact_compliance.contact_not_before_turn_id == snapshot.last_updated_turn_id:
+            eval_res = self._build_contact_not_before_decision(snapshot, context, turn_timestamp_ms)
         elif context.boundary_suspected:
             eval_res = self._build_boundary_suspected_decision(snapshot, context, turn_timestamp_ms)
         # 2. Confirmed Conversion Protection Gate (Item 9: confirm_and_protect)
@@ -212,6 +214,14 @@ class PitchProXCoreIntelligenceEngine:
                     tag = f"prohibited_{pref.prohibited_behavior.replace(' ', '_')}"
                     if tag not in decision.do_not_do:
                         decision.do_not_do.append(tag)
+                # Channel specific prohibitions (e.g. email only -> no phone calls)
+                if pref.channel == "email":
+                    if "prohibited_phone_calls" not in decision.do_not_do:
+                        decision.do_not_do.append("prohibited_phone_calls")
+                # Timing specific prohibitions (e.g. mornings unavailable / no calls before 10am)
+                if pref.time_restriction and any(m in pref.time_restriction.lower() for m in ("morning", "before 10", "before 10am")):
+                    if "prohibited_morning_calls" not in decision.do_not_do:
+                        decision.do_not_do.append("prohibited_morning_calls")
 
         # 2. Check facts for contact preferences
         pref_facts = [f for f in snapshot.facts if f.category == "preference" and f.status == "active"]
@@ -229,8 +239,49 @@ class PitchProXCoreIntelligenceEngine:
             if "PAST_CONTACT_FRICTION_HONORED" not in decision.reason_codes:
                 decision.reason_codes.append("PAST_CONTACT_FRICTION_HONORED")
 
+        # 4. Check time-bounded hold (contact_not_before)
+        if comp.contact_not_before:
+            has_active_preference = True
+            tag = f"prohibited_contact_before_{comp.contact_not_before.lower().replace(' ', '_')}"
+            if tag not in decision.do_not_do:
+                decision.do_not_do.append(tag)
+            if "contact_not_before_hold" not in decision.what_to_protect:
+                decision.what_to_protect.append("contact_not_before_hold")
+            if "CONTACT_NOT_BEFORE_HONORED" not in decision.reason_codes:
+                decision.reason_codes.append("CONTACT_NOT_BEFORE_HONORED")
+
         if has_active_preference and "CONTACT_PREFERENCE_ENFORCED" not in decision.reason_codes:
             decision.reason_codes.append("CONTACT_PREFERENCE_ENFORCED")
+
+    def _build_contact_not_before_decision(
+        self,
+        snapshot: ConversationStateSnapshot,
+        context: StrategicInterpretationContext,
+        turn_timestamp_ms: int,
+    ) -> DecisionEvaluationResult:
+        """Handles explicit temporal contact holds (e.g. 'until Thursday'): acknowledges hold respectfully."""
+        comp = snapshot.contact_compliance
+        hold_target = comp.contact_not_before if comp else "requested date"
+        clean_tag = hold_target.lower().replace(' ', '_')
+        decision = StrategicDecision(
+            call_id=snapshot.call_sid,
+            source_state_version=snapshot.state_version,
+            should_prompt=True,
+            strategic_objective=f"Acknowledge the prospect's requested contact hold until {hold_target} and gracefully confirm timing.",
+            primary_action=StrategicAction.ACKNOWLEDGE,
+            secondary_action=None,
+            push_strength="respect_record_exit",
+            reason_codes=["CONTACT_NOT_BEFORE_DECLARED", "HOLD_RESPECTED"],
+            do_not_do=["press_for_earlier_time", "premature_close", f"prohibited_contact_before_{clean_tag}"],
+            what_to_protect=["contact_not_before_hold", "prospect_trust"],
+            question_allowed=False,
+            retrieval_needed=False,
+            urgency="immediate",
+            max_prompt_words=20,
+            confidence=0.95,
+            created_at_ms=turn_timestamp_ms,
+        )
+        return DecisionEvaluationResult(decision=decision, context=context)
 
     def _build_boundary_decision(
         self,
@@ -299,6 +350,8 @@ class PitchProXCoreIntelligenceEngine:
             primary_action=StrategicAction.ACKNOWLEDGE,
             secondary_action=StrategicAction.DE_RISK,
             push_strength="confirm_and_protect",
+            meeting_gate_open=context.meeting_gate_open,
+            conversion_confirmed=True,
             reason_codes=["CONVERSION_CONFIRMED", "CONFIRM_AND_PROTECT_ACTIVE"],
             do_not_do=["reopen_resolved_objections", "push_for_additional_commitments", "oversell", "prolong_call"],
             what_to_protect=["confirmed_appointment", "established_trust", "agreed_logistics"],
@@ -657,9 +710,11 @@ class PitchProXCoreIntelligenceEngine:
 
         decision.evidence_considered = evidence
         decision.meeting_gate_open = context.meeting_gate_open
+        decision.conversion_confirmed = context.conversion_confirmed
         decision.strategic_interpretation = {
             "conversation_stage": str(snapshot.conversation_stage.value if hasattr(snapshot.conversation_stage, "value") else snapshot.conversation_stage),
             "meeting_gate_open": context.meeting_gate_open,
+            "conversion_confirmed": context.conversion_confirmed,
             "decision_maker_present": context.decision_maker_present,
             "hard_boundary_active": context.hard_boundary_active,
             "boundary_suspected": context.boundary_suspected,

@@ -220,28 +220,27 @@ def test_future_operational_behavior_immediate_turn_update_on_conversion_upgrade
         snap = mgr.process_turn_bundle(eb)
         snaps.append(snap.model_copy(deep=True))
 
-    # Turn 6: Tentative pre-confirmation floor
+    # Turn 6: Pre-proposal floor
     snap6 = snaps[5]
     assert snap6.momentum.family_scores["future_operational_behavior"] == 15.0
 
-    # Turn 7: UPGRADE case - timing objection resolved, conversion_event transitions to CONFIRMED.
-    # MUST immediately reflect confirmed tier (>= 80.0) on Turn 7 itself, NOT lag until Turn 8!
-    snap7 = snaps[6]
-    assert snap7.conversion_event is not None
-    assert str(snap7.conversion_event.status).lower().endswith("confirmed")
-    assert snap7.momentum.family_scores["future_operational_behavior"] >= 80.0
-    assert snap7.momentum.family_scores["commitment_behavior"] >= 80.0
-
-    # Turn 9: DOWNGRADE case - prospect expresses hesitation ("Maybe next week... let me think"),
-    # conversion_event downgrades to TENTATIVE.
-    # MUST immediately drop to tentative tier (45.0) on Turn 9 itself, NOT lag until Turn 10!
+    # Turn 9: TENTATIVE proposal case - prospect expresses interest ("Maybe next week could work"),
+    # conversion_event updates to TENTATIVE.
+    # MUST immediately reflect tentative tier (45.0) on Turn 9 itself!
     snap9 = snaps[8]
     assert snap9.conversion_event is not None
     assert str(snap9.conversion_event.status).lower().endswith("tentative")
     assert snap9.momentum.family_scores["future_operational_behavior"] == 45.0
     assert snap9.momentum.family_scores["commitment_behavior"] <= 65.0
 
-    # Turn 18: CONFIRMATION case - final appointment confirmed.
+    # Turn 10: Decision regression (wife absent) blocks conversion event
+    snap10 = snaps[9]
+    assert snap10.conversion_event is not None
+    assert str(snap10.conversion_event.status).lower().endswith("blocked")
+    assert snap10.conversion_gate.is_open is False
+
+    # Turn 18: CONFIRMATION case - final appointment confirmed with wife.
+    # MUST immediately reflect confirmed tier (>= 80.0) on Turn 18 itself!
     snap18 = snaps[17]
     assert snap18.conversion_event is not None
     assert str(snap18.conversion_event.status).lower().endswith("confirmed")

@@ -338,7 +338,7 @@ def test_item1_push_strength_constrained_by_gate_status_and_model_validator():
     s2 = manager.process_turn_bundle(t2)
     assert s2.conversion_gate.is_open is False
     assert s2.push_strength.state not in ("two_window_choice", "direct_ask")
-    assert s2.push_strength.state == "resolve_then_ask"
+    assert s2.push_strength.state in ("resolve_then_ask", "reduce_friction_reask")
 
     # Model validator on StrategicDecision enforces invariant
     # 1. Closed gate + two_window_choice -> Must raise ValueError

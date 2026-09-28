@@ -82,25 +82,38 @@ class StrategicDecision(BaseModel):
     gateway_fallback_stub: Optional[str] = Field(default=None, description="Surfaces LLM Gateway's deterministic fallback stub in offline replay trace")
     final_prompt_text: Optional[str] = Field(default=None, description="Alias for gateway_fallback_stub for backward compatibility")
     meeting_gate_open: Optional[bool] = Field(default=None, description="Current meeting gate status for invariant validation")
+    conversion_confirmed: Optional[bool] = Field(default=None, description="Current conversion confirmation status for invariant validation")
 
     @model_validator(mode="after")
     def validate_action_gate_push_invariants(self) -> "StrategicDecision":
+        import os
+        import sys
+        import logging
+
+        # Use explicit STRICT_INVARIANT_RAISE setting: in tests raise, in production coerce safely
+        strict_flag = os.environ.get("STRICT_INVARIANT_RAISE", "").lower().strip()
+        strict_raise = strict_flag in ("1", "true", "yes")
+
         # Extract gate status if provided via field or strategic_interpretation
         gate_open = self.meeting_gate_open
         if gate_open is None and self.strategic_interpretation:
             gate_open = self.strategic_interpretation.get("meeting_gate_open")
 
+        is_confirmed = self.conversion_confirmed
+        if is_confirmed is None and self.strategic_interpretation:
+            is_confirmed = self.strategic_interpretation.get("conversion_confirmed")
+
+        violation_reason: Optional[str] = None
+
         # 1. Closed Gate Constraint: When meeting gate is explicitly closed,
         # close-style pushes (direct_ask, two_window_choice) and COMMITMENT_CLOSE are strictly forbidden.
         if gate_open is False:
             if self.primary_action == StrategicAction.COMMITMENT_CLOSE:
-                raise ValueError(
-                    f"Invariant violation: primary_action cannot be COMMITMENT_CLOSE when meeting gate is closed (decision_id={self.decision_id})."
-                )
-            if self.push_strength in ("direct_ask", "two_window_choice"):
-                raise ValueError(
-                    f"Invariant violation: push_strength cannot be close-style '{self.push_strength}' when meeting gate is closed (decision_id={self.decision_id})."
-                )
+                violation_reason = f"primary_action cannot be COMMITMENT_CLOSE when meeting gate is closed (decision_id={self.decision_id})"
+            elif self.push_strength in ("direct_ask", "two_window_choice"):
+                violation_reason = f"push_strength cannot be close-style '{self.push_strength}' when meeting gate is closed (decision_id={self.decision_id})"
+            elif self.push_strength == "confirm_and_protect" and not is_confirmed:
+                violation_reason = f"push_strength cannot be confirm_and_protect when gate is closed without a confirmed conversion (decision_id={self.decision_id})"
 
         # 2. Action & Push Harmony: Close-style push recommendations (two_window_choice, direct_ask)
         # must NOT accompany non-closing actions.
@@ -114,17 +127,30 @@ class StrategicDecision(BaseModel):
             StrategicAction.MIRROR,
             StrategicAction.DIFFERENTIATE,
         }
-        if self.primary_action in non_closing_actions and self.push_strength in ("direct_ask", "two_window_choice"):
-            raise ValueError(
-                f"Invariant violation: push_strength '{self.push_strength}' cannot accompany non-closing primary_action '{self.primary_action.value}'."
-            )
+        if not violation_reason and self.primary_action in non_closing_actions and self.push_strength in ("direct_ask", "two_window_choice"):
+            violation_reason = f"push_strength '{self.push_strength}' cannot accompany non-closing primary_action '{self.primary_action.value}' (decision_id={self.decision_id})"
 
-        # 3. COMMITMENT_CLOSE requires an affirmative closing push strength or milestone confirmation
-        if self.primary_action == StrategicAction.COMMITMENT_CLOSE:
+        # 3. Confirm and Protect requires a confirmed meeting (Item 4):
+        # Distinguish tentative from confirmed. confirm_and_protect applies ONLY after confirmed meeting.
+        if not violation_reason and self.push_strength == "confirm_and_protect" and is_confirmed is False:
+            violation_reason = f"push_strength 'confirm_and_protect' is invalid without a confirmed appointment (decision_id={self.decision_id})"
+
+        # 4. COMMITMENT_CLOSE requires an affirmative closing push strength or milestone confirmation
+        if not violation_reason and self.primary_action == StrategicAction.COMMITMENT_CLOSE:
             if self.push_strength in ("respect_record_exit", "protect_and_shorten", "explore_conditional_terms"):
-                raise ValueError(
-                    f"Invariant violation: primary_action COMMITMENT_CLOSE is incompatible with push_strength '{self.push_strength}'."
-                )
+                violation_reason = f"primary_action COMMITMENT_CLOSE is incompatible with push_strength '{self.push_strength}' (decision_id={self.decision_id})"
+
+        if violation_reason:
+            if strict_raise:
+                raise ValueError(f"Invariant violation: {violation_reason}")
+            else:
+                logging.getLogger(__name__).warning("StrategicDecision invariant violation coerced: %s", violation_reason)
+                if self.primary_action == StrategicAction.COMMITMENT_CLOSE:
+                    self.primary_action = StrategicAction.QUESTION
+                if self.push_strength in ("direct_ask", "two_window_choice", "confirm_and_protect"):
+                    self.push_strength = "resolve_then_ask"
+                if "INVARIANT_VIOLATION_COERCED" not in self.reason_codes:
+                    self.reason_codes.append("INVARIANT_VIOLATION_COERCED")
 
         return self
 

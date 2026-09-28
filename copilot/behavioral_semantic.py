@@ -142,6 +142,7 @@ SOFT_CONTACT_PREFERENCE_PATTERNS: Dict[str, List[str]] = {
         r"\b(only\s+)?(reach\s+out|call|text|contact)\s+(during|in)\s+business\s+hours\b",
         r"\bonly\s+during\s+business\s+hours\b",
         r"\b(call|text|reach\s+out)\s+(?:me\s+|us\s+)?after\s+\d{1,2}(:\d{2})?\s*(am|pm)?\b",
+        r"\bdon['’]?t\s+(call|text|reach\s+out)\s+(?:me\s+|us\s+)?after\s+\d{1,2}(:\d{2})?\s*(am|pm)?\b",
         r"\bdon['’]?t\s+(call|text)\s+(?:me\s+|us\s+)?before\s+\d{1,2}(:\d{2})?\s*(am|pm)?\b",
         r"\bonly\s+(call|text|reach\s+out)\s+on\s+weekends\b",
         r"\b(call|text)\s+(?:me\s+|us\s+)?in\s+the\s+(evening|afternoon|morning)\b",

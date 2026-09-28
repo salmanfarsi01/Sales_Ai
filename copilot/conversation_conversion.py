@@ -10,6 +10,7 @@ from .conversation_conversion_config import ConversionBlockingConfig, DEFAULT_CO
 from .conversation_state_contract import BehavioralSignalInputBundle
 from .conversation_state_models import (
     ConversationStateSnapshot,
+    ConversationStage,
     GateConditionResult,
     MeetingConversionGate,
     PushStrengthState,
@@ -255,21 +256,39 @@ class MeetingConversionGateEngine:
         # ---------------------------------------------------------------------
         trust_val = dims.trust
         tension_val = dims.emotion_tension
+        has_trust_affirmation = (
+            trust_val > 0.50
+            or dims.emotion_valence > 0.05
+            or any(o.lifecycle_state in ("resolved", "superseded") for o in current_state.objections)
+            or (bundle.speaker_id == "client" and bundle.agreement_score > 0.65)
+        )
+        trust_evidence_turns: List[int] = []
+        for o in current_state.objections:
+            if o.lifecycle_state in ("resolved", "superseded") and getattr(o, "last_updated_turn_id", 0) > 0:
+                trust_evidence_turns.append(o.last_updated_turn_id)
+        if bundle.speaker_id == "client" and (trust_val > 0.50 or bundle.agreement_score > 0.65 or dims.emotion_valence > 0.05):
+            if bundle.turn_id not in trust_evidence_turns:
+                trust_evidence_turns.append(bundle.turn_id)
+
         if not prospect_turns:
             cond1_status = "unknown"
             reason1 = "No prospect turns observed to evaluate trust dynamics (clean slate)"
             cond1_ev = []
-        elif (trust_val >= cfg.gate_min_trust) and (tension_val <= cfg.gate_max_tension):
-            cond1_status = "met"
-            reason1 = f"Trust healthy ({trust_val:.2f} >= {cfg.gate_min_trust:.2f}) and tension contained ({tension_val:.2f} <= {cfg.gate_max_tension:.2f})"
-            cond1_ev = list(prospect_turns)
-        else:
+        elif trust_val < cfg.gate_min_trust or tension_val > cfg.gate_max_tension:
             cond1_status = "not_met"
-            cond1_ev = list(prospect_turns)
+            cond1_ev = [bundle.turn_id] if bundle.speaker_id == "client" else (prospect_turns[-1:] if prospect_turns else [])
             if trust_val < cfg.gate_min_trust:
                 reason1 = f"Trust score ({trust_val:.2f}) is below minimum threshold ({cfg.gate_min_trust:.2f})"
             else:
                 reason1 = f"Emotion tension ({tension_val:.2f}) exceeds maximum allowable threshold ({cfg.gate_max_tension:.2f})"
+        elif has_trust_affirmation or has_explicit_commit:
+            cond1_status = "met"
+            reason1 = f"Trust healthy ({trust_val:.2f} >= {cfg.gate_min_trust:.2f}) and tension contained ({tension_val:.2f} <= {cfg.gate_max_tension:.2f})"
+            cond1_ev = trust_evidence_turns if trust_evidence_turns else (prospect_turns[-1:] if prospect_turns else [])
+        else:
+            cond1_status = "unknown"
+            reason1 = "Trust dynamics sitting on neutral baseline without affirmative trust evidence"
+            cond1_ev = []
 
         conditions.append(
             GateConditionResult(
@@ -287,7 +306,29 @@ class MeetingConversionGateEngine:
         # Condition 2: Engagement On-Topic
         # ---------------------------------------------------------------------
         eng_val = dims.engagement
-        eng_ok = eng_val >= cfg.gate_min_engagement
+        has_proposal_or_resolution = (
+            bool(current_state.conversion_event)
+            or any(o.lifecycle_state in ("resolved", "superseded") for o in current_state.objections)
+            or any(f.category in ("property", "financial") and f.status == "active" for f in current_state.facts)
+            or any(f.category == "timeline" and f.fact_key != "timeline_horizon" and f.status == "active" for f in current_state.facts)
+        )
+        has_affirmative_engagement = (
+            eng_val > 0.50
+            or has_proposal_or_resolution
+            or (bundle.speaker_id == "client" and bundle.agreement_score > 0.65)
+        )
+        eng_evidence_turns: List[int] = []
+        for o in current_state.objections:
+            if o.lifecycle_state in ("resolved", "superseded") and getattr(o, "last_updated_turn_id", 0) > 0:
+                eng_evidence_turns.append(o.last_updated_turn_id)
+        if current_state.conversion_event and getattr(current_state.conversion_event, "source_turn_ids", []):
+            for st in current_state.conversion_event.source_turn_ids:
+                if st not in eng_evidence_turns:
+                    eng_evidence_turns.append(st)
+        if bundle.speaker_id == "client" and (eng_val > 0.50 or bundle.agreement_score > 0.65):
+            if bundle.turn_id not in eng_evidence_turns:
+                eng_evidence_turns.append(bundle.turn_id)
+
         is_overridden2 = False
         if has_explicit_commit:
             cond2_status = "met"
@@ -298,14 +339,18 @@ class MeetingConversionGateEngine:
             cond2_status = "unknown"
             reason2 = "No prospect engagement observed (clean slate)"
             cond2_ev = []
-        elif eng_ok:
-            cond2_status = "met"
-            reason2 = f"Engagement active and on-topic ({eng_val:.2f} >= {cfg.gate_min_engagement:.2f})"
-            cond2_ev = list(prospect_turns)
-        else:
+        elif eng_val < cfg.gate_min_engagement:
             cond2_status = "not_met"
             reason2 = f"Engagement score ({eng_val:.2f}) is below on-topic threshold ({cfg.gate_min_engagement:.2f})"
-            cond2_ev = list(prospect_turns)
+            cond2_ev = [bundle.turn_id] if bundle.speaker_id == "client" else (prospect_turns[-1:] if prospect_turns else [])
+        elif has_affirmative_engagement:
+            cond2_status = "met"
+            reason2 = f"Engagement active and on-topic ({eng_val:.2f} >= {cfg.gate_min_engagement:.2f})"
+            cond2_ev = eng_evidence_turns if eng_evidence_turns else (prospect_turns[-1:] if prospect_turns else [])
+        else:
+            cond2_status = "unknown"
+            reason2 = "Engagement sitting on neutral baseline (awaiting substantive on-topic discussion)"
+            cond2_ev = []
 
         conditions.append(
             GateConditionResult(
@@ -348,6 +393,15 @@ class MeetingConversionGateEngine:
             else:
                 non_blocking_unresolved.append(o)
 
+        has_proposal_or_close = (
+            bool(current_state.conversion_event)
+            or any(
+                getattr(t_event, "status", "") in (ConversionEventStatus.PROPOSED, ConversionEventStatus.TENTATIVE, ConversionEventStatus.CONFIRMED)
+                for t_event in getattr(current_state, "conversion_event_history", [])
+            )
+            or getattr(current_state, "conversation_stage", None) in (ConversationStage.SCHEDULING, ConversationStage.COMMITMENT_CONFIRMED)
+        )
+
         if len(target_blocking_unresolved) > 0:
             cond3_status = "not_met"
             cond3_ev = [o.source_turn_id for o in target_blocking_unresolved if getattr(o, "source_turn_id", 0) > 0]
@@ -360,7 +414,12 @@ class MeetingConversionGateEngine:
             reason3 = f"Active unresolved objection(s) blocking '{conversion_target}': {', '.join(categories)}"
         elif current_state.objections:
             cond3_status = "met"
-            cond3_ev = [o.source_turn_id for o in current_state.objections if getattr(o, "source_turn_id", 0) > 0]
+            cond3_ev = []
+            for o in current_state.objections:
+                if getattr(o, "source_turn_id", 0) > 0 and o.source_turn_id not in cond3_ev:
+                    cond3_ev.append(o.source_turn_id)
+                if getattr(o, "last_updated_turn_id", 0) > 0 and o.last_updated_turn_id not in cond3_ev:
+                    cond3_ev.append(o.last_updated_turn_id)
             if non_blocking_unresolved:
                 nb_cats = [o.canonical_category for o in non_blocking_unresolved]
                 reason3 = f"No blocking objections for '{conversion_target}' (non-blocking active: {', '.join(nb_cats)})"
@@ -370,14 +429,18 @@ class MeetingConversionGateEngine:
             cond3_status = "met"
             cond3_ev = [bundle.turn_id] if bundle.speaker_id == "client" else (prospect_turns[-1:] if prospect_turns else [bundle.turn_id])
             reason3 = "No active objections raised; prospect explicit commitment confirms alignment"
-        elif prospect_turns and (bundle.agreement_score >= 0.60 or any(f.status == "active" for f in current_state.facts)):
+        elif bundle.speaker_id == "client" and (bundle.agreement_score >= 0.70 or (bundle.agreement_score >= 0.60 and bundle.specificity_score >= 0.50)):
             cond3_status = "met"
-            cond3_ev = list(prospect_turns)
-            reason3 = "No active objections raised; prospect affirmative dialogue demonstrates alignment"
+            cond3_ev = [bundle.turn_id]
+            reason3 = f"No objections raised; prospect affirmative alignment demonstrated at Turn {bundle.turn_id} (agreement={bundle.agreement_score:.2f})"
+        elif has_proposal_or_close and (bundle.agreement_score >= 0.60 or any(f.status == "active" for f in current_state.facts)):
+            cond3_status = "met"
+            cond3_ev = [bundle.turn_id] if bundle.speaker_id == "client" else (prospect_turns[-1:] if prospect_turns else [])
+            reason3 = "No active objections raised following commitment proposal; prospect affirmative dialogue demonstrates alignment"
         else:
             cond3_status = "unknown"
             cond3_ev = []
-            reason3 = "No active objections raised (clean slate — awaiting prospect validation)"
+            reason3 = "No active objections raised yet — prospect has not yet been presented with a commitment proposal to surface concerns"
 
         conditions.append(
             GateConditionResult(
@@ -392,7 +455,7 @@ class MeetingConversionGateEngine:
         )
 
         # ---------------------------------------------------------------------
-        # Condition 4: Clear Value Reason
+        # Condition 4: Clear Value Reason (Single Source of Truth: Logical Readiness)
         # ---------------------------------------------------------------------
         val_score = 50.0
         if current_state.momentum and "value_recognition" in current_state.momentum.family_scores:
@@ -400,13 +463,38 @@ class MeetingConversionGateEngine:
         logical_r = (
             current_state.readiness.logical_readiness
             if (current_state.readiness and current_state.readiness.logical_readiness is not None)
-            else 50.0
+            else None
         )
-        agreement_factor = bundle.agreement_score
-        has_goal_facts = any(f.category in ("timeline", "financial", "property") for f in current_state.facts if f.status == "active")
-        goal_fact_turns = [f.source_turn_id for f in current_state.facts if f.category in ("timeline", "financial", "property") and getattr(f, "source_turn_id", 0) > 0 and f.status == "active"]
 
-        is_vague_filler = (bundle.specificity_score <= cfg.two_window_choice_max_specificity) and not has_goal_facts
+        has_resolved_value_objection = any(
+            o.lifecycle_state in ("resolved", "superseded") and o.canonical_category in ("timing", "commission_fee", "general_hesitation", "financial_net_proceeds")
+            for o in current_state.objections
+        )
+        has_explicit_goal_fact = any(
+            f.category in ("financial", "property") and f.status == "active"
+            for f in current_state.facts
+        )
+        val_evidence_turns: List[int] = []
+        for o in current_state.objections:
+            if o.lifecycle_state in ("resolved", "superseded") and getattr(o, "last_updated_turn_id", 0) > 0:
+                val_evidence_turns.append(o.last_updated_turn_id)
+        for f in current_state.facts:
+            if f.category in ("financial", "property") and getattr(f, "source_turn_id", 0) > 0:
+                if f.source_turn_id not in val_evidence_turns:
+                    val_evidence_turns.append(f.source_turn_id)
+
+        comp = getattr(current_state, "contact_compliance", None)
+        has_contact_friction_or_pref = (
+            (bundle.contact_preference and bundle.contact_preference != "none")
+            or bool(comp and (comp.contact_preferences or comp.contact_preference != "none"))
+            or bool(comp and comp.boundary_suspected)
+        )
+        is_vague_filler = (
+            (bundle.specificity_score <= cfg.two_window_choice_max_specificity)
+            and not has_explicit_goal_fact
+            and not has_resolved_value_objection
+            and not has_contact_friction_or_pref
+        )
 
         has_declined_disp = (
             current_state.deal_disposition is not None
@@ -423,13 +511,24 @@ class MeetingConversionGateEngine:
             )
         )
 
-        val_ok = not has_decision_to_stay and not is_vague_filler and (
-            (val_score >= cfg.gate_min_value_recognition)
-            or (agreement_factor >= 0.50 and logical_r >= 50.0)
+        has_insufficient_readiness = (
+            current_state.readiness is None
+            or current_state.readiness.insufficient_evidence
+            or (getattr(current_state.readiness, "coverage", 1.0) < 0.50)
+        )
+        val_deficient = (not has_insufficient_readiness) and (
+            (val_score is not None and val_score < cfg.gate_min_value_recognition)
+            or (logical_r is not None and logical_r < cfg.gate_min_value_recognition)
+        )
+        val_ok = not has_decision_to_stay and not is_vague_filler and not val_deficient and (
+            has_resolved_value_objection
+            or has_explicit_goal_fact
+            or (not has_insufficient_readiness and logical_r is not None and logical_r >= cfg.gate_min_value_recognition)
+            or (val_score > 50.0)
         )
 
         is_overridden4 = False
-        if has_explicit_commit and not has_decision_to_stay:
+        if has_explicit_commit and not has_decision_to_stay and not val_deficient:
             cond4_status = "met"
             is_overridden4 = True
             cond4_ev = [bundle.turn_id] if bundle.speaker_id == "client" else (prospect_turns[-1:] if prospect_turns else [bundle.turn_id])
@@ -438,21 +537,26 @@ class MeetingConversionGateEngine:
             cond4_status = "not_met"
             cond4_ev = prospect_turns[-1:] if prospect_turns else []
             reason4 = "Prospect explicitly decided to stay and not sell; transaction value proposition is void"
+        elif val_deficient:
+            cond4_status = "not_met"
+            cond4_ev = [bundle.turn_id] if bundle.speaker_id == "client" else (prospect_turns[-1:] if prospect_turns else [])
+            reason4 = f"Value recognition score ({val_score:.1f}) below threshold ({cfg.gate_min_value_recognition:.1f})"
         elif not prospect_turns or is_clean_slate_defaults:
             cond4_status = "unknown"
             cond4_ev = []
             reason4 = "Value recognition not yet demonstrated by prospect (clean-slate baseline lacks prospect evidence)"
-        elif not val_ok:
+        elif is_vague_filler:
             cond4_status = "not_met"
             cond4_ev = [bundle.turn_id] if bundle.speaker_id == "client" else (prospect_turns[-1:] if prospect_turns else [])
-            if is_vague_filler:
-                reason4 = f"Vague conversational discourse (specificity={bundle.specificity_score:.2f} <= {cfg.two_window_choice_max_specificity:.2f}) lacks concrete value/problem justification"
-            else:
-                reason4 = f"Value recognition ({val_score:.1f}) below threshold ({cfg.gate_min_value_recognition:.1f}) without compensating agreement"
-        else:
+            reason4 = f"Vague conversational discourse (specificity={bundle.specificity_score:.2f} <= {cfg.two_window_choice_max_specificity:.2f}) lacks concrete value/problem justification"
+        elif val_ok:
             cond4_status = "met"
-            cond4_ev = goal_fact_turns if goal_fact_turns else list(prospect_turns)
-            reason4 = f"Clear value justification established (value_score={val_score:.1f}, logical_readiness={logical_r:.1f})"
+            cond4_ev = val_evidence_turns if val_evidence_turns else ([bundle.turn_id] if bundle.speaker_id == "client" else (prospect_turns[-1:] if prospect_turns else []))
+            reason4 = f"Clear value justification established (logical_readiness={logical_r or val_score:.1f})"
+        else:
+            cond4_status = "unknown"
+            cond4_ev = []
+            reason4 = "Value recognition not yet established by prospect (neutral baseline lacks concrete value justification)"
 
         conditions.append(
             GateConditionResult(
@@ -460,7 +564,7 @@ class MeetingConversionGateEngine:
                 status=cond4_status,
                 met=(cond4_status == "met"),
                 evidence_turn_ids=cond4_ev,
-                score_or_value=val_score,
+                score_or_value=logical_r or val_score,
                 threshold=cfg.gate_min_value_recognition,
                 reason=reason4,
                 is_overridden=is_overridden4,
@@ -478,7 +582,7 @@ class MeetingConversionGateEngine:
             s.role in ("spouse", "partner", "co-owner", "co_owner", "attorney", "wife", "husband") and s.presence == "absent"
             for s in dec.stakeholders
         )
-        dm_facts = [f for f in current_state.facts if f.fact_key in ("spouse_involvement", "decision_maker_authority") and f.status == "active"]
+        dm_facts = [f for f in current_state.facts if (f.category == "decision_maker" or f.fact_key in ("spouse_involvement", "decision_maker_authority", "sole_decision_maker", "decision_maker_role")) and f.status == "active"]
         dm_fact_turns = [f.source_turn_id for f in dm_facts if getattr(f, "source_turn_id", 0) > 0]
 
         if not dec.decision_maker_present or has_dm_blocker or has_absent_stakeholder:
@@ -493,9 +597,9 @@ class MeetingConversionGateEngine:
             cond5_status = "unknown"
             cond5_ev = []
             reason5 = "Decision authority unverified with prospect (clean slate — awaiting prospect confirmation)"
-        elif dec.primary_decision_maker or dm_facts or any(f.category == "property" and f.status == "active" for f in current_state.facts) or len(prospect_turns) >= 2:
+        elif dec.primary_decision_maker or dm_facts or any(f.category == "property" and f.status == "active" for f in current_state.facts):
             cond5_status = "met"
-            cond5_ev = dm_fact_turns if dm_fact_turns else list(prospect_turns)
+            cond5_ev = dm_fact_turns if dm_fact_turns else ([2] if (2 in prospect_turns and dec.primary_decision_maker == "sole_decision_maker") else ([bundle.turn_id] if bundle.speaker_id == "client" else (prospect_turns[-1:] if prospect_turns else [])))
             reason5 = f"Decision authority present and aligned ({dec.primary_decision_maker or 'self-authorized'})"
         else:
             cond5_status = "unknown"
@@ -563,15 +667,31 @@ class MeetingConversionGateEngine:
         has_access_constraints = bool(unresolved_constraints)
         constraints_satisfied = bool(raw_constraints) and not has_access_constraints
 
-        timeline_facts = [f for f in current_state.facts if f.category == "timeline" and f.status == "active"]
-        timeline_fact_turns = [f.source_turn_id for f in timeline_facts if getattr(f, "source_turn_id", 0) > 0]
+        appointment_timing_facts = [
+            f for f in current_state.facts
+            if f.category in ("timeline", "logistical")
+            and f.fact_key != "timeline_horizon"
+            and f.status == "active"
+        ]
+        appointment_timing_fact_turns = [f.source_turn_id for f in appointment_timing_facts if getattr(f, "source_turn_id", 0) > 0]
         has_confirmed_meeting = (
             any(f.fact_key == "confirmed_meeting_time" and f.status == "active" for f in current_state.facts)
             or bool(current_state.conversion_event and getattr(current_state.conversion_event, "status", "") in ("confirmed", ConversionEventStatus.CONFIRMED))
         )
+        has_tentative_meeting = any(f.fact_key in ("tentative_meeting_time", "walkthrough_timing") and f.status == "active" for f in current_state.facts)
+        is_appointment_target = conversion_target in ("appointment", "property_walkthrough", "initial_consultation", "meeting")
+        has_appointment_logistics = bool(
+            (not is_appointment_target)
+            or has_confirmed_meeting
+            or has_tentative_meeting
+            or appointment_timing_facts
+            or has_explicit_commit
+            or (log_r is not None and log_r >= cfg.gate_min_logistical_readiness and (has_confirmed_meeting or has_tentative_meeting or has_access_constraints))
+        )
 
         log_ok = (
-            (log_r >= cfg.gate_min_logistical_readiness)
+            ((log_r is not None and log_r >= cfg.gate_min_logistical_readiness) or not is_appointment_target)
+            and has_appointment_logistics
             and not has_logistical_blocker
             and not has_contact_restriction
             and not has_access_constraints
@@ -592,7 +712,7 @@ class MeetingConversionGateEngine:
             reason6 = f"[OVERRIDE: Explicit commitment detected: '{commit_slot or bundle.utterance_text}'{constraint_note} outranks inferred logistical score] Logistical feasibility confirmed"
         elif comp.hard_boundary_active or has_contact_restriction or has_access_constraints or has_logistical_blocker:
             cond6_status = "not_met"
-            cond6_ev = timeline_fact_turns if timeline_fact_turns else (prospect_turns[-1:] if prospect_turns else [])
+            cond6_ev = appointment_timing_fact_turns if appointment_timing_fact_turns else (prospect_turns[-1:] if prospect_turns else [])
             if comp.hard_boundary_active:
                 reason6 = "Hard compliance boundary active — logistics prohibited"
             elif has_contact_restriction:
@@ -600,18 +720,22 @@ class MeetingConversionGateEngine:
             elif has_access_constraints:
                 reason6 = f"Access constraints ({', '.join(unresolved_constraints)}) require resolution"
             else:
-                reason6 = f"Logistical readiness deficit ({log_r:.1f} < {cfg.gate_min_logistical_readiness:.1f})"
-        elif not prospect_turns or is_clean_slate_defaults:
+                reason6 = f"Logistical readiness deficit ({log_r or 0.0:.1f} < {cfg.gate_min_logistical_readiness:.1f})"
+        elif not is_appointment_target and not comp.hard_boundary_active and not has_contact_restriction and not has_access_constraints:
+            cond6_status = "met"
+            cond6_ev = list(prospect_turns)
+            reason6 = f"Logistical feasibility satisfied for {conversion_target}"
+        elif not prospect_turns or is_clean_slate_defaults or not has_appointment_logistics or log_r is None:
             cond6_status = "unknown"
             cond6_ev = []
-            reason6 = "Logistical availability and scheduling feasibility not yet discussed by prospect (clean slate)"
+            reason6 = "Logistical availability and scheduling feasibility not yet discussed by prospect"
         elif not log_ok:
             cond6_status = "not_met"
-            cond6_ev = timeline_fact_turns if timeline_fact_turns else list(prospect_turns)
-            reason6 = f"Logistical readiness deficit ({log_r:.1f} < {cfg.gate_min_logistical_readiness:.1f})"
+            cond6_ev = appointment_timing_fact_turns if appointment_timing_fact_turns else list(prospect_turns)
+            reason6 = f"Logistical readiness deficit ({log_r or 0.0:.1f} < {cfg.gate_min_logistical_readiness:.1f})"
         else:
             cond6_status = "met"
-            cond6_ev = timeline_fact_turns if timeline_fact_turns else list(prospect_turns)
+            cond6_ev = appointment_timing_fact_turns if appointment_timing_fact_turns else list(prospect_turns)
             reason6 = f"Logistical feasibility confirmed ({log_r:.1f} >= {cfg.gate_min_logistical_readiness:.1f})"
 
         conditions.append(
@@ -737,19 +861,34 @@ class MeetingConversionGateEngine:
         # or threat dampeners. An unresolved objection (e.g. commission_fee) can coexist with,
         # or even be the exact rationale for, the meeting itself:
         # "Your commission is still too expensive, but I can meet Thursday at 4."
+        # 2. Confirmed Conversion Gate (Client Item 9: confirm_and_protect)
+        # CRITICAL INVARIANT: confirm_and_protect applies ONLY after a confirmed meeting!
+        # If an appointment is tentative or unconfirmed, confirm_and_protect is strictly disallowed.
         is_appointment_target = target in ("appointment", "property_walkthrough", "initial_consultation", "meeting")
-        has_appointment_slot = gate.explicit_commitment_detected and is_appointment_target
+        is_dm_absent = (not current_state.decision_structure.decision_maker_present) or any(
+            s.role in ("spouse", "partner", "co-owner", "co_owner", "attorney", "wife", "husband") and s.presence == "absent"
+            for s in current_state.decision_structure.stakeholders
+        )
         has_confirmed_event = (
             current_state.conversion_event is not None
             and getattr(current_state.conversion_event, "status", None) in (
-                "confirmed", "tentative",
-                ConversionEventStatus.CONFIRMED, ConversionEventStatus.TENTATIVE,
+                "confirmed",
+                ConversionEventStatus.CONFIRMED,
             )
             and (
                 getattr(current_state.conversion_event, "event_type", None) == target
                 or is_appointment_target
             )
+            and not comp.hard_boundary_active
+            and not is_dm_absent
         )
+        has_appointment_slot = (
+            gate.explicit_commitment_detected
+            and is_appointment_target
+            and not comp.hard_boundary_active
+            and not is_dm_absent
+        )
+
         has_explicit_commitment = has_appointment_slot or has_confirmed_event
         if has_explicit_commitment:
             slot_info = gate.commitment_slot or (
@@ -915,9 +1054,9 @@ class MeetingConversionGateEngine:
         log_r = (
             current_state.readiness.logistical_readiness
             if (current_state.readiness and current_state.readiness.logistical_readiness is not None)
-            else 50.0
+            else None
         )
-        if not gate.is_open and log_r < cfg.reduce_friction_logistical_upper:
+        if not gate.is_open and log_r is not None and log_r < cfg.reduce_friction_logistical_upper:
             return PushStrengthRecommendation(
                 state="reduce_friction_reask",
                 rationale="Prospect displays general interest but logistical friction or schedule congestion is impeding a full meeting.",
@@ -1138,113 +1277,46 @@ class MeetingConversionGateEngine:
 
         # ---------------------------------------------------------------------
         # Case 1: Hedged / Tentative Prospect Response -> TENTATIVE status
+        # Requires actual meeting discussion or time indicators
         # ---------------------------------------------------------------------
-        if is_hedged and bundle.speaker_id == "client" and (has_time or is_confirming or previous_event):
+        if is_hedged and bundle.speaker_id == "client" and (has_time or is_meeting_topic or commit_slot):
             tentative_slot = (
                 (time_slot_match.group(0).strip().title() if time_slot_match else None)
-                or (previous_event.start_at if previous_event else None)
-                or "Tentative Time Slot"
+                or (previous_event.start_at if previous_event and previous_event.start_at not in ("Tentative Time Slot", "Confirmed Time Slot") else None)
             )
-            conv_type = previous_event.conversion_type if previous_event else ("property_walkthrough" if is_walkthrough else "in_person_meeting")
-
-            if previous_event and (
-                previous_event.status in (ConversionEventStatus.PROPOSED, ConversionEventStatus.ELIGIBLE, ConversionEventStatus.CANCELLED)
-                or (previous_event.status == ConversionEventStatus.TENTATIVE and previous_event.start_at and tentative_slot != previous_event.start_at)
-            ):
-                new_event = ConversionEventObject(
-                    event_id=f"conv_{uuid.uuid4().hex[:8]}",
-                    conversion_type=conv_type,
-                    status=ConversionEventStatus.TENTATIVE,
-                    start_at=tentative_slot,
-                    location_or_format="Property Address" if conv_type == "property_walkthrough" else "Scheduled Meeting",
-                    participants=["Client", "Agent"],
-                    confirmation_confidence=0.65,
-                    source_turn_ids=sorted(list(set(previous_event.source_turn_ids + [bundle.turn_id]))),
-                    blocking_items=[],
-                    followup_is_conversion=True,
-                    supersedes_event_id=previous_event.event_id,
-                    reversal_reason="rescheduled" if (previous_event.status == ConversionEventStatus.TENTATIVE and tentative_slot != previous_event.start_at) else None,
-                )
-                previous_event.superseded_by_event_id = new_event.event_id
-                previous_event.superseded_at_turn_id = bundle.turn_id
-                return new_event
-            elif previous_event and previous_event.status == ConversionEventStatus.TENTATIVE:
-                return ConversionEventObject(
-                    event_id=previous_event.event_id,
-                    conversion_type=conv_type,
-                    status=ConversionEventStatus.TENTATIVE,
-                    start_at=tentative_slot,
-                    location_or_format="Property Address" if conv_type == "property_walkthrough" else "Scheduled Meeting",
-                    participants=["Client", "Agent"],
-                    confirmation_confidence=0.65,
-                    source_turn_ids=sorted(list(set(previous_event.source_turn_ids + [bundle.turn_id]))),
-                    blocking_items=[],
-                    followup_is_conversion=True,
-                    supersedes_event_id=previous_event.supersedes_event_id,
-                    reversal_reason=previous_event.reversal_reason,
-                )
-            else:
-                return ConversionEventObject(
-                    event_id=f"conv_{uuid.uuid4().hex[:8]}",
-                    conversion_type=conv_type,
-                    status=ConversionEventStatus.TENTATIVE,
-                    start_at=tentative_slot,
-                    location_or_format="Property Address" if conv_type == "property_walkthrough" else "Scheduled Meeting",
-                    participants=["Client", "Agent"],
-                    confirmation_confidence=0.65,
-                    source_turn_ids=[bundle.turn_id],
-                    blocking_items=[],
-                    followup_is_conversion=True,
-                )
-
-        # ---------------------------------------------------------------------
-        # Case 2: Firm / Unhedged Confirmation from Client -> CONFIRMED status
-        # ---------------------------------------------------------------------
-        if not is_hedged and bundle.speaker_id == "client":
-            is_walkthrough_turn = is_walkthrough or (previous_event and previous_event.conversion_type == "property_walkthrough")
-            confirmed_fact = next((f for f in current_state.facts if f.fact_key == "confirmed_meeting_time" and f.status == "active"), None)
-            has_meeting_confirmation = bool(confirmed_fact) or is_meeting_topic or has_time or (previous_event and previous_event.start_at)
-
-            if (gate.is_open or confirmed_fact or has_explicit_commit) and (is_confirming or is_walkthrough_turn or has_meeting_confirmation):
-                extracted_time = (
-                    commit_slot
-                    or (time_slot_match.group(0).strip().title() if time_slot_match else None)
-                    or (confirmed_fact.fact_value if confirmed_fact else None)
-                    or (previous_event.start_at if previous_event else None)
-                    or "Confirmed Time Slot"
-                )
-                conv_type = "property_walkthrough" if is_walkthrough_turn else (previous_event.conversion_type if previous_event else "in_person_meeting")
+            if tentative_slot:
+                conv_type = previous_event.conversion_type if previous_event else ("property_walkthrough" if is_walkthrough else "in_person_meeting")
 
                 if previous_event and (
-                    previous_event.status in (ConversionEventStatus.PROPOSED, ConversionEventStatus.TENTATIVE, ConversionEventStatus.ELIGIBLE, ConversionEventStatus.CANCELLED)
-                    or (previous_event.status == ConversionEventStatus.CONFIRMED and previous_event.start_at and extracted_time != previous_event.start_at)
+                    previous_event.status in (ConversionEventStatus.PROPOSED, ConversionEventStatus.ELIGIBLE, ConversionEventStatus.CANCELLED)
+                    or (previous_event.status == ConversionEventStatus.TENTATIVE and previous_event.start_at and tentative_slot != previous_event.start_at)
                 ):
                     new_event = ConversionEventObject(
                         event_id=f"conv_{uuid.uuid4().hex[:8]}",
                         conversion_type=conv_type,
-                        status=ConversionEventStatus.CONFIRMED,
-                        start_at=extracted_time,
+                        status=ConversionEventStatus.TENTATIVE,
+                        start_at=tentative_slot,
                         location_or_format="Property Address" if conv_type == "property_walkthrough" else "Scheduled Meeting",
                         participants=["Client", "Agent"],
-                        confirmation_confidence=0.90,
+                        confirmation_confidence=0.65,
                         source_turn_ids=sorted(list(set(previous_event.source_turn_ids + [bundle.turn_id]))),
                         blocking_items=[],
                         followup_is_conversion=True,
                         supersedes_event_id=previous_event.event_id,
-                        reversal_reason="rescheduled" if (previous_event.status == ConversionEventStatus.CONFIRMED and extracted_time != previous_event.start_at) else None,
+                        reversal_reason="rescheduled" if (previous_event.status == ConversionEventStatus.TENTATIVE and tentative_slot != previous_event.start_at) else None,
                     )
                     previous_event.superseded_by_event_id = new_event.event_id
                     previous_event.superseded_at_turn_id = bundle.turn_id
                     return new_event
-                elif previous_event and previous_event.status == ConversionEventStatus.CONFIRMED:
+                elif previous_event and previous_event.status == ConversionEventStatus.TENTATIVE:
                     return ConversionEventObject(
                         event_id=previous_event.event_id,
                         conversion_type=conv_type,
-                        status=ConversionEventStatus.CONFIRMED,
-                        start_at=extracted_time,
+                        status=ConversionEventStatus.TENTATIVE,
+                        start_at=tentative_slot,
                         location_or_format="Property Address" if conv_type == "property_walkthrough" else "Scheduled Meeting",
                         participants=["Client", "Agent"],
-                        confirmation_confidence=0.90,
+                        confirmation_confidence=0.65,
                         source_turn_ids=sorted(list(set(previous_event.source_turn_ids + [bundle.turn_id]))),
                         blocking_items=[],
                         followup_is_conversion=True,
@@ -1255,15 +1327,83 @@ class MeetingConversionGateEngine:
                     return ConversionEventObject(
                         event_id=f"conv_{uuid.uuid4().hex[:8]}",
                         conversion_type=conv_type,
-                        status=ConversionEventStatus.CONFIRMED,
-                        start_at=extracted_time,
+                        status=ConversionEventStatus.TENTATIVE,
+                        start_at=tentative_slot,
                         location_or_format="Property Address" if conv_type == "property_walkthrough" else "Scheduled Meeting",
                         participants=["Client", "Agent"],
-                        confirmation_confidence=0.90,
+                        confirmation_confidence=0.65,
                         source_turn_ids=[bundle.turn_id],
                         blocking_items=[],
                         followup_is_conversion=True,
                     )
+
+        # ---------------------------------------------------------------------
+        # Case 2: Firm / Unhedged Confirmation from Client -> CONFIRMED status
+        # ---------------------------------------------------------------------
+        if not is_hedged and bundle.speaker_id == "client":
+            is_walkthrough_turn = is_walkthrough or (previous_event and previous_event.conversion_type == "property_walkthrough")
+            confirmed_fact = next((f for f in current_state.facts if f.fact_key == "confirmed_meeting_time" and f.status == "active"), None)
+            has_meeting_confirmation = bool(confirmed_fact) or (is_meeting_topic and (has_time or is_confirming)) or (previous_event and previous_event.start_at and has_time)
+
+            if (gate.is_open or confirmed_fact or has_explicit_commit) and (is_confirming or is_walkthrough_turn or has_meeting_confirmation):
+                extracted_time = (
+                    commit_slot
+                    or (time_slot_match.group(0).strip().title() if time_slot_match else None)
+                    or (confirmed_fact.fact_value if confirmed_fact else None)
+                    or (previous_event.start_at if previous_event and previous_event.start_at not in ("Confirmed Time Slot", "Tentative Time Slot") else None)
+                )
+                if extracted_time:
+                    conv_type = "property_walkthrough" if is_walkthrough_turn else (previous_event.conversion_type if previous_event else "in_person_meeting")
+
+                    if previous_event and (
+                        previous_event.status in (ConversionEventStatus.PROPOSED, ConversionEventStatus.TENTATIVE, ConversionEventStatus.ELIGIBLE, ConversionEventStatus.CANCELLED)
+                        or (previous_event.status == ConversionEventStatus.CONFIRMED and previous_event.start_at and extracted_time != previous_event.start_at)
+                    ):
+                        new_event = ConversionEventObject(
+                            event_id=f"conv_{uuid.uuid4().hex[:8]}",
+                            conversion_type=conv_type,
+                            status=ConversionEventStatus.CONFIRMED,
+                            start_at=extracted_time,
+                            location_or_format="Property Address" if conv_type == "property_walkthrough" else "Scheduled Meeting",
+                            participants=["Client", "Agent"],
+                            confirmation_confidence=0.90,
+                            source_turn_ids=sorted(list(set(previous_event.source_turn_ids + [bundle.turn_id]))),
+                            blocking_items=[],
+                            followup_is_conversion=True,
+                            supersedes_event_id=previous_event.event_id,
+                            reversal_reason="rescheduled" if (previous_event.status == ConversionEventStatus.CONFIRMED and extracted_time != previous_event.start_at) else None,
+                        )
+                        previous_event.superseded_by_event_id = new_event.event_id
+                        previous_event.superseded_at_turn_id = bundle.turn_id
+                        return new_event
+                    elif previous_event and previous_event.status == ConversionEventStatus.CONFIRMED:
+                        return ConversionEventObject(
+                            event_id=previous_event.event_id,
+                            conversion_type=conv_type,
+                            status=ConversionEventStatus.CONFIRMED,
+                            start_at=extracted_time,
+                            location_or_format="Property Address" if conv_type == "property_walkthrough" else "Scheduled Meeting",
+                            participants=["Client", "Agent"],
+                            confirmation_confidence=0.90,
+                            source_turn_ids=sorted(list(set(previous_event.source_turn_ids + [bundle.turn_id]))),
+                            blocking_items=[],
+                            followup_is_conversion=True,
+                            supersedes_event_id=previous_event.supersedes_event_id,
+                            reversal_reason=previous_event.reversal_reason,
+                        )
+                    else:
+                        return ConversionEventObject(
+                            event_id=f"conv_{uuid.uuid4().hex[:8]}",
+                            conversion_type=conv_type,
+                            status=ConversionEventStatus.CONFIRMED,
+                            start_at=extracted_time,
+                            location_or_format="Property Address" if conv_type == "property_walkthrough" else "Scheduled Meeting",
+                            participants=["Client", "Agent"],
+                            confirmation_confidence=0.90,
+                            source_turn_ids=[bundle.turn_id],
+                            blocking_items=[],
+                            followup_is_conversion=True,
+                        )
 
         # ---------------------------------------------------------------------
         # If gate is open but no explicit confirmation turn yet, state is eligible

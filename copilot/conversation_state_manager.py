@@ -248,14 +248,31 @@ class ConversationStateManager:
             )
             has_negative_timing_prefix = bool(neg_match)
 
+            # Time-bounded hold check (Client Audit Fix):
+            # "Don't call me again until Thursday" -> temporal hold, NOT boundary_suspected.
+            hold_match = re.search(
+                r"\bdon['’]?t\s+(?:call|reach\s+out|text|contact)\s+(?:me\s+)?(?:again\s+)?until\s+(monday|tuesday|wednesday|thursday|friday|saturday|sunday|tomorrow|tonight|next\s+week|[a-z]+\s+\d{1,2}(?:th|st|rd|nd)?)\b",
+                text_lower,
+            )
+            is_time_bounded_hold = bool(hold_match)
+            hold_target = hold_match.group(1).strip().title() if hold_match else None
+
+            # Daily timing preference check:
+            # "Don't call after 4pm" -> daily time preference, NOT a hold and NOT a boundary.
+            daily_timing_pref_match = re.search(
+                r"\bdon['’]?t\s+(?:call|reach\s+out|text|contact)\s+(?:me\s+)?(?:after|before)\s+(\d{1,2}(?::\d{2})?\s*(?:am|pm)?|noon)\b",
+                text_lower,
+            )
+            is_daily_timing_pref = bool(daily_timing_pref_match)
+
             is_scheduling_alternative = False
-            if not has_cutoff_terms and neg_match:
+            if not has_cutoff_terms and neg_match and not is_time_bounded_hold and not is_daily_timing_pref:
                 subsequent_text = text_lower[neg_match.end():]
                 if re.search(time_expr_pattern, subsequent_text):
                     is_scheduling_alternative = True
 
             # Ambiguous contact timing friction falls back to boundary_suspected (Client Audit Fix Item 4)
-            is_ambiguous_contact_timing = has_negative_timing_prefix and not is_scheduling_alternative and not has_cutoff_terms
+            is_ambiguous_contact_timing = has_negative_timing_prefix and not is_scheduling_alternative and not has_cutoff_terms and not is_time_bounded_hold and not is_daily_timing_pref
 
             # 2. Retraction patterns: explicit prospect invitation to contact after a prior boundary
             retraction_patterns = [
@@ -270,12 +287,13 @@ class ConversationStateManager:
                 and any(re.search(p, text_lower) for p in retraction_patterns)
             )
 
-            # 3. Soft preference check: if utterance is purely a soft preference ("don't text me every day"), keep out of boundary path
-            is_pure_soft_preference = False
-            for cat, pats in SOFT_CONTACT_PREFERENCE_PATTERNS.items():
-                if any(re.search(p, text_lower) for p in pats):
-                    is_pure_soft_preference = True
-                    break
+            # 3. Soft preference check: if utterance is purely a soft preference ("don't text me every day", "don't call after 4pm"), keep out of boundary path
+            is_pure_soft_preference = is_daily_timing_pref
+            if not is_pure_soft_preference:
+                for cat, pats in SOFT_CONTACT_PREFERENCE_PATTERNS.items():
+                    if any(re.search(p, text_lower) for p in pats):
+                        is_pure_soft_preference = True
+                        break
 
             # 4. Clause-level Boundary and Negation Parsing (Client feedback Item 4):
             # Split utterance by contrastive conjunctions or punctuation to evaluate each clause independently.
@@ -312,6 +330,8 @@ class ConversationStateManager:
                 and not is_retraction
                 and not is_scheduling_alternative
                 and not is_ambiguous_contact_timing
+                and not is_time_bounded_hold
+                and not is_daily_timing_pref
                 and (
                     (bundle.boundary_score >= 0.85 and not any(re.search(p, text_lower) for p in negation_patterns if len(clauses) == 1))
                     or bundle.recurrence_type == "boundary_repeated"
@@ -328,17 +348,29 @@ class ConversationStateManager:
                 r"\b(?:maybe\s+)?don['’]?t\s+call\s+(?:me\s+)?(?:right\s+now|today|for\s+now)\b",
                 r"\b(?:leave\s+me\s+alone\s+(?:for\s+now)?|uncomfortable\s+with\s+you\s+calling)\b",
             ]
-            has_contact_friction = any(re.search(p, text_lower) for p in contact_specific_friction_patterns) or is_ambiguous_contact_timing
+            has_contact_friction = (
+                (any(re.search(p, text_lower) for p in contact_specific_friction_patterns) or is_ambiguous_contact_timing)
+                and not is_time_bounded_hold
+                and not is_daily_timing_pref
+            )
 
-            # Clearing boundary_suspected (Client Audit Fix Item 3):
+            # Clearing boundary_suspected (Client Audit Fix Item 3 & Smaller Items):
             # Naked backchannels ("okay", "fine", "sure") do NOT clear suspected boundaries.
-            # Must be an explicit contact permission statement or substantive forward engagement.
+            # Must be an explicit contact permission statement requiring the object ('me' or 'us' or 'to you').
+            # E.g. "you can call my lawyer" and "happy to talk to your manager" must NOT clear.
             has_contact_permission_statement = bool(
                 re.search(
-                    r"\b(?:it['’]?s\s+(?:fine|okay)\s+to\s+(?:call|reach\s+out|talk)|you\s+can\s+(?:call|reach\s+out|talk|contact)|go\s+ahead\s+and\s+(?:call|reach\s+out|talk)|happy\s+to\s+talk|fine\s+to\s+call|okay\s+to\s+call|feel\s+free\s+to\s+call|sure\s+you\s+can\s+call)\b",
+                    r"\b(?:it['’]?s\s+(?:fine|okay)\s+to\s+(?:call|reach\s+out\s+to|talk\s+to)\s+(?:me|us)\b|"
+                    r"(?:you\s+can|feel\s+free\s+to|go\s+ahead\s+and)\s+(?:definitely\s+|certainly\s+)?(?:call|reach\s+out\s+to|talk\s+to|contact)\s+(?:me|us)\b|"
+                    r"happy\s+to\s+talk\s+(?:to|with)\s+you\b|"
+                    r"(?:fine|okay)\s+to\s+call\s+(?:me|us)\b|"
+                    r"feel\s+free\s+to\s+(?:call|contact)\s+(?:me|us)\b)",
                     text_lower,
                 )
-            )
+            ) and not bool(re.search(r"\b(?:don['’]?t|do\s+not|never|can['’]?t|shouldn['’]?t)\s+(?:ever\s+)?(?:call|reach\s+out|contact)\b", text_lower))
+            if re.search(r"\b(?:call|talk\s+to|reach\s+out\s+to)\s+(?:my\s+(?:lawyer|attorney)|your\s+manager|someone\s+else)\b", text_lower):
+                has_contact_permission_statement = False
+
             has_substantive_engagement = (
                 bundle.speaker_id == "client"
                 and (
@@ -363,6 +395,8 @@ class ConversationStateManager:
                 and not is_retraction
                 and not is_pure_soft_preference
                 and not is_scheduling_alternative
+                and not is_time_bounded_hold
+                and not is_daily_timing_pref
                 and has_contact_friction
             )
 
@@ -505,11 +539,35 @@ class ConversationStateManager:
                 else:
                     prefs.append(new_pref)
 
+            # Record temporal contact hold in prospect memory
+            if is_time_bounded_hold and hold_target:
+                if not any(f.fact_key == "contact_not_before" and f.status == "active" for f in self.facts_manager.get_active_facts()):
+                    self.facts_manager.record_fact(
+                        category="preference",
+                        fact_key="contact_not_before",
+                        fact_value=f"Do not contact before {hold_target}",
+                        source_turn_id=bundle.turn_id,
+                        timestamp_ms=bundle.timestamp_ms,
+                        confidence=0.90,
+                        notes=f"Temporal contact hold declared until {hold_target}",
+                    )
+
+            contact_not_before_val = (
+                hold_target if is_time_bounded_hold
+                else self.current_state.contact_compliance.contact_not_before
+            )
+            contact_not_before_turn = (
+                bundle.turn_id if is_time_bounded_hold
+                else self.current_state.contact_compliance.contact_not_before_turn_id
+            )
+
             new_compliance = ContactComplianceState(
                 hard_boundary_active=hard_active,
                 hard_boundary_reason=hard_reason,
                 hard_boundary_channels=channels,
                 contact_preferences=prefs,
+                contact_not_before=contact_not_before_val,
+                contact_not_before_turn_id=contact_not_before_turn,
                 boundary_suspected=suspected_active,
                 boundary_suspected_reason=suspected_reason,
                 boundary_suspected_turn_id=suspected_turn_id,
@@ -726,14 +784,16 @@ class ConversationStateManager:
                 conversion_target=self.conversion_target,
                 prior_bundle=self.prior_bundle,
             )
+            conv_res = self.conversion_engine.evaluate_conversion_event(
+                bundle, self.current_state, gate_res, previous_event=prev_conv
+            )
+            # Update state conversion event so push strength evaluation operates on fresh event state
+            self.current_state.conversion_event = conv_res
             push_res = self.conversion_engine.evaluate_push_strength(
                 bundle,
                 self.current_state,
                 gate_res,
                 conversion_target=self.conversion_target,
-            )
-            conv_res = self.conversion_engine.evaluate_conversion_event(
-                bundle, self.current_state, gate_res, previous_event=prev_conv
             )
 
         # Explainability tracking for conversion state changes

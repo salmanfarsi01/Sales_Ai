@@ -227,30 +227,92 @@ class ConversationScoringEngine:
                 prospect_ev_turn_ids.append(o.source_turn_id)
 
         has_prospect_spoken = len(prospect_ev_turn_ids) > 0 or getattr(current_state, "has_prospect_spoken", False)
-        has_confirmed_meeting = any(f.fact_key == "confirmed_meeting_time" and f.status == "active" for f in current_state.facts) or bool(current_state.conversion_event and getattr(current_state.conversion_event, "status", "") == "confirmed")
 
-        has_substantive_facts = any(
-            f.category in ("timeline", "financial", "property", "decision_maker") and f.status == "active"
+        # ---------------------------------------------------------------------
+        # 1. Per-Dimension Evidence & Scoring (0 - 100 or None if unmeasured)
+        # ---------------------------------------------------------------------
+        comp = current_state.contact_compliance
+        dec = current_state.decision_structure
+
+        # A. Emotional Readiness: High trust, positive valence, absence of tension
+        # Measured only when prospect has spoken and exhibited emotional indicators or objections
+        has_emotional_evidence = has_prospect_spoken and (
+            abs(dims.emotion_valence) > 0.05
+            or dims.emotion_tension > 0.25
+            or dims.trust > 0.55
+            or dims.trust < 0.45
+            or bool(current_state.objections)
+        )
+        if has_emotional_evidence:
+            norm_val = 0.5 + (0.5 * dims.emotion_valence)
+            inv_tension = 1.0 - dims.emotion_tension
+            emotional: Optional[float] = round((0.4 * dims.trust + 0.3 * norm_val + 0.3 * inv_tension) * 100.0, 1)
+            emotional = min(100.0, max(0.0, emotional))
+        else:
+            emotional = None
+
+        # B. Logical Readiness: Value alignment, agreement, problem clarity
+        # Measured only when prospect has engaged on value, problem, terms, or objections
+        has_logical_evidence = has_prospect_spoken and (
+            bundle.agreement_score > 0.60
+            or bundle.agreement_score < 0.20
+            or dims.engagement > 0.70
+            or bool(current_state.objections)
+            or any(f.category in ("problem", "financial", "property") and f.status == "active" for f in current_state.facts)
+            or bundle.future_language_score > 0.40
+        )
+        if has_logical_evidence:
+            agreement_pts = bundle.agreement_score * 100.0
+            specificity_pts = bundle.specificity_score * 100.0
+            logical: Optional[float] = round(0.4 * agreement_pts + 0.3 * (dims.engagement * 100.0) + 0.3 * specificity_pts, 1)
+            logical = min(100.0, max(0.0, logical))
+        else:
+            logical = None
+
+        # C. Logistical Readiness: Meeting/Appointment feasibility & scheduling specificity
+        # Measured only when prospect has engaged on appointment scheduling, timings, or constraints
+        has_confirmed_meeting = (
+            any(f.fact_key == "confirmed_meeting_time" and f.status == "active" for f in current_state.facts)
+            or bool(current_state.conversion_event and getattr(current_state.conversion_event, "status", "") in ("confirmed", ConversionEventStatus.CONFIRMED))
+        )
+        has_tentative_meeting = any(f.fact_key in ("tentative_meeting_time", "walkthrough_timing") and f.status == "active" for f in current_state.facts)
+        has_access_constraints = bool(current_state.decision_structure.access_constraints)
+        has_scheduling_constraint = any(f.fact_key == "scheduling_constraint" and f.status == "active" for f in current_state.facts)
+        has_channel_block = comp.contact_preference == "channel_restriction"
+        has_timing_block = comp.contact_preference == "timing_restriction"
+
+        has_logistical_facts = any(
+            f.category in ("timeline", "logistical")
+            and f.fact_key != "timeline_horizon"
+            and f.status == "active"
             for f in current_state.facts
         )
-        has_affirmative_evidence = (
-            (bundle.speaker_id == "client" and (bundle.agreement_score > 0.55 or bundle.future_language_score > 0.40 or bundle.specificity_score > 0.50))
-            or bool(current_state.objections)
-            or bool(current_state.decision_structure.primary_decision_maker)
-            or has_substantive_facts
-            or has_confirmed_meeting
+        has_logistical_utterance = (
+            bundle.speaker_id == "client"
+            and any(k in bundle.utterance_text.lower() for k in ("schedule", "appointment", "walkthrough", "meet", "calendar", "coordinate", "tomorrow at", "thursday at", "friday at", "morning at", "afternoon at"))
+            and not any(k in bundle.utterance_text.lower() for k in ("next year", "sometime next year"))
         )
-        is_clean_slate_defaults = (not has_prospect_spoken) or (not has_affirmative_evidence)
 
-        has_logistical_evidence = has_active_timeline or has_confirmed_meeting or (
-            bundle.speaker_id == "client" and bundle.future_language_score > 0.40
+        # Explicit appointment logistics indicator (selling timeline 'timeline_horizon' is NOT appointment logistics; contact preferences are not appointment logistics)
+        has_logistical_evidence = has_prospect_spoken and (
+            has_confirmed_meeting
+            or has_tentative_meeting
+            or has_access_constraints
+            or has_scheduling_constraint
+            or comp.hard_boundary_active
+            or has_channel_block
+            or has_timing_block
+            or has_logistical_facts
+            or has_logistical_utterance
         )
-        if not has_prospect_spoken or (not has_logistical_evidence and is_clean_slate_defaults):
-            logistical_pts = 0.0
-        else:
-            logistical_pts = 70.0
-            if has_active_timeline:
-                logistical_pts += 20.0
+
+        if has_logistical_evidence:
+            if has_confirmed_meeting:
+                logistical_pts = 90.0
+            elif has_tentative_meeting:
+                logistical_pts = 80.0
+            else:
+                logistical_pts = 70.0
             if has_channel_block:
                 logistical_pts -= 35.0
             if has_timing_block:
@@ -259,16 +321,15 @@ class ConversationScoringEngine:
                 logistical_pts -= 15.0
             if comp.hard_boundary_active:
                 logistical_pts = 0.0
-        logistical = round(min(100.0, max(0.0, logistical_pts)), 1)
+            logistical: Optional[float] = round(min(100.0, max(0.0, logistical_pts)), 1)
+        else:
+            logistical = None
 
         # D. Decision Readiness: Authority identified, present, aligned
-        dec = current_state.decision_structure
         has_absent_spouse_or_stakeholder = any(
             s.role in ("spouse", "partner", "co-owner", "co_owner", "attorney", "wife", "husband") and s.presence == "absent"
             for s in dec.stakeholders
         )
-
-        # Check for spouse / stakeholder requirement in facts or decision structure
         spouse_facts = [f for f in current_state.facts if f.fact_key in ("spouse_involvement", "decision_maker_authority") and f.status == "active"]
         for sf in spouse_facts:
             val_lower = sf.fact_value.lower()
@@ -277,111 +338,153 @@ class ConversationScoringEngine:
                 if not spouse_on_call:
                     has_absent_spouse_or_stakeholder = True
 
-        if not dec.decision_maker_present or has_absent_spouse_or_stakeholder:
-            decision_pts = 30.0
-        elif dec.primary_decision_maker:
-            decision_pts = 90.0
-        elif not has_prospect_spoken:
-            decision_pts = 0.0
-        else:
-            decision_pts = 50.0
-        decision_readiness = round(min(100.0, max(0.0, decision_pts)), 1)
-
-        # ---------------------------------------------------------------------
-        # 2. Base Composite Uncapped Readiness Mean
-        # ---------------------------------------------------------------------
-        uncapped = (
-            emotional * cfg.emotional_readiness_weight
-            + logical * cfg.logical_readiness_weight
-            + logistical * cfg.logistical_readiness_weight
-            + decision_readiness * cfg.decision_readiness_weight
+        has_decision_evidence = has_prospect_spoken and (
+            dec.primary_decision_maker is not None
+            or has_absent_spouse_or_stakeholder
+            or bool(dec.stakeholders)
+            or bool(spouse_facts)
+            or any(f.category == "decision_maker" and f.status == "active" for f in current_state.facts)
         )
-        uncapped = round(min(100.0, max(0.0, uncapped)), 1)
+
+        if has_decision_evidence:
+            if not dec.decision_maker_present or has_absent_spouse_or_stakeholder:
+                decision_pts = 40.0
+            elif dec.primary_decision_maker:
+                decision_pts = 90.0
+            else:
+                decision_pts = 50.0
+            decision_readiness: Optional[float] = round(min(100.0, max(0.0, decision_pts)), 1)
+        else:
+            decision_readiness = None
 
         # ---------------------------------------------------------------------
-        # 3. Deterministic Blocker Caps (Full Census + Strictest-Wins Monotonic Min)
+        # 2. Composite Uncapped Readiness Mean (Measured Dimensions Only)
         # ---------------------------------------------------------------------
+        dim_weights = {
+            "emotional": cfg.emotional_readiness_weight,
+            "logical": cfg.logical_readiness_weight,
+            "logistical": cfg.logistical_readiness_weight,
+            "decision": cfg.decision_readiness_weight,
+        }
+        measured = [
+            (name, val, dim_weights[name])
+            for name, val in [
+                ("emotional", emotional),
+                ("logical", logical),
+                ("logistical", logistical),
+                ("decision", decision_readiness),
+            ]
+            if val is not None
+        ]
+
+        total_measured_weight = sum(w for _, _, w in measured)
+        coverage = round(total_measured_weight / 1.0, 3)
+
+        is_insufficient = (not has_prospect_spoken) or (len(measured) == 0)
         active_blockers: List[str] = []
         applicable_ceilings: Dict[str, float] = {}
         blocker_descriptions: List[str] = []
 
-        # Blocker 0: Insufficient Prospect Evidence (Clean Slate Default: Readiness Unknown)
-        if is_clean_slate_defaults:
+        if is_insufficient:
+            uncapped = None
+            capped = None
+            readiness_partial = None
+            readiness_score_val = None
+            effective_conf = 0.0
+            binding_note = "Readiness unknown (clean slate baseline lacks prospect-originated evidence)."
             active_blockers.append("insufficient_evidence")
             blocker_descriptions.append("Insufficient prospect-originated evidence for readiness assessment (readiness unknown)")
-
-        # Blocker 1: Hard Compliance Boundary
-        if comp.hard_boundary_active:
-            active_blockers.append("hard_boundary")
-            applicable_ceilings["hard_boundary"] = 0.0
-            blocker_descriptions.append("Hard compliance boundary active (ceiling 0.0)")
-
-        # Blocker 2: Absent / Unaligned Decision Maker
-        is_dm_absent = (not dec.decision_maker_present) or has_absent_spouse_or_stakeholder
-        if not comp.hard_boundary_active and is_dm_absent and not is_clean_slate_defaults:
-            active_blockers.append("absent_decision_maker")
-            applicable_ceilings["absent_decision_maker"] = cfg.absent_decision_maker_ceiling
-            blocker_descriptions.append(f"Absent/unconfirmed decision maker (ceiling {cfg.absent_decision_maker_ceiling:.0f})")
-
-        # Blocker 3: Logistical Deficit Blocker
-        if not comp.hard_boundary_active and logistical <= cfg.logistical_deficit_threshold and not is_clean_slate_defaults:
-            active_blockers.append("logistical_deficit")
-            applicable_ceilings["logistical_deficit"] = cfg.logistical_deficit_ceiling
-            blocker_descriptions.append(
-                f"Logistical readiness deficit ({logistical:.0f} <= {cfg.logistical_deficit_threshold:.0f}, ceiling {cfg.logistical_deficit_ceiling:.0f})"
-            )
-
-        # Blocker 4: Active Target-Blocking Objection Blocker (Goal-Aware Gating Alignment)
-        b_cfg = blocking_config or DEFAULT_CONVERSION_BLOCKING_CONFIG
-        target_blocking_cats = b_cfg.blocking_categories.get(conversion_target, ["boundary"])
-        non_esc_cats = getattr(b_cfg, "non_escalating_categories", {}).get(conversion_target, ["commission_fee"])
-
-        blocking_objs = []
-        for o in current_state.objections:
-            if o.lifecycle_state in ("unresolved", "reactivated", "active"):
-                if o.canonical_category in target_blocking_cats:
-                    blocking_objs.append(o)
-                elif (
-                    getattr(b_cfg, "escalate_on_recurrence", True)
-                    and o.canonical_category not in non_esc_cats
-                    and getattr(o, "recurrence_count", 1) > getattr(b_cfg, "max_non_blocking_recurrence", 2)
-                ):
-                    blocking_objs.append(o)
-
-        if not comp.hard_boundary_active and blocking_objs and not is_clean_slate_defaults:
-            active_blockers.append("unresolved_objection")
-            applicable_ceilings["unresolved_objection"] = cfg.unresolved_objection_ceiling
-            blocker_descriptions.append(f"Active unresolved objection (ceiling {cfg.unresolved_objection_ceiling:.0f})")
-
-        # Strictest-Wins Resolution:
-        if applicable_ceilings:
-            strictest_blocker = min(applicable_ceilings, key=applicable_ceilings.get)
-            strictest_ceiling = applicable_ceilings[strictest_blocker]
-            capped = min(uncapped, strictest_ceiling)
-            binding_note = f"Readiness capped at {capped:.0f} by strictest blocker ({strictest_blocker}). Active blockers: {', '.join(blocker_descriptions)}."
-        elif is_clean_slate_defaults:
-            capped = None
-            binding_note = "Readiness unknown (clean slate baseline lacks prospect-originated evidence)."
         else:
-            capped = uncapped
-            binding_note = None
+            uncapped = round(sum(val * (w / total_measured_weight) for _, val, w in measured), 1)
+            uncapped = min(100.0, max(0.0, uncapped))
+            readiness_partial = uncapped
+            # Confidence directly reflects proportion of measured dimensions
+            raw_conf = min(bundle.inference_confidence, bundle.semantic_confidence)
+            effective_conf = round(raw_conf * (total_measured_weight / 1.0), 3)
 
-        if capped is not None:
-            capped = round(min(100.0, max(0.0, capped)), 1)
-        effective_conf = round(min(bundle.inference_confidence, bundle.semantic_confidence), 3)
-        if is_clean_slate_defaults:
-            effective_conf = 0.0
+            # -----------------------------------------------------------------
+            # 3. Deterministic Blocker Caps (Full Census + Strictest-Wins Monotonic Min)
+            # -----------------------------------------------------------------
+            # Blocker 1: Hard Compliance Boundary
+            if comp.hard_boundary_active:
+                active_blockers.append("hard_boundary")
+                applicable_ceilings["hard_boundary"] = 0.0
+                blocker_descriptions.append("Hard compliance boundary active (ceiling 0.0)")
+
+            # Blocker 2: Absent / Unaligned Decision Maker
+            is_dm_absent = (not dec.decision_maker_present) or has_absent_spouse_or_stakeholder
+            if not comp.hard_boundary_active and is_dm_absent:
+                active_blockers.append("absent_decision_maker")
+                applicable_ceilings["absent_decision_maker"] = cfg.absent_decision_maker_ceiling
+                blocker_descriptions.append(f"Absent/unconfirmed decision maker (ceiling {cfg.absent_decision_maker_ceiling:.0f})")
+
+            # Blocker 3: Logistical Deficit Blocker (only applies if logistical readiness was measured)
+            if not comp.hard_boundary_active and logistical is not None and logistical <= cfg.logistical_deficit_threshold:
+                active_blockers.append("logistical_deficit")
+                applicable_ceilings["logistical_deficit"] = cfg.logistical_deficit_ceiling
+                blocker_descriptions.append(
+                    f"Logistical readiness deficit ({logistical:.0f} <= {cfg.logistical_deficit_threshold:.0f}, ceiling {cfg.logistical_deficit_ceiling:.0f})"
+                )
+
+            # Blocker 4: Active Target-Blocking Objection Blocker (Goal-Aware Gating Alignment)
+            b_cfg = blocking_config or DEFAULT_CONVERSION_BLOCKING_CONFIG
+            target_blocking_cats = b_cfg.blocking_categories.get(conversion_target, ["boundary"])
+            non_esc_cats = getattr(b_cfg, "non_escalating_categories", {}).get(conversion_target, ["commission_fee"])
+
+            blocking_objs = []
+            for o in current_state.objections:
+                if o.lifecycle_state in ("unresolved", "reactivated", "active"):
+                    if o.canonical_category in target_blocking_cats:
+                        blocking_objs.append(o)
+                    elif (
+                        getattr(b_cfg, "escalate_on_recurrence", True)
+                        and o.canonical_category not in non_esc_cats
+                        and getattr(o, "recurrence_count", 1) > getattr(b_cfg, "max_non_blocking_recurrence", 2)
+                    ):
+                        blocking_objs.append(o)
+
+            if not comp.hard_boundary_active and blocking_objs:
+                active_blockers.append("unresolved_objection")
+                applicable_ceilings["unresolved_objection"] = cfg.unresolved_objection_ceiling
+                blocker_descriptions.append(f"Active unresolved objection (ceiling {cfg.unresolved_objection_ceiling:.0f})")
+
+            # Strictest-Wins Resolution:
+            if applicable_ceilings:
+                strictest_blocker = min(applicable_ceilings, key=applicable_ceilings.get)
+                strictest_ceiling = applicable_ceilings[strictest_blocker]
+                capped = min(uncapped, strictest_ceiling)
+                binding_note = f"Readiness capped at {capped:.0f} by strictest blocker ({strictest_blocker}). Active blockers: {', '.join(blocker_descriptions)}."
+            else:
+                capped = uncapped
+                binding_note = None
+
+            if capped is not None:
+                capped = round(min(100.0, max(0.0, capped)), 1)
+
+            # Minimum Coverage Rule (Client Feedback Item 2):
+            # If fewer than 2 dimensions measured (coverage < 0.50), do NOT publish overall readiness_score.
+            # Expose it as readiness_partial with coverage metadata to avoid overstating from a single isolated dimension.
+            if coverage < 0.50:
+                readiness_score_val = None
+                is_insufficient = True
+                coverage_note = f"Readiness unconfirmed: low dimensional coverage ({len(measured)} of 4 dimensions measured, coverage {coverage:.2f} < 0.50). Partial score: {uncapped:.1f}."
+                binding_note = f"{binding_note} | {coverage_note}" if binding_note else coverage_note
+                active_blockers.append("low_coverage")
+            else:
+                readiness_score_val = capped
 
         return ReadinessBreakdown(
-            readiness_score=capped,
-            uncapped_score=None if is_clean_slate_defaults else uncapped,
-            emotional_readiness=None if is_clean_slate_defaults else emotional,
-            logical_readiness=None if is_clean_slate_defaults else logical,
-            logistical_readiness=None if is_clean_slate_defaults else logistical,
-            decision_readiness=None if is_clean_slate_defaults else decision_readiness,
+            readiness_score=readiness_score_val,
+            readiness_partial=readiness_partial,
+            coverage=coverage,
+            uncapped_score=uncapped,
+            emotional_readiness=emotional,
+            logical_readiness=logical,
+            logistical_readiness=logistical,
+            decision_readiness=decision_readiness,
             active_blocker_caps=active_blockers,
             capped_reason=binding_note,
             confidence=effective_conf,
-            insufficient_evidence=is_clean_slate_defaults,
+            insufficient_evidence=is_insufficient,
             evidence_turn_ids=prospect_ev_turn_ids,
         )

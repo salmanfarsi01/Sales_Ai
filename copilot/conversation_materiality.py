@@ -901,8 +901,8 @@ def _get_dormancy_evidence(
                 supporting_signals={"readiness": readiness_val, "trust": trust_val},
             )
 
-    # 4. Blocker supersession — another objection or blocker became primary
-    if state is not None:
+    # 4. Blocker supersession — another objection or blocker became primary (does not age partially_resolved concerns)
+    if state is not None and obj_state_val not in ("partially_resolved", "partially_addressed"):
         # Check if a newer objection was raised that has active status and higher/equal recurrence or priority
         for other_o in getattr(state, "objections", []):
             if other_o.objection_id != objection.objection_id:
@@ -921,11 +921,11 @@ def _get_dormancy_evidence(
                                 },
                             )
 
-        # Check whether an active blocking condition dominates conversion_gate
+        # Check whether an active blocking condition dominates conversion_gate (must be explicit 'not_met', not neutral 'unknown')
         if state.conversion_gate and state.conversion_gate.conditions:
             for cond in state.conversion_gate.conditions:
-                if not cond.met and cond.condition_name != "objections_resolved_or_partial":
-                    if cond.condition_name in ("hard_boundary_clear", "decision_maker_confirmed", "trust_not_collapsing"):
+                if cond.status == "not_met" and cond.condition_name != "objections_resolved_or_partial":
+                    if cond.condition_name in ("hard_boundary_clear", "decision_maker_confirmed", "no_active_boundary", "decision_maker_aligned"):
                         return DormancyEvidence(
                             evidence_type="blocker_supersession",
                             description=f"superseded by primary blocker condition '{cond.condition_name}'",
