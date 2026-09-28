@@ -270,7 +270,7 @@ class PitchProXCoreIntelligenceEngine:
             strategic_objective=f"Acknowledge the prospect's requested contact hold until {hold_target} and gracefully confirm timing.",
             primary_action=StrategicAction.ACKNOWLEDGE,
             secondary_action=None,
-            push_strength="respect_record_exit",
+            push_strength="protect_and_shorten",
             reason_codes=["CONTACT_NOT_BEFORE_DECLARED", "HOLD_RESPECTED"],
             do_not_do=["press_for_earlier_time", "premature_close", f"prohibited_contact_before_{clean_tag}"],
             what_to_protect=["contact_not_before_hold", "prospect_trust"],

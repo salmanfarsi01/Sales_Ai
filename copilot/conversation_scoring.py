@@ -235,36 +235,78 @@ class ConversationScoringEngine:
         dec = current_state.decision_structure
 
         # A. Emotional Readiness: High trust, positive valence, absence of tension
-        # Measured only when prospect has spoken and exhibited emotional indicators or objections
-        has_emotional_evidence = has_prospect_spoken and (
-            abs(dims.emotion_valence) > 0.05
+        # Evaluated strictly on observed sub-components with evidence (no constant 50 defaults)
+        emotional_sub_components = []
+        has_trust_ev = (
+            getattr(bundle.trust, "is_measured", False)
+            or bool(bundle.trust.drivers)
+            or bool(bundle.trust.contributing_evidence_ids)
+            or abs(dims.trust - 0.50) > 0.05
+        )
+        if has_trust_ev:
+            emotional_sub_components.append((dims.trust * 100.0, 0.40))
+
+        has_valence_ev = (
+            getattr(bundle.emotion, "is_measured", False)
+            or bool(bundle.emotion.observable_signals)
+            or abs(dims.emotion_valence) > 0.05
+        )
+        if has_valence_ev:
+            norm_val = (0.5 + 0.5 * dims.emotion_valence) * 100.0
+            emotional_sub_components.append((norm_val, 0.30))
+
+        has_tension_ev = (
+            getattr(bundle.emotion, "is_measured", False)
+            or bool(bundle.emotion.observable_signals)
             or dims.emotion_tension > 0.25
-            or dims.trust > 0.55
-            or dims.trust < 0.45
+            or dims.emotion_tension < 0.15
             or bool(current_state.objections)
         )
-        if has_emotional_evidence:
-            norm_val = 0.5 + (0.5 * dims.emotion_valence)
-            inv_tension = 1.0 - dims.emotion_tension
-            emotional: Optional[float] = round((0.4 * dims.trust + 0.3 * norm_val + 0.3 * inv_tension) * 100.0, 1)
+        if has_tension_ev:
+            inv_tension = (1.0 - dims.emotion_tension) * 100.0
+            emotional_sub_components.append((inv_tension, 0.30))
+
+        if has_prospect_spoken and emotional_sub_components:
+            total_w = sum(w for _, w in emotional_sub_components)
+            emotional: Optional[float] = round(sum(val * (w / total_w) for val, w in emotional_sub_components), 1)
             emotional = min(100.0, max(0.0, emotional))
         else:
             emotional = None
 
         # B. Logical Readiness: Value alignment, agreement, problem clarity
-        # Measured only when prospect has engaged on value, problem, terms, or objections
-        has_logical_evidence = has_prospect_spoken and (
-            bundle.agreement_score > 0.60
-            or bundle.agreement_score < 0.20
-            or dims.engagement > 0.70
-            or bool(current_state.objections)
-            or any(f.category in ("problem", "financial", "property") and f.status == "active" for f in current_state.facts)
-            or bundle.future_language_score > 0.40
+        # Evaluated strictly on observed sub-components with evidence (no constant 50 defaults)
+        logical_sub_components = []
+        has_agreement_ev = (
+            getattr(bundle, "agreement_measured", False)
+            or abs(bundle.agreement_score - 0.50) > 0.05
         )
-        if has_logical_evidence:
-            agreement_pts = bundle.agreement_score * 100.0
-            specificity_pts = bundle.specificity_score * 100.0
-            logical: Optional[float] = round(0.4 * agreement_pts + 0.3 * (dims.engagement * 100.0) + 0.3 * specificity_pts, 1)
+        if has_agreement_ev:
+            logical_sub_components.append((bundle.agreement_score * 100.0, 0.40))
+
+        has_engagement_ev = (
+            getattr(bundle.engagement, "is_measured", False)
+            or bool(bundle.engagement.drivers)
+            or abs(dims.engagement - 0.50) > 0.05
+        )
+        if has_engagement_ev:
+            logical_sub_components.append((dims.engagement * 100.0, 0.30))
+
+        has_spec_or_future_ev = (
+            getattr(bundle, "specificity_measured", False)
+            or getattr(bundle, "future_language_measured", False)
+            or abs(bundle.specificity_score - 0.50) > 0.05
+            or bundle.future_language_score > 0.20
+            or any(f.category in ("problem", "financial", "property") and f.status == "active" for f in current_state.facts)
+        )
+        if has_spec_or_future_ev:
+            spec_val = bundle.specificity_score * 100.0
+            if bundle.future_language_score > 0.20:
+                spec_val = (bundle.specificity_score * 0.50 + bundle.future_language_score * 0.50) * 100.0
+            logical_sub_components.append((spec_val, 0.30))
+
+        if has_prospect_spoken and logical_sub_components:
+            total_w = sum(w for _, w in logical_sub_components)
+            logical: Optional[float] = round(sum(val * (w / total_w) for val, w in logical_sub_components), 1)
             logical = min(100.0, max(0.0, logical))
         else:
             logical = None
@@ -290,7 +332,7 @@ class ConversationScoringEngine:
         has_logistical_utterance = (
             bundle.speaker_id == "client"
             and any(k in bundle.utterance_text.lower() for k in ("schedule", "appointment", "walkthrough", "meet", "calendar", "coordinate", "tomorrow at", "thursday at", "friday at", "morning at", "afternoon at"))
-            and not any(k in bundle.utterance_text.lower() for k in ("next year", "sometime next year"))
+            and not any(k in bundle.utterance_text.lower() for k in ("next year", "sometime next year", "doesn't work", "does not work", "won't work", "cannot work", "can't make it", "hypothetical"))
         )
 
         # Explicit appointment logistics indicator (selling timeline 'timeline_horizon' is NOT appointment logistics; contact preferences are not appointment logistics)

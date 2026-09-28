@@ -23,6 +23,16 @@ class PersistentFactsManager:
     def __init__(self, initial_facts: Optional[List[PersistentFactRecord]] = None):
         self._facts: List[PersistentFactRecord] = list(initial_facts) if initial_facts else []
 
+    @property
+    def facts(self) -> List[PersistentFactRecord]:
+        """Returns the internal list of fact records."""
+        return self._facts
+
+    @facts.setter
+    def facts(self, value: List[PersistentFactRecord]) -> None:
+        """Sets the internal list of fact records."""
+        self._facts = list(value)
+
     def record_fact(
         self,
         category: PersistentFactCategory,

@@ -21,6 +21,7 @@ class DimensionScore(BaseModel):
     primary_horizon: WindowHorizon
     contributing_evidence_ids: List[str] = Field(default_factory=list)
     drivers: List[str] = Field(default_factory=list)
+    is_measured: bool = Field(default=False, description="Explicit flag indicating score was derived from observed evidence rather than neutral default")
 
 
 class EmotionState(BaseModel):
@@ -30,6 +31,7 @@ class EmotionState(BaseModel):
     tone_claim_made: bool = Field(False)
     observable_signals: List[str] = Field(default_factory=list)
     contributing_evidence_ids: List[str] = Field(default_factory=list)
+    is_measured: bool = Field(default=False, description="Explicit flag indicating emotional signals were actively observed")
 
 
 class DownstreamInferenceState(BaseModel):

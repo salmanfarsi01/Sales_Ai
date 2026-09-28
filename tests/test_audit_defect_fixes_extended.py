@@ -183,20 +183,20 @@ def test_time_bounded_hold_sets_contact_not_before_and_bypasses_boundary_suspect
     t2 = _create_bundle(2, "client", "Don't call me again until Thursday.")
     s2 = manager.process_turn_bundle(t2)
 
-    # 1. Stored in contact_compliance
-    assert s2.contact_compliance.contact_not_before == "Thursday"
+    # 1. Stored in contact_compliance as absolute date
+    assert s2.contact_compliance.contact_not_before == "2026-10-01"
     assert s2.contact_compliance.contact_not_before_turn_id == 2
     # 2. Does NOT trigger boundary_suspected!
     assert s2.contact_compliance.boundary_suspected is False
     assert s2.contact_compliance.hard_boundary_active is False
 
-    # 3. Core Engine acknowledges hold
+    # 3. Core Engine acknowledges hold with protect_and_shorten (not hard exit)
     core = PitchProXCoreIntelligenceEngine()
     res = core.evaluate(s2, turn_speaker="client", turn_text=t2.utterance_text)
     assert res.decision.primary_action == StrategicAction.ACKNOWLEDGE
-    assert res.decision.push_strength == "respect_record_exit"
+    assert res.decision.push_strength == "protect_and_shorten"
     assert "HOLD_RESPECTED" in res.decision.reason_codes
-    assert "prohibited_contact_before_thursday" in res.decision.do_not_do
+    assert "prohibited_contact_before_2026-10-01" in res.decision.do_not_do
 
 
 def test_daily_time_preference_is_not_a_hold_or_boundary():
@@ -285,8 +285,62 @@ def test_turn_04_neutral_defaults_evaluate_as_unknown():
     assert cond_map["no_active_boundary"].status == "met"
 
 
+def test_turn_09_gate_hardened_against_thin_evidence():
+    """Turn 9 in the 18-turn benchmark replay:
+    - Prospect hedges: 'Maybe next week could work, let me think about it.'
+    - clear_value_reason is unknown because no value/problem goal has been articulated.
+    - Gate remains CLOSED (is_open=False), preventing premature direct_ask.
+    - Engagement evidence excludes rep line (turn 8).
+    - plausible_logistics notes hedged/conditional feasibility.
+    """
+    with open("reports/synthetic/conversation_state_sim_mucj0p5s.json", encoding="utf-8") as f:
+        data = json.load(f)
+
+    mgr = ConversationStateManager("CA_t09_hardened_audit")
+    for t in data["timeline"][:9]:
+        eb = BehavioralSignalInputBundle(**t["evidence_bundle"])
+        snap = mgr.process_turn_bundle(eb)
+
+    gate = snap.conversion_gate
+    assert gate.is_open is False
+    assert gate.status == "closed"
+    assert snap.push_strength.state == "resolve_then_ask"
+
+    cond_map = {c.condition_name: c for c in gate.conditions}
+    assert cond_map["clear_value_reason"].status == "unknown"
+    assert cond_map["plausible_logistics"].status == "met"
+    assert "hedge phrase" in cond_map["plausible_logistics"].reason
+
+    # Evidence turns must NEVER contain turn 8 (rep line)
+    for c in gate.conditions:
+        assert 8 not in c.evidence_turn_ids
+
+
 # -----------------------------------------------------------------------------
-# 7. Golden Snapshot Integrity
+# 7. Production Invariant Coercion Verification
+# -----------------------------------------------------------------------------
+def test_production_coercion_mode_when_strict_raise_disabled():
+    """Explicitly verify that when STRICT_INVARIANT_RAISE=0 (production mode),
+    illegal gate/action/push combinations are safely coerced without throwing.
+    """
+    os.environ["STRICT_INVARIANT_RAISE"] = "0"
+    dec = StrategicDecision(
+        call_id="CA_prod_coerce_test",
+        source_state_version=1,
+        strategic_objective="Test close in prod",
+        primary_action=StrategicAction.COMMITMENT_CLOSE,
+        push_strength="direct_ask",
+        meeting_gate_open=False,
+    )
+    assert dec.push_strength == "resolve_then_ask"
+    assert dec.primary_action == StrategicAction.QUESTION
+    assert "INVARIANT_VIOLATION_COERCED" in dec.reason_codes
+    # Restore strict raise for test suite
+    os.environ["STRICT_INVARIANT_RAISE"] = "1"
+
+
+# -----------------------------------------------------------------------------
+# 8. Golden Snapshot Integrity
 # -----------------------------------------------------------------------------
 def test_golden_snapshot_integrity():
     """Validates the committed full-field golden snapshot for sim_mucj0p5s."""
@@ -303,10 +357,14 @@ def test_golden_snapshot_integrity():
     t4_gate = t4["state_snapshot"]["conversion_gate"]
     assert t4_gate["is_open"] is False
 
-    # Verify T09 opens legitimately with evidence
+    # Verify T09 gate is hardened: closed because value justification was unarticulated
     t9 = golden["timeline"][8]
     t9_gate = t9["state_snapshot"]["conversion_gate"]
-    assert t9_gate["is_open"] is True
+    assert t9_gate["is_open"] is False
+    assert any(c["condition_name"] == "clear_value_reason" and c["status"] == "unknown" for c in t9_gate["conditions"])
+    # Verify all evidence turns are strictly prospect turns (turn 8 excluded)
+    for c in t9_gate["conditions"]:
+        assert 8 not in c["evidence_turn_ids"]
 
     # Verify T18 closes cleanly with confirmed appointment
     t18 = golden["timeline"][17]

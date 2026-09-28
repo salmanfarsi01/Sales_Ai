@@ -73,6 +73,9 @@ class SemanticFeatureSnapshot(BaseModel):
     future_language_confidence: float = Field(0.95, ge=0.0, le=1.0)
     agreement_confidence: float = Field(0.95, ge=0.0, le=1.0)
     semantic_confidence: float = Field(1.0, ge=0.0, le=1.0)
+    agreement_measured: bool = Field(False, description="Explicit flag indicating agreement was measured from evidence")
+    specificity_measured: bool = Field(False, description="Explicit flag indicating specificity was measured from evidence")
+    future_language_measured: bool = Field(False, description="Explicit flag indicating future language was measured from evidence")
 
 
 STOP_CONTACT_PATTERNS = [

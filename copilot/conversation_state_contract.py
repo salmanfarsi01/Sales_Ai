@@ -93,6 +93,9 @@ class BehavioralSignalInputBundle(BaseModel):
     future_language_score: float = Field(0.0, ge=0.0, le=1.0)
     agreement_score: float = Field(0.0, ge=0.0, le=1.0)
     semantic_confidence: float = Field(1.0, ge=0.0, le=1.0)
+    agreement_measured: bool = Field(False)
+    specificity_measured: bool = Field(False)
+    future_language_measured: bool = Field(False)
 
     # Strategy & Intervention Tracking (populates ObjectionRecord.attempted_strategies in Phase 3)
     salesperson_strategy_tag: Optional[str] = Field(
@@ -168,6 +171,9 @@ def extract_behavioral_bundle(
         future_language_score=semantic_snapshot.future_language_score,
         agreement_score=semantic_snapshot.agreement_score,
         semantic_confidence=semantic_snapshot.semantic_confidence,
+        agreement_measured=getattr(semantic_snapshot, "agreement_measured", False),
+        specificity_measured=getattr(semantic_snapshot, "specificity_measured", False),
+        future_language_measured=getattr(semantic_snapshot, "future_language_measured", False),
         salesperson_strategy_tag=strat_tag,
         salesperson_strategy_source=strat_source,
         contributing_evidence_ids=evidence_ids,

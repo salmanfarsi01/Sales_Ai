@@ -1,10 +1,56 @@
-from __future__ import annotations
-
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 import logging
 import re
 import uuid
 from typing import Any, Dict, List, Optional
+
+
+def resolve_relative_hold_date(
+    hold_str: str,
+    base_dt: Optional[datetime] = None,
+    tz_name: str = "UTC",
+) -> str:
+    """Resolves relative weekday/timing strings ('Thursday', 'tomorrow', 'next week')
+    into an absolute ISO-8601 date string (YYYY-MM-DD) based on call time and prospect timezone.
+    """
+    import zoneinfo
+    try:
+        tz = zoneinfo.ZoneInfo(tz_name)
+    except Exception:
+        tz = timezone.utc
+
+    now = base_dt.astimezone(tz) if (base_dt and base_dt.tzinfo) else (base_dt or datetime.now(tz))
+    if not now.tzinfo:
+        now = now.replace(tzinfo=tz)
+
+    clean = hold_str.lower().strip()
+    weekdays = {
+        "monday": 0,
+        "tuesday": 1,
+        "wednesday": 2,
+        "thursday": 3,
+        "friday": 4,
+        "saturday": 5,
+        "sunday": 6,
+    }
+
+    if clean == "tomorrow":
+        target = now + timedelta(days=1)
+    elif clean in ("tonight", "today"):
+        target = now
+    elif clean in ("next week", "later this week"):
+        target = now + timedelta(days=7)
+    elif clean in weekdays:
+        target_wd = weekdays[clean]
+        current_wd = now.weekday()
+        days_ahead = (target_wd - current_wd) % 7
+        if days_ahead == 0:
+            days_ahead = 7
+        target = now + timedelta(days=days_ahead)
+    else:
+        target = now + timedelta(days=2)
+
+    return target.strftime("%Y-%m-%d")
 
 from .conversation_state_contract import BehavioralSignalInputBundle
 from .conversation_state_models import (
@@ -255,7 +301,8 @@ class ConversationStateManager:
                 text_lower,
             )
             is_time_bounded_hold = bool(hold_match)
-            hold_target = hold_match.group(1).strip().title() if hold_match else None
+            hold_target_raw = hold_match.group(1).strip().title() if hold_match else None
+            hold_target = resolve_relative_hold_date(hold_target_raw) if hold_target_raw else None
 
             # Daily timing preference check:
             # "Don't call after 4pm" -> daily time preference, NOT a hold and NOT a boundary.
@@ -1303,12 +1350,19 @@ class ConversationStateManager:
                 })
 
         # 2. Confirmed meeting / appointment time
-        # Case A: Prospect explicitly mentions day and time
+        # Case A: Prospect explicitly mentions day and time (must not be negated or hypothetical)
         time_day_match = re.search(
             r"\b(monday|tuesday|wednesday|thursday|friday|saturday|sunday|tomorrow)\b.*?\b(?:at\s+)?(\d{1,2}(?::\d{2})?\s*(?:am|pm)?|one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve)\b",
             text_lower,
         )
-        if time_day_match:
+        is_negated_or_hypothetical = any(re.search(pat, text_lower) for pat in [
+            r"\b(?:doesn't|does\s+not|won't|will\s+not|can't|cannot|couldn't|could\s+not)\s+(?:work|make\s+it|do\s+it)\b",
+            r"\bhypothetical(?:ly)?\b",
+            r"\blet['’]?s\s+say\b",
+            r"\bwhat\s+if\b",
+            r"\bsuppose\b",
+        ])
+        if time_day_match and not is_negated_or_hypothetical:
             new_val = time_day_match.group(0).strip().title()
             # If earlier tentative meeting/walkthrough fact exists, supersede it directly
             tentative_f = next((f for f in self.current_state.facts if f.fact_key in ("tentative_meeting_time", "walkthrough_timing") and f.status == "active"), None)
