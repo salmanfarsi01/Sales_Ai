@@ -270,10 +270,33 @@ class ContactComplianceState(BaseModel):
     hard_boundary_reason: Optional[str] = None
     hard_boundary_channels: List[str] = Field(default_factory=list)
     contact_preferences: List[ContactPreference] = Field(default_factory=list)
+    boundary_suspected: bool = False
+    boundary_suspected_reason: Optional[str] = None
+    boundary_suspected_turn_id: Optional[int] = None
+    hard_boundary_retracted: bool = False
+    retraction_turn_id: Optional[int] = None
     # Backward compatibility scalar fields
     contact_preference: Literal["none", "reduced_frequency", "channel_restriction", "timing_restriction"] = "none"
     contact_preference_details: Optional[str] = None
     contact_preference_confidence: float = Field(0.0, ge=0.0, le=1.0)
+
+
+class ComplianceEvent(BaseModel):
+    """ComplianceEvent per Spec 11 §4.6 with clearly labeled inferred extensions."""
+    event_id: str = Field(default_factory=lambda: f"comp_{uuid.uuid4().hex[:8]}")
+    event_type: Literal[
+        "disclosure_detected",
+        "consent_issue",
+        "stop_ai_prompted",
+        "ai_stopped",
+        "continued_after_disclosure_issue",
+        "hard_boundary_confirmed",
+        "boundary_retracted",
+    ]
+    occurred_at: str
+    source_turn_ids: List[int] = Field(default_factory=list)
+    details: Dict[str, Any] = Field(default_factory=dict)
+    is_inferred_extension: bool = False
 
 
 ContactCompliance = ContactComplianceState
@@ -308,15 +331,17 @@ class MomentumBreakdown(BaseModel):
 
 class ReadinessBreakdown(BaseModel):
     """Multi-dimensional readiness breakdown with explainable blocker caps (Phase 6)."""
-    readiness_score: float = Field(..., ge=0.0, le=100.0, description="Final capped readiness score on 0 - 100 scale")
-    uncapped_score: float = Field(..., ge=0.0, le=100.0, description="Readiness score before applying blocker caps")
-    emotional_readiness: float = Field(..., ge=0.0, le=100.0)
-    logical_readiness: float = Field(..., ge=0.0, le=100.0)
-    logistical_readiness: float = Field(..., ge=0.0, le=100.0)
-    decision_readiness: float = Field(..., ge=0.0, le=100.0)
+    readiness_score: Optional[float] = Field(default=None, description="Final capped readiness score on 0-100 scale, or None if insufficient evidence")
+    uncapped_score: Optional[float] = Field(default=None, description="Readiness score before applying blocker caps")
+    emotional_readiness: Optional[float] = Field(default=None)
+    logical_readiness: Optional[float] = Field(default=None)
+    logistical_readiness: Optional[float] = Field(default=None)
+    decision_readiness: Optional[float] = Field(default=None)
     active_blocker_caps: List[str] = Field(default_factory=list)
     capped_reason: Optional[str] = None
-    confidence: float = Field(1.0, ge=0.0, le=1.0)
+    confidence: float = Field(0.0, ge=0.0, le=1.0)
+    insufficient_evidence: bool = Field(default=False, description="True if baseline lacks prospect-originated evidence (unknown readiness)")
+    evidence_turn_ids: List[int] = Field(default_factory=list)
 
 
 PushStrengthState = Literal[
@@ -360,11 +385,21 @@ ConversionStatus = ConversionEventStatus
 class GateConditionResult(BaseModel):
     """Evaluation result for one of the 7 meeting gate conditions."""
     condition_name: str
-    met: bool
+    status: Literal["met", "not_met", "unknown"] = "unknown"
+    met: bool = False
+    evidence_turn_ids: List[int] = Field(default_factory=list)
     score_or_value: Any = None
     threshold: Any = None
     reason: str
     is_overridden: bool = Field(default=False, description="True if condition passed via explicit human statement override")
+
+    def model_post_init(self, __context: Any) -> None:
+        if self.met and self.status == "unknown":
+            self.status = "met"
+        elif self.status == "met":
+            self.met = True
+        else:
+            self.met = False
 
 
 class MeetingConversionGate(BaseModel):
@@ -374,6 +409,7 @@ class MeetingConversionGate(BaseModel):
     conversion_target: str = Field("appointment", description="Active conversion ask (e.g. appointment, signed_listing_agreement, permission_to_follow_up)")
     conditions: List[GateConditionResult] = Field(default_factory=list)
     failed_conditions: List[str] = Field(default_factory=list)
+    unknown_conditions: List[str] = Field(default_factory=list)
     blocking_reasons: List[str] = Field(default_factory=list)
     confidence: float = Field(1.0, ge=0.0, le=1.0)
     explicit_commitment_detected: bool = Field(default=False, description="True if prospect provided a direct, concrete commitment")
@@ -413,6 +449,7 @@ class ConversationStateSnapshot(BaseModel):
     state_version: int = Field(1, ge=1)
     last_updated_turn_id: int = 0
     last_updated_timestamp_ms: int = 0
+    prospect_turn_ids: List[int] = Field(default_factory=list)
     decision_structure: DecisionStructure = Field(default_factory=DecisionStructure)
     objections: List[ObjectionRecord] = Field(default_factory=list)
     facts: List[PersistentFactRecord] = Field(default_factory=list)
@@ -428,6 +465,7 @@ class ConversationStateSnapshot(BaseModel):
     deal_dispositions: List[DealDispositionRecord] = Field(default_factory=list)
     conversation_stage: ConversationStage = ConversationStage.DISCOVERY
     stage_history: List[StageHistoryRecord] = Field(default_factory=list)
+    compliance_events: List[ComplianceEvent] = Field(default_factory=list)
     overall_confidence: float = Field(0.75, ge=0.0, le=1.0)
     change_history: List[StateChangeRecord] = Field(default_factory=list)
 
@@ -501,4 +539,9 @@ class ConversationStateSnapshot(BaseModel):
     def get_superseded_conversion_events(self) -> List[ConversionEventObject]:
         """Returns all superseded historical conversion events."""
         return [ev for ev in self.conversion_events if ev.superseded_by_event_id is not None]
+
+    @property
+    def compliance_event(self) -> Optional[ComplianceEvent]:
+        """Returns the most recent compliance event or None."""
+        return self.compliance_events[-1] if self.compliance_events else None
 

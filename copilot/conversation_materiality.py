@@ -445,11 +445,29 @@ class MaterialityFilter:
 
         skip_objection_classification = False
 
+        # Boundary retraction check
+        retraction_patterns = [
+            r"\b(?:actually\b\s*,?\s*)?(?:you\s+can|feel\s+free\s+to|go\s+ahead\s+and)\s+(?:call|reach\s+out|contact|text)\b",
+            r"\b(?:i\s+changed\s+my\s+mind|never\s+mind|changed\s+mind)\b.*?\b(?:call|reach\s+out|contact|talk)\b",
+            r"\b(?:go\s+ahead\s+and\s+call|call\s+me\s+back|call\s+me\s+tomorrow|call\s+me\s+later)\b",
+            r"\b(?:it['’]?s\s+okay\s+to|fine\s+to|you\s+may)\s+(?:call|contact|reach\s+out)\b",
+        ]
+        is_retraction = (
+            bundle.speaker_id == "client"
+            and current_state is not None
+            and getattr(current_state, "contact_compliance", None) is not None
+            and current_state.contact_compliance.hard_boundary_active
+            and any(re.search(p, text.lower()) for p in retraction_patterns)
+        )
+
         if is_hard_boundary:
             targets.add("contact_compliance")
             reasons.append("Contains contact boundary (stop contact / legal threat).")
             targets.add("dimensions")
             reasons.append("Hard boundary impacts readiness/trust dimensions.")
+        elif is_retraction:
+            targets.add("contact_compliance")
+            reasons.append("Boundary retraction: prospect explicitly invited contact after prior hard boundary.")
         elif is_soft_pref:
             targets.add("contact_compliance")
             targets.add("facts")

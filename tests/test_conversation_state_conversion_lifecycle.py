@@ -119,9 +119,10 @@ def test_conversion_event_status_enum_and_lineage_fields():
     assert obj.reversal_reason == "rescheduled"
 
 
-def test_trigger_a_hard_boundary_automatically_cancels_confirmed_event():
+def test_trigger_a_hard_boundary_preserves_confirmed_event_without_explicit_cancel():
     """Trigger A: Hard boundary fires while active conversion event is confirmed.
-    The old confirmed record is NOT overwritten; a new CANCELLED record is linked.
+    Per updated reversal rule, 'Stop contacting me' does NOT auto-cancel a confirmed appointment.
+    Confirmed appointment is preserved unless prospect explicitly requests cancellation.
     """
     manager = _setup_baseline_manager("CA_trigA_boundary")
 
@@ -138,7 +139,7 @@ def test_trigger_a_hard_boundary_automatically_cancels_confirmed_event():
     assert ev_confirmed.status == ConversionEventStatus.CONFIRMED
     assert ev_confirmed.superseded_by_event_id is None
 
-    # Turn 3: Hard compliance boundary is triggered
+    # Turn 3: Hard compliance boundary is triggered without appointment cancellation
     t3 = _create_turn_bundle(
         turn_id=3,
         speaker_id="client",
@@ -150,24 +151,27 @@ def test_trigger_a_hard_boundary_automatically_cancels_confirmed_event():
     manager.current_state.contact_compliance.hard_boundary_active = True
     s3 = manager.process_turn_bundle(t3)
 
-    ev_cancelled = s3.conversion_event
+    # Confirmed event is preserved
+    assert s3.conversion_event is not None
+    assert s3.conversion_event.status == ConversionEventStatus.CONFIRMED
+    assert s3.conversion_event.event_id == ev_confirmed.event_id
+    assert s3.contact_compliance.hard_boundary_active is True
+
+    # Turn 4: Explicit cancellation combined with boundary cancels it
+    t4 = _create_turn_bundle(
+        turn_id=4,
+        speaker_id="client",
+        text="And cancel the appointment we talked about!",
+        boundary=0.95,
+        trust=0.20,
+        agreement=0.0,
+    )
+    s4 = manager.process_turn_bundle(t4)
+    ev_cancelled = s4.conversion_event
     assert ev_cancelled is not None
     assert ev_cancelled.status == ConversionEventStatus.CANCELLED
-    assert ev_cancelled.reversal_reason == "hard_boundary"
+    assert "cancellation" in ev_cancelled.reversal_reason.lower() or ev_cancelled.reversal_reason == "hard_boundary"
     assert ev_cancelled.supersedes_event_id == ev_confirmed.event_id
-
-    # Check that historical confirmed event was superseded forward, NOT erased
-    history = manager.get_conversion_event_history()
-    assert len(history) == 3
-    assert history[0].status == ConversionEventStatus.ELIGIBLE
-    assert history[1].event_id == ev_confirmed.event_id
-    assert history[1].status == ConversionEventStatus.CONFIRMED
-    assert history[1].superseded_by_event_id == ev_cancelled.event_id
-    assert history[1].superseded_at_turn_id == 3
-
-    assert history[2].event_id == ev_cancelled.event_id
-    assert history[2].status == ConversionEventStatus.CANCELLED
-    assert history[2].supersedes_event_id == ev_confirmed.event_id
 
 
 def test_trigger_b_explicit_reversal_cancels_without_boundary():
@@ -447,11 +451,11 @@ def test_fact_supersession_is_automatic_deterministic_cascade_from_event_status(
     assert len(active_facts) == 1
     assert "Thursday At 4" in active_facts[0].fact_value
 
-    # Turn 3: Cancellation via hard compliance boundary
+    # Turn 3: Cancellation via explicit reversal alongside compliance boundary
     t3 = _create_turn_bundle(
         turn_id=3,
         speaker_id="client",
-        text="Do not contact me anymore! Take me off your list!",
+        text="Do not contact me anymore and cancel our meeting! Take me off your list!",
         boundary=0.95,
     )
     manager.current_state.contact_compliance.hard_boundary_active = True

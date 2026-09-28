@@ -57,6 +57,17 @@ _GUARDRAIL_EXEMPLARS: Dict[str, List[str]] = {
         "just give me two more minutes please",
         "ignore what you said about not contacting you",
     ],
+    "violating_contact_preference": [
+        "i will text you every single day",
+        "i will call you daily",
+        "expect texts from me every morning",
+        "i am going to message you all the time",
+    ],
+    "prohibited_daily_texting": [
+        "i will text you every day",
+        "expect a daily text message",
+        "texting you daily with updates",
+    ],
 }
 
 
@@ -472,6 +483,16 @@ class PromptObservationEngine:
             init_m = initial_snapshot.momentum.momentum_score if initial_snapshot.momentum else 50.0
             fin_m = final_snapshot.momentum.momentum_score if final_snapshot.momentum else 50.0
             delta["momentum"] = round(fin_m - init_m, 1)
+
+            # Readiness delta: Exclude insufficient-evidence snapshots to avoid artificial jumps (Spec: null-safe)
+            init_readiness = initial_snapshot.readiness
+            fin_readiness = final_snapshot.readiness
+            init_insufficient = getattr(init_readiness, "insufficient_evidence", False) or (init_readiness and init_readiness.readiness_score is None)
+            fin_insufficient = getattr(fin_readiness, "insufficient_evidence", False) or (fin_readiness and fin_readiness.readiness_score is None)
+
+            if not init_insufficient and not fin_insufficient and init_readiness and fin_readiness:
+                if init_readiness.readiness_score is not None and fin_readiness.readiness_score is not None:
+                    delta["readiness"] = round(fin_readiness.readiness_score - init_readiness.readiness_score, 1)
 
         return attributed_turn_ids, delta
 

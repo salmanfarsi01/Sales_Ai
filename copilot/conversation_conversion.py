@@ -100,6 +100,7 @@ class MeetingConversionGateEngine:
             r"\b(?:not|never)\s+(?:works?|feasible|possible|available|good)\b",
             r"\b(?:not\s+free|unavailable|busy)\b",
             r"\b(?:hard|tough|impossible)\s+to\s+make\b",
+            r"\b(?:don't|do\s+not)\s+(?:call|reach|contact|text|bother)\b",
         ]
         hypothetical_patterns = [
             r"\bhypothetical(?:ly)?\b",
@@ -217,24 +218,65 @@ class MeetingConversionGateEngine:
             bundle, current_state, prior_bundle
         )
 
+        # Collect prospect evidence turn IDs
+        prospect_turns: List[int] = []
+        if bundle.speaker_id == "client":
+            prospect_turns.append(bundle.turn_id)
+        if hasattr(current_state, "prospect_turn_ids"):
+            for pt in current_state.prospect_turn_ids:
+                if pt not in prospect_turns:
+                    prospect_turns.append(pt)
+        for f in current_state.facts:
+            if getattr(f, "source_turn_id", 0) > 0 and f.source_turn_id not in prospect_turns:
+                prospect_turns.append(f.source_turn_id)
+        for o in current_state.objections:
+            if getattr(o, "source_turn_id", 0) > 0 and o.source_turn_id not in prospect_turns:
+                prospect_turns.append(o.source_turn_id)
+
+        # Check for substantive prospect-originated evidence
+        has_prospect_spoken = len(prospect_turns) > 0 or getattr(current_state, "has_prospect_spoken", False)
+        has_substantive_facts = any(
+            f.category in ("timeline", "financial", "property", "decision_maker") and f.status == "active"
+            for f in current_state.facts
+        )
+        has_affirmative_evidence = (
+            has_explicit_commit
+            or (bundle.speaker_id == "client" and (bundle.agreement_score > 0.55 or bundle.future_language_score > 0.40 or bundle.specificity_score > 0.50))
+            or bool(current_state.objections)
+            or bool(current_state.decision_structure.primary_decision_maker)
+            or has_substantive_facts
+            or any(f.fact_key == "confirmed_meeting_time" and f.status == "active" for f in current_state.facts)
+            or bool(current_state.conversion_event and getattr(current_state.conversion_event, "status", "") in ("confirmed", ConversionEventStatus.CONFIRMED))
+        )
+        is_clean_slate_defaults = (not has_prospect_spoken) or (not has_affirmative_evidence)
+
         # ---------------------------------------------------------------------
         # Condition 1: Trust Not Collapsing
         # ---------------------------------------------------------------------
         trust_val = dims.trust
         tension_val = dims.emotion_tension
-        trust_ok = (trust_val >= cfg.gate_min_trust) and (tension_val <= cfg.gate_max_tension)
-        if not trust_ok:
+        if not prospect_turns:
+            cond1_status = "unknown"
+            reason1 = "No prospect turns observed to evaluate trust dynamics (clean slate)"
+            cond1_ev = []
+        elif (trust_val >= cfg.gate_min_trust) and (tension_val <= cfg.gate_max_tension):
+            cond1_status = "met"
+            reason1 = f"Trust healthy ({trust_val:.2f} >= {cfg.gate_min_trust:.2f}) and tension contained ({tension_val:.2f} <= {cfg.gate_max_tension:.2f})"
+            cond1_ev = list(prospect_turns)
+        else:
+            cond1_status = "not_met"
+            cond1_ev = list(prospect_turns)
             if trust_val < cfg.gate_min_trust:
                 reason1 = f"Trust score ({trust_val:.2f}) is below minimum threshold ({cfg.gate_min_trust:.2f})"
             else:
                 reason1 = f"Emotion tension ({tension_val:.2f}) exceeds maximum allowable threshold ({cfg.gate_max_tension:.2f})"
-        else:
-            reason1 = f"Trust healthy ({trust_val:.2f} >= {cfg.gate_min_trust:.2f}) and tension contained ({tension_val:.2f} <= {cfg.gate_max_tension:.2f})"
 
         conditions.append(
             GateConditionResult(
                 condition_name="trust_not_collapsing",
-                met=trust_ok,
+                status=cond1_status,
+                met=(cond1_status == "met"),
+                evidence_turn_ids=cond1_ev,
                 score_or_value={"trust": trust_val, "tension": tension_val},
                 threshold={"min_trust": cfg.gate_min_trust, "max_tension": cfg.gate_max_tension},
                 reason=reason1,
@@ -247,19 +289,30 @@ class MeetingConversionGateEngine:
         eng_val = dims.engagement
         eng_ok = eng_val >= cfg.gate_min_engagement
         is_overridden2 = False
-        if has_explicit_commit and not eng_ok:
-            eng_ok = True
+        if has_explicit_commit:
+            cond2_status = "met"
             is_overridden2 = True
             reason2 = f"[EXPLICIT COMMITMENT OVERRIDE: '{commit_slot or bundle.utterance_text}'] Engagement active on specific commitment"
-        elif not eng_ok:
-            reason2 = f"Engagement score ({eng_val:.2f}) is below on-topic threshold ({cfg.gate_min_engagement:.2f})"
-        else:
+            cond2_ev = [bundle.turn_id] if bundle.speaker_id == "client" else (prospect_turns[-1:] if prospect_turns else [bundle.turn_id])
+        elif not prospect_turns:
+            cond2_status = "unknown"
+            reason2 = "No prospect engagement observed (clean slate)"
+            cond2_ev = []
+        elif eng_ok:
+            cond2_status = "met"
             reason2 = f"Engagement active and on-topic ({eng_val:.2f} >= {cfg.gate_min_engagement:.2f})"
+            cond2_ev = list(prospect_turns)
+        else:
+            cond2_status = "not_met"
+            reason2 = f"Engagement score ({eng_val:.2f}) is below on-topic threshold ({cfg.gate_min_engagement:.2f})"
+            cond2_ev = list(prospect_turns)
 
         conditions.append(
             GateConditionResult(
                 condition_name="engagement_on_topic",
-                met=eng_ok,
+                status=cond2_status,
+                met=(cond2_status == "met"),
+                evidence_turn_ids=cond2_ev,
                 score_or_value=eng_val,
                 threshold=cfg.gate_min_engagement,
                 reason=reason2,
@@ -295,8 +348,9 @@ class MeetingConversionGateEngine:
             else:
                 non_blocking_unresolved.append(o)
 
-        obj_ok = len(target_blocking_unresolved) == 0
-        if not obj_ok:
+        if len(target_blocking_unresolved) > 0:
+            cond3_status = "not_met"
+            cond3_ev = [o.source_turn_id for o in target_blocking_unresolved if getattr(o, "source_turn_id", 0) > 0]
             categories = []
             for o in target_blocking_unresolved:
                 if o in escalated_objs:
@@ -304,19 +358,33 @@ class MeetingConversionGateEngine:
                 else:
                     categories.append(o.canonical_category)
             reason3 = f"Active unresolved objection(s) blocking '{conversion_target}': {', '.join(categories)}"
-        else:
+        elif current_state.objections:
+            cond3_status = "met"
+            cond3_ev = [o.source_turn_id for o in current_state.objections if getattr(o, "source_turn_id", 0) > 0]
             if non_blocking_unresolved:
                 nb_cats = [o.canonical_category for o in non_blocking_unresolved]
                 reason3 = f"No blocking objections for '{conversion_target}' (non-blocking active: {', '.join(nb_cats)})"
-            elif current_state.objections:
-                reason3 = f"All {len(current_state.objections)} raised objection(s) are resolved, partially resolved, or superseded"
             else:
-                reason3 = "No active objections raised (clean slate)"
+                reason3 = f"All {len(current_state.objections)} raised objection(s) are resolved, partially resolved, or superseded"
+        elif has_explicit_commit:
+            cond3_status = "met"
+            cond3_ev = [bundle.turn_id] if bundle.speaker_id == "client" else (prospect_turns[-1:] if prospect_turns else [bundle.turn_id])
+            reason3 = "No active objections raised; prospect explicit commitment confirms alignment"
+        elif prospect_turns and (bundle.agreement_score >= 0.60 or any(f.status == "active" for f in current_state.facts)):
+            cond3_status = "met"
+            cond3_ev = list(prospect_turns)
+            reason3 = "No active objections raised; prospect affirmative dialogue demonstrates alignment"
+        else:
+            cond3_status = "unknown"
+            cond3_ev = []
+            reason3 = "No active objections raised (clean slate — awaiting prospect validation)"
 
         conditions.append(
             GateConditionResult(
                 condition_name="objections_resolved_or_partial",
-                met=obj_ok,
+                status=cond3_status,
+                met=(cond3_status == "met"),
+                evidence_turn_ids=cond3_ev,
                 score_or_value=len(target_blocking_unresolved),
                 threshold=0,
                 reason=reason3,
@@ -329,12 +397,15 @@ class MeetingConversionGateEngine:
         val_score = 50.0
         if current_state.momentum and "value_recognition" in current_state.momentum.family_scores:
             val_score = current_state.momentum.family_scores["value_recognition"]
-        logical_r = current_state.readiness.logical_readiness if current_state.readiness else 50.0
+        logical_r = (
+            current_state.readiness.logical_readiness
+            if (current_state.readiness and current_state.readiness.logical_readiness is not None)
+            else 50.0
+        )
         agreement_factor = bundle.agreement_score
         has_goal_facts = any(f.category in ("timeline", "financial", "property") for f in current_state.facts if f.status == "active")
+        goal_fact_turns = [f.source_turn_id for f in current_state.facts if f.category in ("timeline", "financial", "property") and getattr(f, "source_turn_id", 0) > 0 and f.status == "active"]
 
-        # Friendly-but-vague guard: Polite filler agreement with low specificity (<= 0.45)
-        # without concrete goal/timeline facts does NOT establish a clear value reason.
         is_vague_filler = (bundle.specificity_score <= cfg.two_window_choice_max_specificity) and not has_goal_facts
 
         has_declined_disp = (
@@ -359,23 +430,36 @@ class MeetingConversionGateEngine:
 
         is_overridden4 = False
         if has_explicit_commit and not has_decision_to_stay:
-            val_ok = True
+            cond4_status = "met"
             is_overridden4 = True
-            reason4 = f"[OVERRIDE: Explicit commitment detected: '{commit_slot or bundle.utterance_text}' outranks inferred readiness] Clear value justification established"
+            cond4_ev = [bundle.turn_id] if bundle.speaker_id == "client" else (prospect_turns[-1:] if prospect_turns else [bundle.turn_id])
+            reason4 = f"[OVERRIDE: Explicit commitment detected: '{commit_slot or bundle.utterance_text}'] Clear value justification established"
+        elif has_decision_to_stay:
+            cond4_status = "not_met"
+            cond4_ev = prospect_turns[-1:] if prospect_turns else []
+            reason4 = "Prospect explicitly decided to stay and not sell; transaction value proposition is void"
+        elif not prospect_turns or is_clean_slate_defaults:
+            cond4_status = "unknown"
+            cond4_ev = []
+            reason4 = "Value recognition not yet demonstrated by prospect (clean-slate baseline lacks prospect evidence)"
         elif not val_ok:
-            if has_decision_to_stay:
-                reason4 = "Prospect explicitly decided to stay and not sell; transaction value proposition is void"
-            elif is_vague_filler:
+            cond4_status = "not_met"
+            cond4_ev = [bundle.turn_id] if bundle.speaker_id == "client" else (prospect_turns[-1:] if prospect_turns else [])
+            if is_vague_filler:
                 reason4 = f"Vague conversational discourse (specificity={bundle.specificity_score:.2f} <= {cfg.two_window_choice_max_specificity:.2f}) lacks concrete value/problem justification"
             else:
                 reason4 = f"Value recognition ({val_score:.1f}) below threshold ({cfg.gate_min_value_recognition:.1f}) without compensating agreement"
         else:
+            cond4_status = "met"
+            cond4_ev = goal_fact_turns if goal_fact_turns else list(prospect_turns)
             reason4 = f"Clear value justification established (value_score={val_score:.1f}, logical_readiness={logical_r:.1f})"
 
         conditions.append(
             GateConditionResult(
                 condition_name="clear_value_reason",
-                met=val_ok,
+                status=cond4_status,
+                met=(cond4_status == "met"),
+                evidence_turn_ids=cond4_ev,
                 score_or_value=val_score,
                 threshold=cfg.gate_min_value_recognition,
                 reason=reason4,
@@ -394,16 +478,36 @@ class MeetingConversionGateEngine:
             s.role in ("spouse", "partner", "co-owner", "co_owner", "attorney", "wife", "husband") and s.presence == "absent"
             for s in dec.stakeholders
         )
-        dm_ok = dec.decision_maker_present and not has_dm_blocker and not has_absent_stakeholder
-        if not dm_ok:
+        dm_facts = [f for f in current_state.facts if f.fact_key in ("spouse_involvement", "decision_maker_authority") and f.status == "active"]
+        dm_fact_turns = [f.source_turn_id for f in dm_facts if getattr(f, "source_turn_id", 0) > 0]
+
+        if not dec.decision_maker_present or has_dm_blocker or has_absent_stakeholder:
+            cond5_status = "not_met"
+            cond5_ev = dm_fact_turns if dm_fact_turns else (prospect_turns[-1:] if prospect_turns else [])
             reason5 = "Decision-maker absent, unaligned, or consultation required with unconfirmed party"
-        else:
+        elif has_explicit_commit:
+            cond5_status = "met"
+            cond5_ev = [bundle.turn_id] if bundle.speaker_id == "client" else (prospect_turns[-1:] if prospect_turns else [bundle.turn_id])
+            reason5 = f"Decision authority confirmed via explicit commitment ({dec.primary_decision_maker or 'self-authorized'})"
+        elif not prospect_turns or is_clean_slate_defaults:
+            cond5_status = "unknown"
+            cond5_ev = []
+            reason5 = "Decision authority unverified with prospect (clean slate — awaiting prospect confirmation)"
+        elif dec.primary_decision_maker or dm_facts or any(f.category == "property" and f.status == "active" for f in current_state.facts) or len(prospect_turns) >= 2:
+            cond5_status = "met"
+            cond5_ev = dm_fact_turns if dm_fact_turns else list(prospect_turns)
             reason5 = f"Decision authority present and aligned ({dec.primary_decision_maker or 'self-authorized'})"
+        else:
+            cond5_status = "unknown"
+            cond5_ev = []
+            reason5 = "Decision authority unverified with prospect (clean-slate default lacks explicit prospect confirmation)"
 
         conditions.append(
             GateConditionResult(
                 condition_name="decision_maker_aligned",
-                met=dm_ok,
+                status=cond5_status,
+                met=(cond5_status == "met"),
+                evidence_turn_ids=cond5_ev,
                 score_or_value=dec.decision_maker_present,
                 threshold=True,
                 reason=reason5,
@@ -413,12 +517,15 @@ class MeetingConversionGateEngine:
         # ---------------------------------------------------------------------
         # Condition 6: Plausible Logistics
         # ---------------------------------------------------------------------
-        log_r = current_state.readiness.logistical_readiness if current_state.readiness else 50.0
+        log_r = (
+            current_state.readiness.logistical_readiness
+            if (current_state.readiness and current_state.readiness.logistical_readiness is not None)
+            else 50.0
+        )
         comp = current_state.contact_compliance
         has_logistical_blocker = bool(
             current_state.readiness and ("logistical_deficit" in current_state.readiness.active_blocker_caps)
         )
-        # Check for hard channel prohibitions vs soft preferences (Issue #7)
         has_hard_channel_restriction = any(
             p.boundary_strength == "hard_restriction" and not p.allowed
             for p in getattr(comp, "contact_preferences", [])
@@ -428,7 +535,6 @@ class MeetingConversionGateEngine:
             or comp.contact_preference in ("channel_restriction", "timing_restriction")
         )
 
-        # Evaluate access constraints against explicit commitment / proposed slot (Client Principles #1 & #6)
         raw_constraints = current_state.decision_structure.access_constraints
         unresolved_constraints: List[str] = []
         slot_text = f"{commit_slot or ''} {bundle.utterance_text}".lower()
@@ -457,6 +563,13 @@ class MeetingConversionGateEngine:
         has_access_constraints = bool(unresolved_constraints)
         constraints_satisfied = bool(raw_constraints) and not has_access_constraints
 
+        timeline_facts = [f for f in current_state.facts if f.category == "timeline" and f.status == "active"]
+        timeline_fact_turns = [f.source_turn_id for f in timeline_facts if getattr(f, "source_turn_id", 0) > 0]
+        has_confirmed_meeting = (
+            any(f.fact_key == "confirmed_meeting_time" and f.status == "active" for f in current_state.facts)
+            or bool(current_state.conversion_event and getattr(current_state.conversion_event, "status", "") in ("confirmed", ConversionEventStatus.CONFIRMED))
+        )
+
         log_ok = (
             (log_r >= cfg.gate_min_logistical_readiness)
             and not has_logistical_blocker
@@ -472,26 +585,41 @@ class MeetingConversionGateEngine:
             and not has_contact_restriction
             and not has_access_constraints
         ):
-            if not log_ok or log_r < cfg.gate_min_logistical_readiness or has_logistical_blocker or constraints_satisfied:
-                log_ok = True
-                is_overridden6 = True
-                constraint_note = " (satisfies scheduling constraints)" if constraints_satisfied else ""
-                reason6 = f"[OVERRIDE: Explicit commitment detected: '{commit_slot or bundle.utterance_text}'{constraint_note} outranks inferred logistical score] Logistical feasibility confirmed"
-
-        if not log_ok and not is_overridden6:
-            if has_contact_restriction:
+            cond6_status = "met"
+            is_overridden6 = True
+            cond6_ev = [bundle.turn_id] if bundle.speaker_id == "client" else (prospect_turns[-1:] if prospect_turns else [bundle.turn_id])
+            constraint_note = " (satisfies scheduling constraints)" if constraints_satisfied else ""
+            reason6 = f"[OVERRIDE: Explicit commitment detected: '{commit_slot or bundle.utterance_text}'{constraint_note} outranks inferred logistical score] Logistical feasibility confirmed"
+        elif comp.hard_boundary_active or has_contact_restriction or has_access_constraints or has_logistical_blocker:
+            cond6_status = "not_met"
+            cond6_ev = timeline_fact_turns if timeline_fact_turns else (prospect_turns[-1:] if prospect_turns else [])
+            if comp.hard_boundary_active:
+                reason6 = "Hard compliance boundary active — logistics prohibited"
+            elif has_contact_restriction:
                 reason6 = f"Active contact/scheduling restriction ({comp.contact_preference}) impedes meeting logistics"
             elif has_access_constraints:
                 reason6 = f"Access constraints ({', '.join(unresolved_constraints)}) require resolution"
             else:
                 reason6 = f"Logistical readiness deficit ({log_r:.1f} < {cfg.gate_min_logistical_readiness:.1f})"
-        elif not is_overridden6:
+        elif not prospect_turns or is_clean_slate_defaults:
+            cond6_status = "unknown"
+            cond6_ev = []
+            reason6 = "Logistical availability and scheduling feasibility not yet discussed by prospect (clean slate)"
+        elif not log_ok:
+            cond6_status = "not_met"
+            cond6_ev = timeline_fact_turns if timeline_fact_turns else list(prospect_turns)
+            reason6 = f"Logistical readiness deficit ({log_r:.1f} < {cfg.gate_min_logistical_readiness:.1f})"
+        else:
+            cond6_status = "met"
+            cond6_ev = timeline_fact_turns if timeline_fact_turns else list(prospect_turns)
             reason6 = f"Logistical feasibility confirmed ({log_r:.1f} >= {cfg.gate_min_logistical_readiness:.1f})"
 
         conditions.append(
             GateConditionResult(
                 condition_name="plausible_logistics",
-                met=log_ok,
+                status=cond6_status,
+                met=(cond6_status == "met"),
+                evidence_turn_ids=cond6_ev,
                 score_or_value=log_r,
                 threshold=cfg.gate_min_logistical_readiness,
                 reason=reason6,
@@ -504,15 +632,26 @@ class MeetingConversionGateEngine:
         # ---------------------------------------------------------------------
         has_boundary_obj = any(o.lifecycle_state == "boundary" for o in current_state.objections)
         boundary_ok = not comp.hard_boundary_active and not has_boundary_obj and bundle.boundary_score < 0.85
+
         if not boundary_ok:
+            cond7_status = "not_met"
+            cond7_ev = [bundle.turn_id] if bundle.boundary_score >= 0.85 else (prospect_turns[-1:] if prospect_turns else [])
             reason7 = "Hard compliance boundary active — persuasion and conversion prohibited"
+        elif not prospect_turns:
+            cond7_status = "unknown"
+            cond7_ev = []
+            reason7 = "Awaiting prospect interaction to verify compliance boundaries (clean slate)"
         else:
+            cond7_status = "met"
+            cond7_ev = list(prospect_turns)
             reason7 = "No active compliance boundary"
 
         conditions.append(
             GateConditionResult(
                 condition_name="no_active_boundary",
-                met=boundary_ok,
+                status=cond7_status,
+                met=(cond7_status == "met"),
+                evidence_turn_ids=cond7_ev,
                 score_or_value=bundle.boundary_score,
                 threshold=0.85,
                 reason=reason7,
@@ -520,13 +659,16 @@ class MeetingConversionGateEngine:
         )
 
         # Gate Synthesis
-        is_open = all(c.met for c in conditions)
-        failed_conditions = [c.condition_name for c in conditions if not c.met]
-        blocking_reasons = [c.reason for c in conditions if not c.met]
+        is_open = all(c.status == "met" for c in conditions)
+        failed_conditions = [c.condition_name for c in conditions if c.status == "not_met"]
+        unknown_conditions = [c.condition_name for c in conditions if c.status == "unknown"]
+        blocking_reasons = [c.reason for c in conditions if c.status != "met"]
         effective_conf = round(
             min(bundle.inference_confidence, bundle.semantic_confidence, current_state.overall_confidence),
             3,
         )
+        if unknown_conditions and not is_open:
+            effective_conf = min(effective_conf, 0.40)
 
         return MeetingConversionGate(
             is_open=is_open,
@@ -534,6 +676,7 @@ class MeetingConversionGateEngine:
             conversion_target=conversion_target,
             conditions=conditions,
             failed_conditions=failed_conditions,
+            unknown_conditions=unknown_conditions,
             blocking_reasons=blocking_reasons,
             confidence=effective_conf,
             explicit_commitment_detected=has_explicit_commit,
@@ -747,29 +890,33 @@ class MeetingConversionGateEngine:
             )
 
 
-        # 5. Agreeable-but-Vague: Two-window choice
+        # 5. Agreeable-but-Vague: Two-window choice (ONLY when gate is open)
         # Prospect is polite/agreeable but specificity is low or non-committal
         is_agreeable = bundle.agreement_score >= cfg.two_window_choice_min_agreement or dims.trust >= 0.60
         is_vague = (bundle.specificity_score <= cfg.two_window_choice_max_specificity) and not bool(
             any(f.category == "timeline" and f.status == "active" for f in current_state.facts)
         )
-        if not gate.is_open and is_agreeable and is_vague:
+        if gate.is_open and is_agreeable and is_vague:
             if comp.contact_preference == "reduced_frequency":
                 return PushStrengthRecommendation(
                     state="two_window_choice",
-                    rationale="Prospect is agreeable with low contact frequency preference. Respect cadence while offering binary choice.",
+                    rationale="Meeting gate is open. Prospect is agreeable with low contact frequency preference. Respect cadence while offering binary choice.",
                     recommended_action="Offer a low-friction binary choice while reassuring prospect that contact frequency will remain minimal.",
                     confidence=conf,
                 )
             return PushStrengthRecommendation(
                 state="two_window_choice",
-                rationale="Prospect is agreeable but vague on concrete commitments. Open-ended closing requests invite polite brush-offs.",
+                rationale="Meeting gate is open. Prospect is agreeable but vague on concrete commitments. Open-ended closing requests invite polite brush-offs.",
                 recommended_action="Offer a concrete binary choice (e.g. 'Tuesday morning or Thursday afternoon?') to overcome vagueness.",
                 confidence=conf,
             )
 
         # 6. Soft Hesitation / Logistical Friction: Reduce friction, re-ask
-        log_r = current_state.readiness.logistical_readiness if current_state.readiness else 50.0
+        log_r = (
+            current_state.readiness.logistical_readiness
+            if (current_state.readiness and current_state.readiness.logistical_readiness is not None)
+            else 50.0
+        )
         if not gate.is_open and log_r < cfg.reduce_friction_logistical_upper:
             return PushStrengthRecommendation(
                 state="reduce_friction_reask",
@@ -794,11 +941,13 @@ class MeetingConversionGateEngine:
                 confidence=conf,
             )
 
-        # Default closed fallback
+        # Default closed fallback: Must NOT be a close-style push (Spec 09 / Client Audit Fix Item 1)
+        reasons = list(gate.failed_conditions) + list(getattr(gate, "unknown_conditions", []))
+        reason_str = ", ".join(reasons) if reasons else "unmet gate criteria"
         return PushStrengthRecommendation(
-            state="two_window_choice",
-            rationale=f"Meeting gate closed due to: {', '.join(gate.failed_conditions)}.",
-            recommended_action="Structure conversation with low-pressure alternative choices to build alignment.",
+            state="resolve_then_ask",
+            rationale=f"Meeting gate closed due to: {reason_str}. Close-style push is strictly disallowed while gate is closed.",
+            recommended_action="Discover missing gate details and address prospect priorities before attempting commitment close.",
             confidence=conf,
         )
 
@@ -813,38 +962,7 @@ class MeetingConversionGateEngine:
         text_lower = bundle.utterance_text.lower()
 
         # ---------------------------------------------------------------------
-        # Trigger A: Hard Boundary Active Override (Automatic Cancellation)
-        # ---------------------------------------------------------------------
-        is_hard_boundary = current_state.contact_compliance.hard_boundary_active or bundle.boundary_score >= 0.85
-        if is_hard_boundary:
-            if previous_event and previous_event.status in (
-                ConversionEventStatus.CONFIRMED,
-                ConversionEventStatus.TENTATIVE,
-                ConversionEventStatus.PROPOSED,
-                ConversionEventStatus.ELIGIBLE,
-            ):
-                new_event = ConversionEventObject(
-                    event_id=f"conv_{uuid.uuid4().hex[:8]}",
-                    conversion_type=previous_event.conversion_type,
-                    status=ConversionEventStatus.CANCELLED,
-                    start_at=previous_event.start_at,
-                    location_or_format=previous_event.location_or_format,
-                    participants=previous_event.participants,
-                    confirmation_confidence=1.0,
-                    source_turn_ids=[bundle.turn_id],
-                    blocking_items=["hard_boundary"],
-                    followup_is_conversion=False,
-                    supersedes_event_id=previous_event.event_id,
-                    reversal_reason="hard_boundary",
-                )
-                previous_event.superseded_by_event_id = new_event.event_id
-                previous_event.superseded_at_turn_id = bundle.turn_id
-                return new_event
-            elif previous_event and previous_event.status == ConversionEventStatus.CANCELLED:
-                return previous_event
-
-        # ---------------------------------------------------------------------
-        # Trigger B: Explicit Reversal Language (Independent of Boundary)
+        # Trigger B: Explicit Reversal Language (Takes Priority for Explicit Cancellations)
         # ---------------------------------------------------------------------
         is_reversal, reversal_reason = self.detect_explicit_reversal(bundle, current_state)
         if is_reversal:
@@ -871,6 +989,42 @@ class MeetingConversionGateEngine:
                 previous_event.superseded_at_turn_id = bundle.turn_id
                 return new_event
             elif previous_event and previous_event.status == ConversionEventStatus.CANCELLED:
+                return previous_event
+
+        # ---------------------------------------------------------------------
+        # Trigger A: Hard Boundary Active Override (Blocks Unconfirmed / Preserves Confirmed)
+        # ---------------------------------------------------------------------
+        is_hard_boundary = current_state.contact_compliance.hard_boundary_active or bundle.boundary_score >= 0.85
+        if is_hard_boundary:
+            # Client Requirement: Do NOT auto-cancel a CONFIRMED appointment on a contact boundary.
+            # "Stop contacting me" and "cancel the appointment" are different outcomes.
+            # Only unconfirmed / tentative / proposed / eligible conversion events are cancelled.
+            if previous_event and previous_event.status in (
+                ConversionEventStatus.TENTATIVE,
+                ConversionEventStatus.PROPOSED,
+                ConversionEventStatus.ELIGIBLE,
+            ):
+                new_event = ConversionEventObject(
+                    event_id=f"conv_{uuid.uuid4().hex[:8]}",
+                    conversion_type=previous_event.conversion_type,
+                    status=ConversionEventStatus.CANCELLED,
+                    start_at=previous_event.start_at,
+                    location_or_format=previous_event.location_or_format,
+                    participants=previous_event.participants,
+                    confirmation_confidence=1.0,
+                    source_turn_ids=[bundle.turn_id],
+                    blocking_items=["hard_boundary"],
+                    followup_is_conversion=False,
+                    supersedes_event_id=previous_event.event_id,
+                    reversal_reason="hard_boundary",
+                )
+                previous_event.superseded_by_event_id = new_event.event_id
+                previous_event.superseded_at_turn_id = bundle.turn_id
+                return new_event
+            elif previous_event and previous_event.status in (
+                ConversionEventStatus.CONFIRMED,
+                ConversionEventStatus.CANCELLED,
+            ):
                 return previous_event
 
         # If previous event is already cancelled, stay cancelled unless a new affirmative commitment is made

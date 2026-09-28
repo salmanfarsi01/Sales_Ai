@@ -1115,9 +1115,11 @@
       document.getElementById('kpiMomentum').textContent = `${momScore}% (${momTrend})`;
 
       // Readiness
-      const readScore = conv.readiness_score !== undefined ? conv.readiness_score.toFixed(0) : '—';
+      const readScore = (conv.readiness_score !== undefined && conv.readiness_score !== null)
+        ? `${conv.readiness_score.toFixed(0)}%`
+        : 'UNKNOWN (Insufficient Evidence)';
       const blockerCount = conv.active_blockers ? conv.active_blockers.length : 0;
-      document.getElementById('kpiReadiness').textContent = `${readScore}% ${blockerCount > 0 ? '[Blockers: ' + blockerCount + ']' : ''}`;
+      document.getElementById('kpiReadiness').textContent = `${readScore} ${blockerCount > 0 ? '[Blockers: ' + blockerCount + ']' : ''}`;
 
       // Deal disposition
       const dispRecord = finalState.deal_disposition;
@@ -1411,40 +1413,110 @@
 
       const col4 = document.getElementById('col4Body');
       col4.innerHTML = `
-      <!-- PitchProX Strategic Decision (Spec 01 / Spec 11) -->
+      <!-- PitchProX Strategic Decision & Full Trace (Spec 01 / Spec 10 / Spec 11) -->
       ${step.strategic_decision ? `
-        <div class="card-unit" style="border: 1px solid #C7D2FE; border-left: 4px solid #4F46E5; background: #F5F3FF; margin-bottom: 10px;">
-          <div class="card-unit-title" style="display:flex; justify-content:space-between; align-items:center;">
-            <span style="color:#312E81; font-weight:700;">PitchProX Strategic Decision</span>
-            <span class="mono" style="font-size:10.5px; color:#4338CA;">${escapeHtml(step.strategic_decision.decision_id)} · V${step.strategic_decision.source_state_version}</span>
-          </div>
-          <div style="display:flex; gap:6px; flex-wrap:wrap; margin:6px 0;">
-            <span class="badge" style="background:#4F46E5; color:#FFFFFF; font-weight:700; font-size:11px;">PRIMARY: ${escapeHtml(String(step.strategic_decision.primary_action).toUpperCase())}</span>
-            ${step.strategic_decision.secondary_action ? `<span class="badge" style="background:#EEF2FF; color:#4338CA; border:1px solid #C7D2FE; font-weight:600; font-size:11px;">SECONDARY: ${escapeHtml(String(step.strategic_decision.secondary_action).toUpperCase())}</span>` : ''}
-            <span class="badge badge-push" style="font-size:10.5px;">Push: ${escapeHtml(step.strategic_decision.push_strength)}</span>
-          </div>
-          <div style="font-size:12px; color:#1E1B4B; margin:6px 0; background:#FFFFFF; padding:6px 8px; border-radius:4px; border:1px solid #E0E7FF;">
-            <strong>Objective:</strong> ${escapeHtml(step.strategic_decision.strategic_objective)}
-          </div>
-          ${step.strategic_decision.reason_codes && step.strategic_decision.reason_codes.length > 0 ? `
-            <div style="font-size:11px; margin:4px 0;">
-              <strong style="color:#312E81;">Reason Codes:</strong>
-              ${step.strategic_decision.reason_codes.map(r => `<span class="badge" style="background:#E0E7FF; color:#3730A3; font-size:10px; margin-right:3px;">${escapeHtml(r)}</span>`).join('')}
-            </div>
-          ` : ''}
-          <div style="display:grid; grid-template-columns: 1fr 1fr; gap:6px; font-size:11px; margin-top:6px;">
-            <div style="background:#FFFFFF; padding:5px 6px; border-radius:4px; border:1px solid #E2E8F0;">
-              <strong style="color:#059669;">Protect:</strong> ${(step.strategic_decision.what_to_protect || []).join(', ') || 'Standard rapport'}
-            </div>
-            <div style="background:#FFFFFF; padding:5px 6px; border-radius:4px; border:1px solid #E2E8F0;">
-              <strong style="color:#DC2626;">Do Not Do:</strong> ${(step.strategic_decision.do_not_do || []).join(', ') || 'None'}
+        <div class="card-unit" style="border: 1px solid #C7D2FE; border-left: 4px solid #4F46E5; background: #F8FAFC; margin-bottom: 12px; padding: 12px 14px;">
+          <div class="card-unit-title" style="display:flex; justify-content:space-between; align-items:center; margin-bottom: 8px;">
+            <span style="color:#312E81; font-weight:700; font-size:12.5px; display:flex; align-items:center; gap:6px;">
+              <span style="display:inline-block; width:8px; height:8px; border-radius:50%; background:#4F46E5;"></span>
+              PitchProX Full Strategic Trace
+            </span>
+            <div style="display:flex; align-items:center; gap:6px;">
+              <span class="mono" style="font-size:10.5px; color:#4338CA;">${escapeHtml(step.strategic_decision.decision_id)} · V${step.strategic_decision.source_state_version}</span>
+              <span class="badge" style="background:#EEF2FF; color:#4338CA; border:1px solid #C7D2FE; font-weight:700; font-size:10px;">${(step.strategic_decision.confidence * 100).toFixed(0)}% CONF</span>
             </div>
           </div>
-          <div style="display:flex; justify-content:space-between; align-items:center; font-size:10.5px; color:#475569; margin-top:6px; padding-top:4px; border-top:1px solid #E0E7FF;">
-            <span>Question Allowed: <strong>${step.strategic_decision.question_allowed ? 'Yes' : 'No'}</strong></span>
-            <span>Retrieval: <strong>${step.strategic_decision.retrieval_needed ? 'Required' : 'None'}</strong></span>
-            <span>Max Words: <strong>${step.strategic_decision.max_prompt_words}</strong></span>
-            <span>Confidence: <strong>${(step.strategic_decision.confidence * 100).toFixed(0)}%</strong></span>
+
+          <!-- Trace Step 1: Evidence Considered -->
+          <div style="margin-bottom: 10px; background: #FFFFFF; border: 1px solid #E2E8F0; border-radius: 6px; padding: 8px 10px;">
+            <div style="font-size: 10.5px; font-weight: 700; text-transform: uppercase; color: #475569; letter-spacing: 0.5px; margin-bottom: 4px; display: flex; align-items: center; gap: 4px;">
+              <span class="badge" style="background:#E2E8F0; color:#1E293B; font-size:9px; padding:1px 5px;">1. EVIDENCE</span>
+              Evidence Considered
+            </div>
+            ${(step.strategic_decision.evidence_considered && step.strategic_decision.evidence_considered.length > 0) ? `
+              <ul style="margin: 0; padding-left: 16px; font-size: 11.5px; color: #1E293B; line-height: 1.5;">
+                ${step.strategic_decision.evidence_considered.map(e => `<li>${escapeHtml(e)}</li>`).join('')}
+              </ul>
+            ` : `
+              <div style="font-size: 11.5px; color: #64748B;">Turn utterance ("${escapeHtml(step.text.slice(0, 60))}"), trust score, readiness score, objections, gate criteria.</div>
+            `}
+          </div>
+
+          <!-- Trace Step 2: Strategic Interpretation -->
+          <div style="margin-bottom: 10px; background: #FFFFFF; border: 1px solid #E2E8F0; border-radius: 6px; padding: 8px 10px;">
+            <div style="font-size: 10.5px; font-weight: 700; text-transform: uppercase; color: #475569; letter-spacing: 0.5px; margin-bottom: 4px; display: flex; align-items: center; gap: 4px;">
+              <span class="badge" style="background:#E2E8F0; color:#1E293B; font-size:9px; padding:1px 5px;">2. INTERPRETATION</span>
+              Strategic Interpretation
+            </div>
+            ${step.strategic_decision.strategic_interpretation ? `
+              <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 6px; font-size: 11px; color: #1E293B;">
+                <div>Gate Status: <strong style="color:${step.strategic_decision.strategic_interpretation.meeting_gate_open ? '#16A34A' : '#DC2626'}">${step.strategic_decision.strategic_interpretation.meeting_gate_open ? 'OPEN' : 'CLOSED'}</strong></div>
+                <div>Decision Maker: <strong>${step.strategic_decision.strategic_interpretation.decision_maker_present ? 'Present' : 'Absent'}</strong></div>
+                <div>Push Strength: <span class="badge badge-push" style="font-size:9.5px; padding:1px 5px;">${escapeHtml(step.strategic_decision.strategic_interpretation.push_strength_state || '—')}</span></div>
+                <div>Readiness Score: <strong>${(step.strategic_decision.strategic_interpretation.readiness_score !== null && step.strategic_decision.strategic_interpretation.readiness_score !== undefined) ? step.strategic_decision.strategic_interpretation.readiness_score + '%' : 'UNKNOWN (Insufficient Evidence)'}</strong></div>
+                <div>Boundary State: <strong style="color:${step.strategic_decision.strategic_interpretation.hard_boundary_active ? '#DC2626' : (step.strategic_decision.strategic_interpretation.boundary_suspected ? '#D97706' : '#16A34A')}">${step.strategic_decision.strategic_interpretation.hard_boundary_active ? 'CONFIRMED' : (step.strategic_decision.strategic_interpretation.boundary_suspected ? 'SUSPECTED' : 'CLEAR')}</strong></div>
+                <div>Active Objections: <strong>${(step.strategic_decision.strategic_interpretation.active_objections || []).length}</strong></div>
+              </div>
+              ${(step.strategic_decision.strategic_interpretation.cross_metric_penalties && step.strategic_decision.strategic_interpretation.cross_metric_penalties.length > 0) ? `
+                <div style="margin-top: 4px; font-size: 10.5px; color: #DC2626;">
+                  <strong>Penalties:</strong> ${step.strategic_decision.strategic_interpretation.cross_metric_penalties.join(', ')}
+                </div>
+              ` : ''}
+            ` : `
+              <div style="font-size: 11px; color: #64748B;">Cross-metric evaluation complete: stage ${escapeHtml(String(sAfter.conversation_stage || 'discovery'))}, push strength ${escapeHtml(step.strategic_decision.push_strength)}.</div>
+            `}
+          </div>
+
+          <!-- Trace Step 3: Decision & Guardrails -->
+          <div style="margin-bottom: 10px; background: #FFFFFF; border: 1px solid #E2E8F0; border-radius: 6px; padding: 8px 10px;">
+            <div style="font-size: 10.5px; font-weight: 700; text-transform: uppercase; color: #475569; letter-spacing: 0.5px; margin-bottom: 6px; display: flex; align-items: center; gap: 4px;">
+              <span class="badge" style="background:#E2E8F0; color:#1E293B; font-size:9px; padding:1px 5px;">3. DECISION</span>
+              Core Strategic Decision
+            </div>
+            <div style="display:flex; gap:6px; flex-wrap:wrap; margin-bottom:6px;">
+              <span class="badge" style="background:#4F46E5; color:#FFFFFF; font-weight:700; font-size:11px;">PRIMARY: ${escapeHtml(String(step.strategic_decision.primary_action).toUpperCase())}</span>
+              ${step.strategic_decision.secondary_action ? `<span class="badge" style="background:#EEF2FF; color:#4338CA; border:1px solid #C7D2FE; font-weight:600; font-size:11px;">SECONDARY: ${escapeHtml(String(step.strategic_decision.secondary_action).toUpperCase())}</span>` : ''}
+              <span class="badge badge-push" style="font-size:10.5px;">Push: ${escapeHtml(step.strategic_decision.push_strength)}</span>
+            </div>
+            <div style="font-size:12px; color:#1E1B4B; margin-bottom:6px; background:#F8FAFC; padding:6px 8px; border-radius:4px; border:1px solid #E0E7FF;">
+              <strong>Objective:</strong> ${escapeHtml(step.strategic_decision.strategic_objective)}
+            </div>
+            ${step.strategic_decision.reason_codes && step.strategic_decision.reason_codes.length > 0 ? `
+              <div style="font-size:11px; margin-bottom:6px;">
+                <strong style="color:#312E81;">Reason Codes:</strong>
+                ${step.strategic_decision.reason_codes.map(r => `<span class="badge" style="background:#E0E7FF; color:#3730A3; font-size:10px; margin-right:3px;">${escapeHtml(r)}</span>`).join('')}
+              </div>
+            ` : ''}
+            <div style="display:grid; grid-template-columns: 1fr 1fr; gap:6px; font-size:11px;">
+              <div style="background:#F0FDF4; padding:5px 6px; border-radius:4px; border:1px solid #BBF7D0;">
+                <strong style="color:#059669;">Protect:</strong> ${(step.strategic_decision.what_to_protect || []).join(', ') || 'Standard rapport'}
+              </div>
+              <div style="background:#FEF2F2; padding:5px 6px; border-radius:4px; border:1px solid #FECACA;">
+                <strong style="color:#DC2626;">Do Not Do:</strong> ${(step.strategic_decision.do_not_do || []).join(', ') || 'None'}
+              </div>
+            </div>
+            <div style="display:flex; justify-content:space-between; align-items:center; font-size:10.5px; color:#475569; margin-top:6px; padding-top:4px; border-top:1px solid #F1F5F9;">
+              <span>Question Allowed: <strong>${step.strategic_decision.question_allowed ? 'Yes' : 'No'}</strong></span>
+              <span>Retrieval: <strong>${step.strategic_decision.retrieval_needed ? 'Required' : 'None'}</strong></span>
+              <span>Max Words: <strong>${step.strategic_decision.max_prompt_words}</strong></span>
+            </div>
+          </div>
+
+          <!-- Trace Step 4: Final Prompt Text -->
+          <div style="background: #F0FDF4; border: 1px solid #BBF7D0; border-left: 4px solid #16A34A; border-radius: 6px; padding: 8px 10px;">
+            <div style="font-size: 10.5px; font-weight: 700; text-transform: uppercase; color: #166534; letter-spacing: 0.5px; margin-bottom: 4px; display: flex; align-items: center; justify-content: space-between;">
+              <div style="display: flex; align-items: center; gap: 4px;">
+                <span class="badge" style="background:#DCFCE7; color:#166534; font-size:9px; padding:1px 5px;">4. GATEWAY PROMPT SYNTHESIS</span>
+                [LLM Gateway Deterministic Fallback Stub]
+              </div>
+              <span style="font-size: 10px; color: #15803D;">Deterministic Fallback</span>
+            </div>
+            <div style="font-size: 11px; color: #166534; margin-bottom: 4px; font-style: normal;">
+              <em>Note: Core Intelligence strictly outputs structural decision parameters (Action, Objective, Constraints). Spoken wording is synthesized downstream by the LLM Response Gateway (or its deterministic offline fallback stub in replay).</em>
+            </div>
+            <div style="font-size: 12.5px; font-weight: 500; color: #14532D; font-style: italic; line-height: 1.5; padding: 4px 0;">
+              "${escapeHtml(step.strategic_decision.gateway_fallback_stub || step.strategic_decision.final_prompt_text || step.strategic_decision.strategic_objective)}"
+            </div>
           </div>
         </div>
       ` : ''}
@@ -1545,7 +1617,9 @@
         <div class="card-unit" style="border: 1px solid #FDE68A; border-left: 4px solid #D97706; background: #FFFFFF;">
           <div class="card-unit-title" style="display:flex; justify-content:space-between; align-items:center;">
             <span style="color:#000000; font-weight:700;">Composite Readiness (Sprint 5)</span>
-            <span class="mono" style="font-size:14px; font-weight:700; color:#000000;">${sAfter.readiness.readiness_score !== undefined ? sAfter.readiness.readiness_score.toFixed(1) : '—'}%</span>
+            ${(sAfter.readiness.insufficient_evidence || sAfter.readiness.readiness_score === null || sAfter.readiness.readiness_score === undefined)
+              ? '<span class="badge" style="background:#FEF3C7; color:#92400E; font-size:11px; font-weight:700;">UNKNOWN (Insufficient Evidence)</span>'
+              : `<span class="mono" style="font-size:14px; font-weight:700; color:#000000;">${sAfter.readiness.readiness_score.toFixed(1)}%</span>`}
           </div>
           ${sAfter.readiness.active_blocker_caps && sAfter.readiness.active_blocker_caps.length > 0 ? `
             <div style="background: #FEF2F2; border: 1px solid #FECACA; border-radius: 4px; padding: 6px 8px; margin: 8px 0; font-size: 11px;">
@@ -1680,15 +1754,25 @@
     }
 
     function renderDimensionBar(label, val, color, tooltip = '') {
-      const v = val !== undefined && val !== null ? val : 0.5;
-      const pct = Math.max(0, Math.min(100, Math.round(v * 100)));
+      if (val === null || val === undefined) {
+        return `
+        <div class="dim-row" ${tooltip ? `title="${tooltip}"` : ''}>
+          <span class="dim-label">${label}</span>
+          <div class="dim-bar-wrapper">
+            <div class="dim-bar-fill" style="width: 0%; background: #CBD5E1"></div>
+          </div>
+          <span class="dim-val" style="color:#64748B; font-style:italic;">unknown</span>
+        </div>
+      `;
+      }
+      const pct = Math.max(0, Math.min(100, Math.round(val * 100)));
       return `
       <div class="dim-row" ${tooltip ? `title="${tooltip}"` : ''}>
         <span class="dim-label">${label}</span>
         <div class="dim-bar-wrapper">
           <div class="dim-bar-fill" style="width: ${pct}%; background: ${color}"></div>
         </div>
-        <span class="dim-val">${v.toFixed(2)}</span>
+        <span class="dim-val">${val.toFixed(2)}</span>
       </div>
     `;
     }

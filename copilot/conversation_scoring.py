@@ -211,18 +211,54 @@ class ConversationScoringEngine:
         has_timing_block = comp.contact_preference == "timing_restriction"
         has_access_constraints = bool(current_state.decision_structure.access_constraints)
 
-        logistical_pts = 70.0
-        if has_active_timeline:
-            logistical_pts += 20.0
-        if has_channel_block:
-            logistical_pts -= 35.0
-        if has_timing_block:
-            logistical_pts -= 25.0
+        # Collect prospect evidence turn IDs
+        prospect_ev_turn_ids: List[int] = []
+        if bundle.speaker_id == "client":
+            prospect_ev_turn_ids.append(bundle.turn_id)
+        if hasattr(current_state, "prospect_turn_ids"):
+            for pt in current_state.prospect_turn_ids:
+                if pt not in prospect_ev_turn_ids:
+                    prospect_ev_turn_ids.append(pt)
+        for f in current_state.facts:
+            if getattr(f, "source_turn_id", 0) > 0 and f.source_turn_id not in prospect_ev_turn_ids:
+                prospect_ev_turn_ids.append(f.source_turn_id)
+        for o in current_state.objections:
+            if getattr(o, "source_turn_id", 0) > 0 and o.source_turn_id not in prospect_ev_turn_ids:
+                prospect_ev_turn_ids.append(o.source_turn_id)
+
+        has_prospect_spoken = len(prospect_ev_turn_ids) > 0 or getattr(current_state, "has_prospect_spoken", False)
         has_confirmed_meeting = any(f.fact_key == "confirmed_meeting_time" and f.status == "active" for f in current_state.facts) or bool(current_state.conversion_event and getattr(current_state.conversion_event, "status", "") == "confirmed")
-        if has_access_constraints and not has_confirmed_meeting:
-            logistical_pts -= 15.0
-        if comp.hard_boundary_active:
+
+        has_substantive_facts = any(
+            f.category in ("timeline", "financial", "property", "decision_maker") and f.status == "active"
+            for f in current_state.facts
+        )
+        has_affirmative_evidence = (
+            (bundle.speaker_id == "client" and (bundle.agreement_score > 0.55 or bundle.future_language_score > 0.40 or bundle.specificity_score > 0.50))
+            or bool(current_state.objections)
+            or bool(current_state.decision_structure.primary_decision_maker)
+            or has_substantive_facts
+            or has_confirmed_meeting
+        )
+        is_clean_slate_defaults = (not has_prospect_spoken) or (not has_affirmative_evidence)
+
+        has_logistical_evidence = has_active_timeline or has_confirmed_meeting or (
+            bundle.speaker_id == "client" and bundle.future_language_score > 0.40
+        )
+        if not has_prospect_spoken or (not has_logistical_evidence and is_clean_slate_defaults):
             logistical_pts = 0.0
+        else:
+            logistical_pts = 70.0
+            if has_active_timeline:
+                logistical_pts += 20.0
+            if has_channel_block:
+                logistical_pts -= 35.0
+            if has_timing_block:
+                logistical_pts -= 25.0
+            if has_access_constraints and not has_confirmed_meeting:
+                logistical_pts -= 15.0
+            if comp.hard_boundary_active:
+                logistical_pts = 0.0
         logistical = round(min(100.0, max(0.0, logistical_pts)), 1)
 
         # D. Decision Readiness: Authority identified, present, aligned
@@ -245,6 +281,8 @@ class ConversationScoringEngine:
             decision_pts = 30.0
         elif dec.primary_decision_maker:
             decision_pts = 90.0
+        elif not has_prospect_spoken:
+            decision_pts = 0.0
         else:
             decision_pts = 50.0
         decision_readiness = round(min(100.0, max(0.0, decision_pts)), 1)
@@ -267,6 +305,11 @@ class ConversationScoringEngine:
         applicable_ceilings: Dict[str, float] = {}
         blocker_descriptions: List[str] = []
 
+        # Blocker 0: Insufficient Prospect Evidence (Clean Slate Default: Readiness Unknown)
+        if is_clean_slate_defaults:
+            active_blockers.append("insufficient_evidence")
+            blocker_descriptions.append("Insufficient prospect-originated evidence for readiness assessment (readiness unknown)")
+
         # Blocker 1: Hard Compliance Boundary
         if comp.hard_boundary_active:
             active_blockers.append("hard_boundary")
@@ -275,13 +318,13 @@ class ConversationScoringEngine:
 
         # Blocker 2: Absent / Unaligned Decision Maker
         is_dm_absent = (not dec.decision_maker_present) or has_absent_spouse_or_stakeholder
-        if not comp.hard_boundary_active and is_dm_absent:
+        if not comp.hard_boundary_active and is_dm_absent and not is_clean_slate_defaults:
             active_blockers.append("absent_decision_maker")
             applicable_ceilings["absent_decision_maker"] = cfg.absent_decision_maker_ceiling
             blocker_descriptions.append(f"Absent/unconfirmed decision maker (ceiling {cfg.absent_decision_maker_ceiling:.0f})")
 
         # Blocker 3: Logistical Deficit Blocker
-        if not comp.hard_boundary_active and logistical <= cfg.logistical_deficit_threshold:
+        if not comp.hard_boundary_active and logistical <= cfg.logistical_deficit_threshold and not is_clean_slate_defaults:
             active_blockers.append("logistical_deficit")
             applicable_ceilings["logistical_deficit"] = cfg.logistical_deficit_ceiling
             blocker_descriptions.append(
@@ -305,33 +348,40 @@ class ConversationScoringEngine:
                 ):
                     blocking_objs.append(o)
 
-        if not comp.hard_boundary_active and blocking_objs:
+        if not comp.hard_boundary_active and blocking_objs and not is_clean_slate_defaults:
             active_blockers.append("unresolved_objection")
             applicable_ceilings["unresolved_objection"] = cfg.unresolved_objection_ceiling
             blocker_descriptions.append(f"Active unresolved objection (ceiling {cfg.unresolved_objection_ceiling:.0f})")
 
         # Strictest-Wins Resolution:
-        # Monotonic minimum across uncapped readiness and all active ceilings
         if applicable_ceilings:
             strictest_blocker = min(applicable_ceilings, key=applicable_ceilings.get)
             strictest_ceiling = applicable_ceilings[strictest_blocker]
             capped = min(uncapped, strictest_ceiling)
             binding_note = f"Readiness capped at {capped:.0f} by strictest blocker ({strictest_blocker}). Active blockers: {', '.join(blocker_descriptions)}."
+        elif is_clean_slate_defaults:
+            capped = None
+            binding_note = "Readiness unknown (clean slate baseline lacks prospect-originated evidence)."
         else:
             capped = uncapped
             binding_note = None
 
-        capped = round(min(100.0, max(0.0, capped)), 1)
+        if capped is not None:
+            capped = round(min(100.0, max(0.0, capped)), 1)
         effective_conf = round(min(bundle.inference_confidence, bundle.semantic_confidence), 3)
+        if is_clean_slate_defaults:
+            effective_conf = 0.0
 
         return ReadinessBreakdown(
             readiness_score=capped,
-            uncapped_score=uncapped,
-            emotional_readiness=emotional,
-            logical_readiness=logical,
-            logistical_readiness=logistical,
-            decision_readiness=decision_readiness,
+            uncapped_score=None if is_clean_slate_defaults else uncapped,
+            emotional_readiness=None if is_clean_slate_defaults else emotional,
+            logical_readiness=None if is_clean_slate_defaults else logical,
+            logistical_readiness=None if is_clean_slate_defaults else logistical,
+            decision_readiness=None if is_clean_slate_defaults else decision_readiness,
             active_blocker_caps=active_blockers,
             capped_reason=binding_note,
             confidence=effective_conf,
+            insufficient_evidence=is_clean_slate_defaults,
+            evidence_turn_ids=prospect_ev_turn_ids,
         )

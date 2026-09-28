@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from datetime import datetime, timezone
 import logging
 import re
 import uuid
@@ -13,6 +14,8 @@ from .conversation_state_models import (
     DimensionScores,
     ContactComplianceState,
     ContactPreference,
+    ComplianceEvent,
+    PersistentFactRecord,
     PushStrengthRecommendation,
     StateChangeRecord,
     ConversionEventStatus,
@@ -25,7 +28,7 @@ from .conversation_state_models import (
     ObjectionRecord,
     DormancyEvidence,
 )
-from .behavioral_semantic import extract_structured_contact_preference, HARD_BOUNDARY_PATTERNS
+from .behavioral_semantic import extract_structured_contact_preference, HARD_BOUNDARY_PATTERNS, SOFT_CONTACT_PREFERENCE_PATTERNS
 from .conversation_facts import PersistentFactsManager
 from .conversation_objections import ObjectionLifecycleEngine, DECISION_TO_STAY_PATTERNS
 from .conversation_supersession import TruthSupersessionDetector
@@ -114,6 +117,8 @@ class ConversationStateManager:
             self.conversion_target = conversion_target
         if bundle.speaker_id == "client":
             self.has_prospect_spoken = True
+            if bundle.turn_id not in self.current_state.prospect_turn_ids:
+                self.current_state.prospect_turn_ids.append(bundle.turn_id)
         self._bundle_history.append(bundle)
         # Stale-write protection (Client Principle #9)
         # 1. Strictly reject turns with turn_id older than latest processed turn
@@ -167,9 +172,19 @@ class ConversationStateManager:
         )
         stage_transition_due = (stage_check != self.current_state.conversation_stage)
 
-        # If turn is non-material (no targets affected, no manual decision/fact updates, no dormancy aging, and no stage transition due),
-        # preserve state version and dimension stability entirely without mutating state.
-        if not materiality.is_material and not decision_updates and not fact_updates and not dormant_due and not stage_transition_due:
+        # If turn is non-material (no targets affected, no manual decision/fact updates, no dormancy aging, no stage transition due,
+        # no pending suspected boundary, and no active hard boundary that prospect could retract), preserve state version without mutating.
+        has_pending_suspected = self.current_state.contact_compliance.boundary_suspected
+        has_active_hard_boundary = self.current_state.contact_compliance.hard_boundary_active and bundle.speaker_id == "client"
+        if (
+            not materiality.is_material
+            and not decision_updates
+            and not fact_updates
+            and not dormant_due
+            and not stage_transition_due
+            and not has_pending_suspected
+            and not has_active_hard_boundary
+        ):
             self.current_state.last_updated_turn_id = bundle.turn_id
             self.current_state.last_updated_timestamp_ms = bundle.timestamp_ms
             self.prior_bundle = bundle
@@ -213,17 +228,144 @@ class ConversationStateManager:
                 self.current_state.dimensions = new_dims
 
         # 2. Update Contact/Compliance State (Gated by Materiality)
-        if "contact_compliance" in materiality.affected_targets:
+        if "contact_compliance" in materiality.affected_targets or bundle.speaker_id == "client":
             text_lower = bundle.utterance_text.lower().strip()
-            matched_boundary_pattern = next((p for p in HARD_BOUNDARY_PATTERNS if re.search(p, text_lower)), None)
-            is_hard_turn = (
-                bundle.boundary_score >= 0.85
-                or bundle.recurrence_type == "boundary_repeated"
-                or bool(matched_boundary_pattern)
+
+            # 1. Scheduling alternative exemption: "don't call me tomorrow, call Thursday"
+            # Prospect is adjusting timing or logistics, NOT setting a permanent contact boundary.
+            is_scheduling_alternative = bool(
+                re.search(
+                    r"\bdon['’]?t\s+call\s+(?:me\s+)?(?:today|tomorrow|tonight|right\s+now|this\s+morning|this\s+afternoon)\b.*?\b(?:call|instead|tomorrow|thursday|friday|monday|tuesday|wednesday|saturday|sunday|next\s+week)\b",
+                    text_lower,
+                )
+                or re.search(
+                    r"\bdon['’]?t\s+call\s+(?:me\s+)?(?:today|tomorrow|tonight|right\s+now)\s*,\s*(?:just\s+)?(?:call|text)\s+(?:me\s+)?(?:on\s+)?(?:thursday|friday|monday|tuesday|wednesday|saturday|sunday|later|tomorrow)\b",
+                    text_lower,
+                )
             )
-            hard_active = self.current_state.contact_compliance.hard_boundary_active or is_hard_turn
-            hard_reason = self.current_state.contact_compliance.hard_boundary_reason
-            if is_hard_turn:
+
+            # 2. Retraction patterns: explicit prospect invitation to contact after a prior boundary
+            retraction_patterns = [
+                r"\b(?:actually\b\s*,?\s*)?(?:you\s+can|feel\s+free\s+to|go\s+ahead\s+and)\s+(?:call|reach\s+out|contact|text)\b",
+                r"\b(?:i\s+changed\s+my\s+mind|never\s+mind|changed\s+mind)\b.*?\b(?:call|reach\s+out|contact|talk)\b",
+                r"\b(?:go\s+ahead\s+and\s+call|call\s+me\s+back|call\s+me\s+tomorrow|call\s+me\s+later)\b",
+                r"\b(?:it['’]?s\s+okay\s+to|fine\s+to|you\s+may)\s+(?:call|contact|reach\s+out)\b",
+            ]
+            is_retraction = (
+                bundle.speaker_id == "client"
+                and self.current_state.contact_compliance.hard_boundary_active
+                and any(re.search(p, text_lower) for p in retraction_patterns)
+            )
+
+            # 3. Soft preference check: if utterance is purely a soft preference ("don't text me every day"), keep out of boundary path
+            is_pure_soft_preference = False
+            for cat, pats in SOFT_CONTACT_PREFERENCE_PATTERNS.items():
+                if any(re.search(p, text_lower) for p in pats):
+                    is_pure_soft_preference = True
+                    break
+
+            # 4. Clause-level Boundary and Negation Parsing (Client feedback Item 4):
+            # Split utterance by contrastive conjunctions or punctuation to evaluate each clause independently.
+            # Prevents "I don't mind you calling, but don't call me again" from being false-negatived by the first clause.
+            negation_patterns = [
+                r"\b(?:don['’]?t|do\s+not|doesn['’]?t)\s+mind\s+(?:if\s+you\s+|you\s+)?(?:call|reach\s+out|text|contact)\b",
+                r"\b(?:fine|okay|ok|welcome|happy)\s+(?:if\s+you|for\s+you\s+to)?\s*(?:call|reach\s+out|text|contact)\b",
+                r"\b(?:you\s+can|feel\s+free\s+to|go\s+ahead\s+and)\s+(?:call|reach\s+out|text|contact)\b",
+                r"\bnot\s+saying\s+(?:you\s+can['’]?t|never)\s+(?:call|reach\s+out|contact)\b",
+                r"\b(?:i['’]?m\s+)?not\s+against\s+(?:you\s+)?(?:calling|contacting)\b",
+            ]
+
+            raw_clauses = re.split(r"(?<=[.?!;,])\s+|\s+(?:but|however|except|although|though)\s+", text_lower)
+            clauses = [c.strip() for c in raw_clauses if c.strip()]
+            if not clauses:
+                clauses = [text_lower]
+
+            matched_boundary_pattern = None
+            if bundle.speaker_id == "client" and not is_retraction and not is_scheduling_alternative:
+                for clause in clauses:
+                    clause_negated = any(re.search(p, clause) for p in negation_patterns)
+                    if clause_negated:
+                        continue  # Permissive clause, do not match boundary in this clause
+
+                    candidates = [p for p in HARD_BOUNDARY_PATTERNS if re.search(p, clause)]
+                    if is_pure_soft_preference:
+                        candidates = [p for p in candidates if any(w in p for w in ["loss_my_number", "lose_my_number", "dnc", "harass", "leave_me_alone"])]
+                    if candidates:
+                        matched_boundary_pattern = candidates[0]
+                        break
+
+            is_hard_turn = (
+                bundle.speaker_id == "client"
+                and not is_retraction
+                and not is_scheduling_alternative
+                and (
+                    (bundle.boundary_score >= 0.85 and not any(re.search(p, text_lower) for p in negation_patterns if len(clauses) == 1))
+                    or bundle.recurrence_type == "boundary_repeated"
+                    or bool(matched_boundary_pattern)
+                )
+            )
+
+            # 5. Narrowly Scoped boundary_suspected with Clear Lifecycle Exits (Client feedback Item 5):
+            # Scope: ONLY triggers on contact-specific friction. Ordinary objections ("need to think", "talk to spouse", "commission") stay in objection lifecycle.
+            contact_specific_friction_patterns = [
+                r"\b(?:not\s+sure|don['’]?t\s+know)\s+(?:if\s+)?(?:i\s+want\s+to|you\s+should)\s+(?:talk|call|chat)\b",
+                r"\b(?:maybe\s+)?don['’]?t\s+call\s+(?:me\s+)?right\s+now\b",
+                r"\b(?:why\s+are\s+you|who\s+gave\s+you)\s+(?:calling\s+me|this\s+number)\b",
+                r"\b(?:too\s+many\s+calls|stop\s+calling\s+so\s+much)\b",
+                r"\b(?:leave\s+me\s+alone\s+for\s+now|uncomfortable\s+with\s+you\s+calling)\b",
+            ]
+            has_contact_friction = any(re.search(p, text_lower) for p in contact_specific_friction_patterns)
+
+            # Check if prior boundary_suspected is cleared by affirmative/neutral response
+            cleared_by_prospect = bool(
+                re.search(r"\b(?:that['’]?s\s+fine|it['’]?s\s+okay|fine|okay|ok|go\s+ahead|you\s+can\s+call|sure)\b", text_lower)
+            )
+            # Check if prior boundary_suspected has expired (N >= 2 turns elapsed)
+            prior_suspected_turn = self.current_state.contact_compliance.boundary_suspected_turn_id or 0
+            has_expired = (bundle.turn_id - prior_suspected_turn) >= 2 if prior_suspected_turn > 0 else False
+
+            is_suspected = (
+                bundle.speaker_id == "client"
+                and not is_hard_turn
+                and not is_retraction
+                and not is_pure_soft_preference
+                and not is_scheduling_alternative
+                and has_contact_friction
+            )
+
+            suspected_turn_id = self.current_state.contact_compliance.boundary_suspected_turn_id
+
+            if is_retraction:
+                hard_active = False
+                hard_reason = f"Boundary retracted by explicit prospect invitation ('{bundle.utterance_text.strip()}')"
+                hard_retracted = True
+                retract_turn = bundle.turn_id
+                suspected_active = False
+                suspected_reason = None
+                suspected_turn_id = None
+                self.current_state.compliance_events.append(
+                    ComplianceEvent(
+                        event_type="boundary_retracted",
+                        occurred_at=datetime.now(timezone.utc).isoformat(),
+                        source_turn_ids=[bundle.turn_id],
+                        details={
+                            "reason": hard_reason,
+                            "utterance": bundle.utterance_text,
+                            "prior_boundary_reason": self.current_state.contact_compliance.hard_boundary_reason,
+                            "is_inferred_extension": True,
+                            "requires_human_compliance_review": True,
+                            "automatic_suppression_removal": False,
+                        },
+                        is_inferred_extension=True,
+                    )
+                )
+            elif is_hard_turn:
+                hard_active = True
+                hard_retracted = False
+                retract_turn = None
+                suspected_active = False
+                suspected_reason = None
+                suspected_turn_id = None
                 if bundle.boundary_score >= 0.85:
                     hard_reason = f"Triggered by upstream compliance boundary detection (score={bundle.boundary_score:.2f})"
                 elif bundle.recurrence_type == "boundary_repeated":
@@ -232,6 +374,30 @@ class ConversationStateManager:
                     hard_reason = f"Triggered by explicit compliance cutoff phrase ('{bundle.utterance_text.strip()}')"
                 else:
                     hard_reason = "Triggered by compliance boundary detection"
+            elif is_suspected:
+                hard_active = self.current_state.contact_compliance.hard_boundary_active
+                hard_reason = self.current_state.contact_compliance.hard_boundary_reason
+                hard_retracted = self.current_state.contact_compliance.hard_boundary_retracted
+                retract_turn = self.current_state.contact_compliance.retraction_turn_id
+                suspected_active = True
+                suspected_reason = f"Contact-specific friction detected ('{bundle.utterance_text.strip()}')"
+                suspected_turn_id = bundle.turn_id
+            elif cleared_by_prospect or has_expired:
+                # Suspected boundary resolves: cleared by prospect or expired after N turns
+                hard_active = self.current_state.contact_compliance.hard_boundary_active
+                hard_reason = self.current_state.contact_compliance.hard_boundary_reason
+                hard_retracted = self.current_state.contact_compliance.hard_boundary_retracted
+                retract_turn = self.current_state.contact_compliance.retraction_turn_id
+                suspected_active = False
+                suspected_reason = None
+                suspected_turn_id = None
+            else:
+                hard_active = self.current_state.contact_compliance.hard_boundary_active
+                hard_reason = self.current_state.contact_compliance.hard_boundary_reason
+                hard_retracted = self.current_state.contact_compliance.hard_boundary_retracted
+                retract_turn = self.current_state.contact_compliance.retraction_turn_id
+                suspected_active = self.current_state.contact_compliance.boundary_suspected
+                suspected_reason = self.current_state.contact_compliance.boundary_suspected_reason
 
             # Track prohibited channels
             channels = list(self.current_state.contact_compliance.hard_boundary_channels)
@@ -249,6 +415,24 @@ class ConversationStateManager:
                     for ch in ["call", "sms", "email"]:
                         if ch not in channels:
                             channels.append(ch)
+
+                self.current_state.compliance_events.append(
+                    ComplianceEvent(
+                        event_type="hard_boundary_confirmed",
+                        occurred_at=datetime.now(timezone.utc).isoformat(),
+                        source_turn_ids=[bundle.turn_id],
+                        details={
+                            "reason": hard_reason,
+                            "channels": channels,
+                            "spec_literal_fallback": "consent_issue",
+                            "is_inferred_extension": True,
+                            "requires_human_compliance_review": True,
+                            "automatic_suppression_removal": False,
+                            "utterance": bundle.utterance_text,
+                        },
+                        is_inferred_extension=True,
+                    )
+                )
 
             # Update contact preferences list (distinct from hard boundary!)
             prefs = list(self.current_state.contact_compliance.contact_preferences)
@@ -269,6 +453,11 @@ class ConversationStateManager:
                 hard_boundary_reason=hard_reason,
                 hard_boundary_channels=channels,
                 contact_preferences=prefs,
+                boundary_suspected=suspected_active,
+                boundary_suspected_reason=suspected_reason,
+                boundary_suspected_turn_id=suspected_turn_id,
+                hard_boundary_retracted=hard_retracted,
+                retraction_turn_id=retract_turn,
                 contact_preference=bundle.contact_preference if bundle.contact_preference != "none" else self.current_state.contact_compliance.contact_preference,
                 contact_preference_details=bundle.contact_preference_details or self.current_state.contact_compliance.contact_preference_details,
                 contact_preference_confidence=bundle.contact_preference_confidence or self.current_state.contact_compliance.contact_preference_confidence,

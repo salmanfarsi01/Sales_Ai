@@ -36,47 +36,33 @@ class PitchProXCoreIntelligenceEngine:
         turn_timestamp_ms: int = 0,
     ) -> DecisionEvaluationResult:
         context = self._build_context(snapshot)
+        unresolved_objections = snapshot.get_unresolved_objections()
 
         # 1. Compliance and Hard Boundary Gate (Spec 01 §10, Spec 09 §7)
         if context.hard_boundary_active:
             eval_res = self._build_boundary_decision(snapshot, context, turn_timestamp_ms)
-            self._apply_cross_metric_consistency_rules(snapshot, eval_res.decision, eval_res.context)
-            self._finalize_decision_confidence(snapshot, eval_res.decision, eval_res.context)
-            return eval_res
-
+        elif context.boundary_suspected:
+            eval_res = self._build_boundary_suspected_decision(snapshot, context, turn_timestamp_ms)
         # 2. Confirmed Conversion Protection Gate (Item 9: confirm_and_protect)
-        if context.conversion_confirmed or context.push_strength_state == "confirm_and_protect":
+        elif context.conversion_confirmed or context.push_strength_state == "confirm_and_protect":
             eval_res = self._build_confirm_protect_decision(snapshot, context, turn_timestamp_ms)
-            self._apply_cross_metric_consistency_rules(snapshot, eval_res.decision, eval_res.context)
-            self._finalize_decision_confidence(snapshot, eval_res.decision, eval_res.context)
-            return eval_res
-
         # 3. Active Objection Lifecycle and Spec 01 §6 6-Level Depth Ladder
-        unresolved_objections = snapshot.get_unresolved_objections()
-        if unresolved_objections:
+        elif unresolved_objections:
             eval_res = self._build_objection_decision(snapshot, context, unresolved_objections, turn_timestamp_ms)
-            self._apply_cross_metric_consistency_rules(snapshot, eval_res.decision, eval_res.context)
-            self._finalize_decision_confidence(snapshot, eval_res.decision, eval_res.context)
-            return eval_res
-
         # 4. Multi-Stakeholder and Absent Decision Maker Gate (Spec 09 §3)
-        if not context.decision_maker_present:
+        elif not context.decision_maker_present:
             eval_res = self._build_absent_stakeholder_decision(snapshot, context, turn_timestamp_ms)
-            self._apply_cross_metric_consistency_rules(snapshot, eval_res.decision, eval_res.context)
-            self._finalize_decision_confidence(snapshot, eval_res.decision, eval_res.context)
-            return eval_res
-
         # 5. Conversion Gate and Push Strength Alignment (Spec 09 §6, §7)
-        if context.meeting_gate_open:
+        elif context.meeting_gate_open:
             eval_res = self._build_meeting_gate_decision(snapshot, context, turn_timestamp_ms)
-            self._apply_cross_metric_consistency_rules(snapshot, eval_res.decision, eval_res.context)
-            self._finalize_decision_confidence(snapshot, eval_res.decision, eval_res.context)
-            return eval_res
-
         # 6. Stage-Specific and Discovery Fallback Strategy
-        eval_res = self._build_stage_default_decision(snapshot, context, turn_timestamp_ms)
+        else:
+            eval_res = self._build_stage_default_decision(snapshot, context, turn_timestamp_ms)
+
+        self._apply_contact_compliance_constraints(snapshot, eval_res.decision, eval_res.context)
         self._apply_cross_metric_consistency_rules(snapshot, eval_res.decision, eval_res.context)
         self._finalize_decision_confidence(snapshot, eval_res.decision, eval_res.context)
+        self._attach_full_trace(eval_res.decision, eval_res.context, snapshot, turn_speaker, turn_text)
         return eval_res
 
     def _build_context(self, snapshot: ConversationStateSnapshot) -> StrategicInterpretationContext:
@@ -111,6 +97,8 @@ class PitchProXCoreIntelligenceEngine:
             failed_strategies_by_objection=failed_by_obj,
             decision_maker_present=snapshot.decision_structure.decision_maker_present,
             hard_boundary_active=snapshot.contact_compliance.hard_boundary_active,
+            boundary_suspected=snapshot.contact_compliance.boundary_suspected,
+            boundary_retracted=snapshot.contact_compliance.hard_boundary_retracted,
             meeting_gate_open=gate_open,
             conversion_confirmed=is_confirmed,
             push_strength_state=push_strength,
@@ -155,7 +143,7 @@ class PitchProXCoreIntelligenceEngine:
                 decision.do_not_do.append("ignore_negative_sentiment")
 
         # Rule 5: Readiness high but authority/logistics blocked -> Apply blocker cap
-        if context.readiness_score > 70.0 and not context.decision_maker_present:
+        if context.readiness_score is not None and context.readiness_score > 70.0 and not context.decision_maker_present:
             context.cross_metric_penalties.append("READINESS_CAPPED_BY_ABSENT_AUTHORITY")
             if "press_for_single_party_commitment" not in decision.do_not_do:
                 decision.do_not_do.append("press_for_single_party_commitment")
@@ -199,6 +187,51 @@ class PitchProXCoreIntelligenceEngine:
         decision.confidence = round(final_conf, 3)
         decision.confidence_breakdown = breakdown
 
+    def _apply_contact_compliance_constraints(
+        self,
+        snapshot: ConversationStateSnapshot,
+        decision: StrategicDecision,
+        context: StrategicInterpretationContext,
+    ) -> None:
+        """Enforces contact preferences and channel restrictions across all strategic decisions (Spec 01 §10)."""
+        comp = snapshot.contact_compliance
+        if not comp:
+            return
+
+        has_active_preference = False
+
+        # 1. Process structured contact preferences
+        for pref in comp.contact_preferences:
+            if not pref.allowed or pref.cadence in ("reduced", "specific_times") or pref.prohibited_behavior:
+                has_active_preference = True
+                if "violating_contact_preference" not in decision.do_not_do:
+                    decision.do_not_do.append("violating_contact_preference")
+                if "contact_preference" not in decision.what_to_protect:
+                    decision.what_to_protect.append("contact_preference")
+                if pref.prohibited_behavior:
+                    tag = f"prohibited_{pref.prohibited_behavior.replace(' ', '_')}"
+                    if tag not in decision.do_not_do:
+                        decision.do_not_do.append(tag)
+
+        # 2. Check facts for contact preferences
+        pref_facts = [f for f in snapshot.facts if f.category == "preference" and f.status == "active"]
+        if pref_facts:
+            has_active_preference = True
+        # 3. Check for expired contact friction in prospect memory (Client Audit Item 3)
+        # Keeps light constraint: no high-pressure closing, no aggressive scheduling push
+        has_past_friction = any(f.fact_key == "past_contact_friction" and f.status == "active" for f in snapshot.facts)
+        if has_past_friction:
+            has_active_preference = True
+            if "high_pressure_closing" not in decision.do_not_do:
+                decision.do_not_do.append("high_pressure_closing")
+            if "scheduling_push" not in decision.do_not_do:
+                decision.do_not_do.append("scheduling_push")
+            if "PAST_CONTACT_FRICTION_HONORED" not in decision.reason_codes:
+                decision.reason_codes.append("PAST_CONTACT_FRICTION_HONORED")
+
+        if has_active_preference and "CONTACT_PREFERENCE_ENFORCED" not in decision.reason_codes:
+            decision.reason_codes.append("CONTACT_PREFERENCE_ENFORCED")
+
     def _build_boundary_decision(
         self,
         snapshot: ConversationStateSnapshot,
@@ -211,7 +244,7 @@ class PitchProXCoreIntelligenceEngine:
             should_prompt=True,
             strategic_objective="Acknowledge boundary, cease persuasion, and gracefully conclude call.",
             primary_action=StrategicAction.ACKNOWLEDGE,
-            secondary_action=StrategicAction.WAIT_SILENCE,
+            secondary_action=None,
             push_strength="respect_record_exit",
             reason_codes=["HARD_BOUNDARY_ACTIVE", "COMPLIANCE_PRIORITY"],
             do_not_do=["persuade", "pitch", "schedule_meeting", "overcome_boundary"],
@@ -221,6 +254,33 @@ class PitchProXCoreIntelligenceEngine:
             urgency="immediate",
             max_prompt_words=18,
             confidence=1.0,
+            created_at_ms=turn_timestamp_ms,
+        )
+        return DecisionEvaluationResult(decision=decision, context=context)
+
+    def _build_boundary_suspected_decision(
+        self,
+        snapshot: ConversationStateSnapshot,
+        context: StrategicInterpretationContext,
+        turn_timestamp_ms: int,
+    ) -> DecisionEvaluationResult:
+        """Handles ambiguous boundary signals: stops persuading and issues a short clarify (Spec 01 §10)."""
+        decision = StrategicDecision(
+            call_id=snapshot.call_sid,
+            source_state_version=snapshot.state_version,
+            should_prompt=True,
+            strategic_objective="Stop persuading and issue a short clarify to confirm prospect comfort and boundaries.",
+            primary_action=StrategicAction.CLARIFY,
+            secondary_action=None,
+            push_strength="respect_record_exit",
+            reason_codes=["BOUNDARY_SUSPECTED", "STOP_PERSUADING_CLARIFY"],
+            do_not_do=["persuade", "pitch", "schedule_meeting", "overcome_boundary", "apply_pressure"],
+            what_to_protect=["prospect_comfort", "conversation_safety", "legal_compliance"],
+            question_allowed=True,
+            retrieval_needed=False,
+            urgency="immediate",
+            max_prompt_words=16,
+            confidence=0.85,
             created_at_ms=turn_timestamp_ms,
         )
         return DecisionEvaluationResult(decision=decision, context=context)
@@ -376,6 +436,55 @@ class PitchProXCoreIntelligenceEngine:
         context: StrategicInterpretationContext,
         turn_timestamp_ms: int,
     ) -> DecisionEvaluationResult:
+        gate = snapshot.conversion_gate
+        unknown_conds = getattr(gate, "unknown_conditions", []) if gate else []
+        gate_conf = gate.confidence if gate else 0.0
+
+        # Don't choose COMMITMENT_CLOSE on a gate with low confidence or unknown conditions.
+        # Route to QUESTION or CLARIFY to discover the missing piece.
+        if unknown_conds or gate_conf < 0.60 or not (gate and gate.is_open):
+            missing_cond = unknown_conds[0] if unknown_conds else "readiness_criteria"
+            if missing_cond == "plausible_logistics":
+                primary_action = StrategicAction.QUESTION
+                secondary_action = StrategicAction.CLARIFY
+                objective = "Explore prospect scheduling preferences and logistical availability."
+                reason_codes = ["GATE_UNKNOWN_LOGISTICS", "DISCOVER_MISSING_GATE_PIECE"]
+            elif missing_cond in ("clear_value_reason", "problem_pain_acknowledged"):
+                primary_action = StrategicAction.QUESTION
+                secondary_action = StrategicAction.EDUCATE
+                objective = "Discover prospect priorities and establish clear value before closing."
+                reason_codes = ["GATE_UNKNOWN_VALUE_REASON", "DISCOVER_MISSING_GATE_PIECE"]
+            elif missing_cond == "decision_maker_aligned":
+                primary_action = StrategicAction.CLARIFY
+                secondary_action = StrategicAction.QUESTION
+                objective = "Clarify stakeholder involvement and decision process."
+                reason_codes = ["GATE_UNKNOWN_DECISION_MAKER", "DISCOVER_MISSING_GATE_PIECE"]
+            else:
+                primary_action = StrategicAction.CLARIFY
+                secondary_action = StrategicAction.QUESTION
+                objective = f"Clarify missing gate criteria ({missing_cond}) before attempting commitment close."
+                reason_codes = ["GATE_LOW_CONFIDENCE_OR_UNKNOWN", "DISCOVER_MISSING_GATE_PIECE"]
+
+            decision = StrategicDecision(
+                call_id=snapshot.call_sid,
+                source_state_version=snapshot.state_version,
+                should_prompt=True,
+                strategic_objective=objective,
+                primary_action=primary_action,
+                secondary_action=secondary_action,
+                push_strength="resolve_then_ask",
+                reason_codes=reason_codes,
+                do_not_do=["premature_close", "blind_commitment_close", "apply_manipulative_pressure"],
+                what_to_protect=["trust", "conversation_flow"],
+                question_allowed=True,
+                retrieval_needed=False,
+                urgency="immediate",
+                max_prompt_words=20,
+                confidence=gate_conf,
+                created_at_ms=turn_timestamp_ms,
+            )
+            return DecisionEvaluationResult(decision=decision, context=context)
+
         push_state = context.push_strength_state
 
         if push_state == "two_window_choice":
@@ -442,12 +551,22 @@ class PitchProXCoreIntelligenceEngine:
             do_not_do = ["premature_close"]
             max_words = 24
         elif stage in (ConversationStage.SCHEDULING, ConversationStage.COMMITMENT_CONFIRMED):
-            primary_action = StrategicAction.COMMITMENT_CLOSE
-            secondary_action = StrategicAction.CLARIFY
-            objective = "Coordinate logistical details and calendar commitment."
-            reason_codes = ["STAGE_SCHEDULING", "FINALIZE_TIME"]
-            do_not_do = ["reopen_discovery"]
-            max_words = 20
+            gate = snapshot.conversion_gate
+            gate_ready = bool(gate and gate.is_open and not getattr(gate, "unknown_conditions", []) and (gate.confidence >= 0.60))
+            if not gate_ready:
+                primary_action = StrategicAction.QUESTION
+                secondary_action = StrategicAction.CLARIFY
+                objective = "Discover scheduling preferences and uncover logistical details."
+                reason_codes = ["STAGE_SCHEDULING", "GATE_NOT_READY_DISCOVERY"]
+                do_not_do = ["premature_close", "blind_commitment_close"]
+                max_words = 20
+            else:
+                primary_action = StrategicAction.COMMITMENT_CLOSE
+                secondary_action = StrategicAction.CLARIFY
+                objective = "Coordinate logistical details and calendar commitment."
+                reason_codes = ["STAGE_SCHEDULING", "FINALIZE_TIME"]
+                do_not_do = ["reopen_discovery"]
+                max_words = 20
         else:
             primary_action = StrategicAction.QUESTION
             secondary_action = StrategicAction.ACKNOWLEDGE
@@ -461,6 +580,20 @@ class PitchProXCoreIntelligenceEngine:
             primary_action = StrategicAction.VALIDATE
             reason_codes.append("LOW_TRUST_VALIDATION_INJECTED")
 
+        # Invariant: Non-closing discovery/clarify actions cannot carry a close-style push recommendation
+        push_st = context.push_strength_state
+        if primary_action in (
+            StrategicAction.QUESTION,
+            StrategicAction.CLARIFY,
+            StrategicAction.VALIDATE,
+            StrategicAction.EDUCATE,
+            StrategicAction.ACKNOWLEDGE,
+            StrategicAction.REFRAME,
+            StrategicAction.MIRROR,
+            StrategicAction.DIFFERENTIATE,
+        ) and push_st in ("two_window_choice", "direct_ask"):
+            push_st = "resolve_then_ask"
+
         decision = StrategicDecision(
             call_id=snapshot.call_sid,
             source_state_version=snapshot.state_version,
@@ -468,7 +601,8 @@ class PitchProXCoreIntelligenceEngine:
             strategic_objective=objective,
             primary_action=primary_action,
             secondary_action=secondary_action,
-            push_strength=context.push_strength_state,
+            push_strength=push_st,
+            meeting_gate_open=context.meeting_gate_open,
             reason_codes=reason_codes,
             do_not_do=do_not_do,
             what_to_protect=["trust", "conversation_flow"],
@@ -480,3 +614,58 @@ class PitchProXCoreIntelligenceEngine:
             created_at_ms=turn_timestamp_ms,
         )
         return DecisionEvaluationResult(decision=decision, context=context)
+
+    def _attach_full_trace(
+        self,
+        decision: StrategicDecision,
+        context: StrategicInterpretationContext,
+        snapshot: ConversationStateSnapshot,
+        turn_speaker: str,
+        turn_text: str,
+    ) -> None:
+        """Attaches full explainability trace to StrategicDecision: Evidence -> Interpretation -> Decision Contract.
+        Client Principle: Core Intelligence strictly outputs structural decisions and constraints;
+        it does NOT generate spoken teleprompter copy.
+        """
+        evidence: List[str] = []
+        if turn_text:
+            cleaned_text = turn_text.strip().replace("\n", " ")
+            evidence.append(f'Turn utterance ({turn_speaker}): "{cleaned_text[:80]}"')
+        evidence.append(f"Trust: {context.trust_score:.0f}% (confidence: {snapshot.dimensions.trust_confidence:.2f})")
+
+        # Insufficient evidence display: Show UNKNOWN instead of misleading 0.0%
+        has_insufficient_ev = (snapshot.readiness and snapshot.readiness.insufficient_evidence) or (snapshot.readiness and snapshot.readiness.readiness_score is None)
+        if has_insufficient_ev:
+            evidence.append("Readiness: UNKNOWN (Insufficient Evidence)")
+        else:
+            evidence.append(f"Readiness: {context.readiness_score:.1f}%")
+
+        evidence.append(f"Momentum: {context.momentum_trend}")
+        if context.active_objections:
+            evidence.append(f"Active objections: {context.active_objections}")
+        if snapshot.conversion_gate:
+            gate_st = "OPEN" if snapshot.conversion_gate.is_open else "CLOSED"
+            unk = getattr(snapshot.conversion_gate, "unknown_conditions", [])
+            evidence.append(f"Gate: {gate_st} (unknown: {unk if unk else 'none'})")
+        if snapshot.contact_compliance:
+            if snapshot.contact_compliance.hard_boundary_active:
+                evidence.append("Hard boundary: ACTIVE")
+            elif snapshot.contact_compliance.boundary_suspected:
+                evidence.append("Boundary suspected: AMBIGUOUS")
+            if snapshot.contact_compliance.contact_preferences:
+                evidence.append(f"Contact preferences: {len(snapshot.contact_compliance.contact_preferences)} active")
+
+        decision.evidence_considered = evidence
+        decision.meeting_gate_open = context.meeting_gate_open
+        decision.strategic_interpretation = {
+            "conversation_stage": str(snapshot.conversation_stage.value if hasattr(snapshot.conversation_stage, "value") else snapshot.conversation_stage),
+            "meeting_gate_open": context.meeting_gate_open,
+            "decision_maker_present": context.decision_maker_present,
+            "hard_boundary_active": context.hard_boundary_active,
+            "boundary_suspected": context.boundary_suspected,
+            "push_strength_state": context.push_strength_state,
+            "active_objections": context.active_objections,
+            "readiness_score": None if has_insufficient_ev else round(context.readiness_score, 1),
+            "momentum_trend": context.momentum_trend,
+            "cross_metric_penalties": context.cross_metric_penalties,
+        }

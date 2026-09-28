@@ -18,6 +18,7 @@ from .conversation_materiality import MaterialityClassification
 from .conversation_state_manager import ConversationStateManager
 from .core_intelligence_models import StrategicDecision
 from .core_decision_manager import CoreDecisionManager
+from .llm_response_gateway import LLMResponseGateway
 
 LOGGER = logging.getLogger("copilot.conversation_replay")
 
@@ -121,6 +122,7 @@ class ConversationReplayEngine:
         timeline: List[TurnReplayStep] = []
         prior_bundle: Optional[BehavioralSignalInputBundle] = None
         decision_manager = CoreDecisionManager(call_sid=call_sid)
+        gateway = LLMResponseGateway()
 
         is_synthetic_run = (source == "synthetic_simulation") or ("sim_" in call_sid.lower())
 
@@ -165,6 +167,11 @@ class ConversationReplayEngine:
                 turn_text=bundle.utterance_text,
                 turn_timestamp_ms=bundle.timestamp_ms,
             )
+
+            # Surface the LLM Gateway's deterministic fallback stub in the offline replay trace
+            gateway_stub = gateway._deterministic_fallback(eval_result.decision)
+            eval_result.decision.gateway_fallback_stub = gateway_stub
+            eval_result.decision.final_prompt_text = gateway_stub
 
             step = TurnReplayStep(
                 turn_id=bundle.turn_id,

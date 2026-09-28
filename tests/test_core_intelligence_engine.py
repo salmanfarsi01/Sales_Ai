@@ -42,7 +42,7 @@ def test_hard_boundary_priority():
     decision = result.decision
 
     assert decision.primary_action == StrategicAction.ACKNOWLEDGE
-    assert decision.secondary_action == StrategicAction.WAIT_SILENCE
+    assert decision.secondary_action is None
     assert decision.push_strength == "respect_record_exit"
     assert not decision.question_allowed
     assert "HARD_BOUNDARY_ACTIVE" in decision.reason_codes
@@ -315,3 +315,108 @@ def test_spec11_required_facts_granularity():
     assert modified.required_facts[0].topic == "market_comps"
     assert modified.required_facts[0].verification_required is True
     assert modified.required_facts[1].required_evidence_type == "roi_calculator"
+
+
+def test_contact_preference_enforced_in_do_not_do_and_protect():
+    """Client Specification: Active contact preferences (e.g. 'No daily texting') must be
+
+    injected into do_not_do and what_to_protect across all strategic decisions.
+    """
+    from copilot.conversation_state_models import ContactPreference
+
+    engine = PitchProXCoreIntelligenceEngine()
+    snapshot = ConversationStateSnapshot(
+        call_sid="call_pref_test",
+        state_version=3,
+        conversation_stage=ConversationStage.DISCOVERY,
+    )
+    snapshot.contact_compliance.contact_preferences.append(
+        ContactPreference(
+            channel="sms",
+            allowed=True,
+            cadence="reduced",
+            prohibited_behavior="daily texting",
+            boundary_strength="preference",
+            source_turn_id=2,
+            confidence=0.90,
+        )
+    )
+
+    result = engine.evaluate(snapshot)
+    decision = result.decision
+
+    assert "violating_contact_preference" in decision.do_not_do
+    assert "prohibited_daily_texting" in decision.do_not_do
+    assert "contact_preference" in decision.what_to_protect
+    assert "CONTACT_PREFERENCE_ENFORCED" in decision.reason_codes
+
+
+def test_gate_unknown_conditions_prevents_commitment_close():
+    """Client Specification: Don't choose COMMITMENT_CLOSE on a gate with low confidence or unknown conditions.
+    Route to QUESTION or CLARIFY to discover the missing piece.
+    """
+    engine = PitchProXCoreIntelligenceEngine()
+    snapshot = ConversationStateSnapshot(
+        call_sid="call_gate_unknown",
+        state_version=5,
+        conversation_stage=ConversationStage.SCHEDULING,
+        conversion_gate=MeetingConversionGate(
+            is_open=False,
+            confidence=0.40,
+            unknown_conditions=["plausible_logistics"],
+            blocking_conditions=["plausible_logistics"],
+        ),
+    )
+
+    result = engine.evaluate(snapshot)
+    decision = result.decision
+
+    assert decision.primary_action != StrategicAction.COMMITMENT_CLOSE
+    assert decision.primary_action in (StrategicAction.QUESTION, StrategicAction.CLARIFY)
+    assert "premature_close" in decision.do_not_do
+    assert "blind_commitment_close" in decision.do_not_do
+
+
+def test_boundary_suspected_triggers_short_clarify():
+    """Client Specification: boundary_suspected stops persuading and issues a short clarify."""
+    engine = PitchProXCoreIntelligenceEngine()
+    snapshot = ConversationStateSnapshot(
+        call_sid="call_boundary_suspect",
+        state_version=6,
+        contact_compliance=ContactComplianceState(
+            boundary_suspected=True,
+            boundary_suspected_reason="Ambiguous hesitation detected",
+        ),
+    )
+
+    result = engine.evaluate(snapshot)
+    decision = result.decision
+
+    assert decision.primary_action == StrategicAction.CLARIFY
+    assert "persuade" in decision.do_not_do
+    assert "BOUNDARY_SUSPECTED" in decision.reason_codes
+    assert decision.max_prompt_words <= 18
+
+
+def test_retraction_resumes_normal_selection():
+    """Client Specification: After retraction, resume normal selection."""
+    engine = PitchProXCoreIntelligenceEngine()
+    snapshot = ConversationStateSnapshot(
+        call_sid="call_boundary_retracted",
+        state_version=7,
+        conversation_stage=ConversationStage.DISCOVERY,
+        contact_compliance=ContactComplianceState(
+            hard_boundary_active=False,
+            boundary_suspected=False,
+            hard_boundary_retracted=True,
+            retraction_turn_id=5,
+        ),
+    )
+
+    result = engine.evaluate(snapshot)
+    decision = result.decision
+
+    assert decision.primary_action == StrategicAction.QUESTION
+    assert decision.push_strength != "respect_record_exit"
+    assert "HARD_BOUNDARY_ACTIVE" not in decision.reason_codes
+

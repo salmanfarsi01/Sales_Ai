@@ -125,6 +125,15 @@ class LLMResponseGateway:
                 "Instead, formulate a truthful line focusing entirely on the prospect's own situation without citing external results.\n"
             )
 
+        contact_pref_directive = ""
+        if "violating_contact_preference" in decision.do_not_do or any("prohibited_" in d for d in decision.do_not_do):
+            contact_pref_directive = (
+                "6. CONTACT PREFERENCE RESTRICTION (CRITICAL): The prospect has set active contact restrictions (DO NOT DO: violating_contact_preference). "
+                "Do NOT propose daily texting, unsolicited frequent messaging, or contact through restricted channels. You must strictly honor their communication boundaries.\n"
+            )
+
+        prohibited_line = f"7. MANDATORY CONSTRAINTS: Strictly obey all DO NOT DO prohibitions from Block 1: {', '.join(decision.do_not_do)}.\n" if decision.do_not_do else ""
+
         block6 = (
             "### BLOCK 6: MANDATORY GENERATION DIRECTIVES\n"
             "Generate the exact word-for-word line the salesperson should say right now.\n"
@@ -134,6 +143,8 @@ class LLMResponseGateway:
             "3. Do NOT invent unverified facts, credentials, or numbers.\n"
             f"4. Maximum length is {decision.max_prompt_words} words.\n"
             f"{fallback_directive}"
+            f"{contact_pref_directive}"
+            f"{prohibited_line}"
         )
 
         return f"{block1}\n{block2}\n{block3}\n{block4}\n{block5}\n{block6}"
@@ -209,12 +220,29 @@ class LLMResponseGateway:
 
     def _deterministic_fallback(self, decision: StrategicDecision) -> str:
         action = decision.primary_action
+        reasons = decision.reason_codes
+
+        if "HARD_BOUNDARY_ACTIVE" in reasons or action == StrategicAction.ACKNOWLEDGE and "COMPLIANCE_PRIORITY" in reasons:
+            return "Understood, I completely respect that. Thank you for your time today, and take care."
+
+        if "BOUNDARY_SUSPECTED" in reasons:
+            return "I want to make sure I'm respecting your preferences—would you prefer we not stay in touch?"
+
+        if "GATE_UNKNOWN_LOGISTICS" in reasons:
+            return "What days or times usually work best for your schedule when reviewing options?"
+
+        if "GATE_UNKNOWN_VALUE_REASON" in reasons:
+            return "What would be the most important priority for you when evaluating your options?"
+
+        if "DECISION_MAKER_ABSENT" in reasons:
+            return "It makes total sense to coordinate with your partner—would it be helpful if we found a time when you are both available?"
+
         if action == StrategicAction.ACKNOWLEDGE:
-            if "HARD_BOUNDARY_ACTIVE" in decision.reason_codes:
-                return "I completely respect that. Thank you for your time, and have a great rest of your day."
             if "CONVERSION_CONFIRMED" in decision.reason_codes:
                 return "Perfect, I have Thursday at three confirmed on my calendar. I will see you both then."
             return "I completely understand where you're coming from."
+        elif action == StrategicAction.CLARIFY:
+            return "Could you share a little more about what would make the biggest difference for your situation?"
         elif action == StrategicAction.VALIDATE:
             return "That makes complete sense—let's focus directly on what matters most for your specific situation."
         elif action == StrategicAction.REFRAME:
@@ -222,7 +250,7 @@ class LLMResponseGateway:
         elif action == StrategicAction.DE_RISK:
             return "There is zero obligation—if our approach doesn't make total sense, you can walk away anytime."
         elif action == StrategicAction.COMMITMENT_CLOSE:
-            if decision.secondary_action == StrategicAction.QUESTION:
+            if decision.secondary_action == StrategicAction.QUESTION or decision.push_strength == "two_window_choice":
                 return "Would Thursday at two or Friday morning work better for a brief walkthrough?"
             return "Let's schedule a twenty minute walkthrough so we can review the exact numbers in person."
         elif action == StrategicAction.QUANTIFY:
