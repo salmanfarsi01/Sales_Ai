@@ -231,18 +231,31 @@ class ConversationStateManager:
         if "contact_compliance" in materiality.affected_targets or bundle.speaker_id == "client":
             text_lower = bundle.utterance_text.lower().strip()
 
-            # 1. Scheduling alternative exemption: "don't call me tomorrow, call Thursday"
-            # Prospect is adjusting timing or logistics, NOT setting a permanent contact boundary.
-            is_scheduling_alternative = bool(
-                re.search(
-                    r"\bdon['’]?t\s+call\s+(?:me\s+)?(?:today|tomorrow|tonight|right\s+now|this\s+morning|this\s+afternoon)\b.*?\b(?:call|instead|tomorrow|thursday|friday|monday|tuesday|wednesday|saturday|sunday|next\s+week)\b",
-                    text_lower,
-                )
-                or re.search(
-                    r"\bdon['’]?t\s+call\s+(?:me\s+)?(?:today|tomorrow|tonight|right\s+now)\s*,\s*(?:just\s+)?(?:call|text)\s+(?:me\s+)?(?:on\s+)?(?:thursday|friday|monday|tuesday|wednesday|saturday|sunday|later|tomorrow)\b",
-                    text_lower,
-                )
+            # 1. Bounded Scheduling alternative exemption (Spec 09 / Client Audit Fix Item 4):
+            # "Don't call me tomorrow, call Thursday" -> genuine scheduling alternative.
+            # "Don't call me again, call my lawyer" -> cutoff / legal referral, MUST NOT pass as scheduling.
+            has_cutoff_terms = bool(
+                re.search(r"\b(?:again|anymore|never|stop|lawyer|attorney|counsel)\b", text_lower)
             )
+            time_expr_pattern = (
+                r"\b(?:on\s+)?(?:monday|tuesday|wednesday|thursday|friday|saturday|sunday|"
+                r"tomorrow|tonight|next\s+week|this\s+weekend|next\s+month|later\s+this\s+week|"
+                r"in\s+the\s+morning|in\s+the\s+afternoon|in\s+the\s+evening|after\s+\d+|at\s+\d+|\d+\s*(?:am|pm))\b"
+            )
+            neg_match = re.search(
+                r"\bdon['’]?t\s+(?:call|reach\s+out|text)\s+(?:me\s+)?(?:today|tomorrow|tonight|right\s+now|this\s+morning|this\s+afternoon)\b",
+                text_lower,
+            )
+            has_negative_timing_prefix = bool(neg_match)
+
+            is_scheduling_alternative = False
+            if not has_cutoff_terms and neg_match:
+                subsequent_text = text_lower[neg_match.end():]
+                if re.search(time_expr_pattern, subsequent_text):
+                    is_scheduling_alternative = True
+
+            # Ambiguous contact timing friction falls back to boundary_suspected (Client Audit Fix Item 4)
+            is_ambiguous_contact_timing = has_negative_timing_prefix and not is_scheduling_alternative and not has_cutoff_terms
 
             # 2. Retraction patterns: explicit prospect invitation to contact after a prior boundary
             retraction_patterns = [
@@ -298,6 +311,7 @@ class ConversationStateManager:
                 bundle.speaker_id == "client"
                 and not is_retraction
                 and not is_scheduling_alternative
+                and not is_ambiguous_contact_timing
                 and (
                     (bundle.boundary_score >= 0.85 and not any(re.search(p, text_lower) for p in negation_patterns if len(clauses) == 1))
                     or bundle.recurrence_type == "boundary_repeated"
@@ -305,24 +319,43 @@ class ConversationStateManager:
                 )
             )
 
-            # 5. Narrowly Scoped boundary_suspected with Clear Lifecycle Exits (Client feedback Item 5):
-            # Scope: ONLY triggers on contact-specific friction. Ordinary objections ("need to think", "talk to spouse", "commission") stay in objection lifecycle.
+            # 5. Narrowly Scoped boundary_suspected with Clear Lifecycle Exits (Client Audit Fix Items 2 & 3):
+            # Scope: ONLY triggers on contact-specific friction ("too many calls", "you keep calling", "stop calling so much", "leave me alone").
+            # Cold outreach first reactions ("why are you calling me", "who gave you this number") are objections / who-and-why clarify, NOT boundary_suspected.
             contact_specific_friction_patterns = [
+                r"\b(?:too\s+many\s+calls|you\s+keep\s+calling|calling\s+(?:too\s+much|all\s+the\s+time)|stop\s+calling\s+so\s+much)\b",
                 r"\b(?:not\s+sure|don['’]?t\s+know)\s+(?:if\s+)?(?:i\s+want\s+to|you\s+should)\s+(?:talk|call|chat)\b",
-                r"\b(?:maybe\s+)?don['’]?t\s+call\s+(?:me\s+)?right\s+now\b",
-                r"\b(?:why\s+are\s+you|who\s+gave\s+you)\s+(?:calling\s+me|this\s+number)\b",
-                r"\b(?:too\s+many\s+calls|stop\s+calling\s+so\s+much)\b",
-                r"\b(?:leave\s+me\s+alone\s+for\s+now|uncomfortable\s+with\s+you\s+calling)\b",
+                r"\b(?:maybe\s+)?don['’]?t\s+call\s+(?:me\s+)?(?:right\s+now|today|for\s+now)\b",
+                r"\b(?:leave\s+me\s+alone\s+(?:for\s+now)?|uncomfortable\s+with\s+you\s+calling)\b",
             ]
-            has_contact_friction = any(re.search(p, text_lower) for p in contact_specific_friction_patterns)
+            has_contact_friction = any(re.search(p, text_lower) for p in contact_specific_friction_patterns) or is_ambiguous_contact_timing
 
-            # Check if prior boundary_suspected is cleared by affirmative/neutral response
-            cleared_by_prospect = bool(
-                re.search(r"\b(?:that['’]?s\s+fine|it['’]?s\s+okay|fine|okay|ok|go\s+ahead|you\s+can\s+call|sure)\b", text_lower)
+            # Clearing boundary_suspected (Client Audit Fix Item 3):
+            # Naked backchannels ("okay", "fine", "sure") do NOT clear suspected boundaries.
+            # Must be an explicit contact permission statement or substantive forward engagement.
+            has_contact_permission_statement = bool(
+                re.search(
+                    r"\b(?:it['’]?s\s+(?:fine|okay)\s+to\s+(?:call|reach\s+out|talk)|you\s+can\s+(?:call|reach\s+out|talk|contact)|go\s+ahead\s+and\s+(?:call|reach\s+out|talk)|happy\s+to\s+talk|fine\s+to\s+call|okay\s+to\s+call|feel\s+free\s+to\s+call|sure\s+you\s+can\s+call)\b",
+                    text_lower,
+                )
             )
+            has_substantive_engagement = (
+                bundle.speaker_id == "client"
+                and (
+                    bundle.agreement_score >= 0.70
+                    or bundle.specificity_score >= 0.70
+                    or any(cat in text_lower for cat in ["price", "commission", "timeline", "property", "house", "appointment", "walkthrough"])
+                )
+                and not any(re.search(p, text_lower) for p in contact_specific_friction_patterns)
+            )
+            cleared_by_prospect = bool(
+                self.current_state.contact_compliance.boundary_suspected
+                and (has_contact_permission_statement or has_substantive_engagement)
+            )
+
             # Check if prior boundary_suspected has expired (N >= 2 turns elapsed)
-            prior_suspected_turn = self.current_state.contact_compliance.boundary_suspected_turn_id or 0
-            has_expired = (bundle.turn_id - prior_suspected_turn) >= 2 if prior_suspected_turn > 0 else False
+            prior_suspected_turn = self.current_state.contact_compliance.boundary_suspected_turn_id
+            has_expired = (bundle.turn_id - prior_suspected_turn) >= 2 if prior_suspected_turn is not None else False
 
             is_suspected = (
                 bundle.speaker_id == "client"
@@ -360,6 +393,7 @@ class ConversationStateManager:
                     )
                 )
             elif is_hard_turn:
+                # 1. Hard Boundary Confirmation takes priority (Evaluated before expiry)
                 hard_active = True
                 hard_retracted = False
                 retract_turn = None
@@ -375,6 +409,7 @@ class ConversationStateManager:
                 else:
                     hard_reason = "Triggered by compliance boundary detection"
             elif is_suspected:
+                # 2. Suspected boundary active or refreshed
                 hard_active = self.current_state.contact_compliance.hard_boundary_active
                 hard_reason = self.current_state.contact_compliance.hard_boundary_reason
                 hard_retracted = self.current_state.contact_compliance.hard_boundary_retracted
@@ -382,8 +417,8 @@ class ConversationStateManager:
                 suspected_active = True
                 suspected_reason = f"Contact-specific friction detected ('{bundle.utterance_text.strip()}')"
                 suspected_turn_id = bundle.turn_id
-            elif cleared_by_prospect or has_expired:
-                # Suspected boundary resolves: cleared by prospect or expired after N turns
+            elif cleared_by_prospect:
+                # 3. Explicit Clearing by Prospect takes priority (Evaluated before expiry)
                 hard_active = self.current_state.contact_compliance.hard_boundary_active
                 hard_reason = self.current_state.contact_compliance.hard_boundary_reason
                 hard_retracted = self.current_state.contact_compliance.hard_boundary_retracted
@@ -391,6 +426,28 @@ class ConversationStateManager:
                 suspected_active = False
                 suspected_reason = None
                 suspected_turn_id = None
+            elif has_expired:
+                # 4. Suspected boundary expires after 2 turns without confirmation:
+                # Resume normal persuasion, but store friction in prospect memory (facts)
+                hard_active = self.current_state.contact_compliance.hard_boundary_active
+                hard_reason = self.current_state.contact_compliance.hard_boundary_reason
+                hard_retracted = self.current_state.contact_compliance.hard_boundary_retracted
+                retract_turn = self.current_state.contact_compliance.retraction_turn_id
+                suspected_active = False
+                suspected_reason = None
+                suspected_turn_id = None
+
+                # Persist friction in prospect memory so it's not forgotten (Client Audit Item 3)
+                if not any(f.fact_key == "past_contact_friction" and f.status == "active" for f in self.facts_manager.get_active_facts()):
+                    self.facts_manager.record_fact(
+                        category="preference",
+                        fact_key="past_contact_friction",
+                        fact_value="Prospect previously exhibited contact hesitation/friction that expired without confirmation.",
+                        source_turn_id=bundle.turn_id,
+                        timestamp_ms=bundle.timestamp_ms,
+                        confidence=0.85,
+                        notes="Stored from expired boundary_suspected lifecycle",
+                    )
             else:
                 hard_active = self.current_state.contact_compliance.hard_boundary_active
                 hard_reason = self.current_state.contact_compliance.hard_boundary_reason
@@ -656,9 +713,9 @@ class ConversationStateManager:
         if not self.has_prospect_spoken and bundle.speaker_id == "salesperson":
             gate_res = None
             push_res = PushStrengthRecommendation(
-                state="two_window_choice",
-                rationale="Awaiting prospect opening response.",
-                recommended_action="Discover prospect availability or offer two window choices once prospect responds.",
+                state="resolve_then_ask",
+                rationale="Awaiting prospect opening response; meeting gate criteria unknown on clean slate.",
+                recommended_action="Engage prospect and discover core needs before proposing appointment windows.",
                 confidence=0.50,
             )
             conv_res = None

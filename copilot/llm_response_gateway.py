@@ -127,9 +127,26 @@ class LLMResponseGateway:
 
         contact_pref_directive = ""
         if "violating_contact_preference" in decision.do_not_do or any("prohibited_" in d for d in decision.do_not_do):
+            pref_clauses = []
+            if snapshot.contact_compliance and snapshot.contact_compliance.contact_preferences:
+                for cp in snapshot.contact_compliance.contact_preferences:
+                    if cp.prohibited_behavior:
+                        pref_clauses.append(f"do NOT engage in {cp.prohibited_behavior}")
+                    elif not cp.allowed:
+                        pref_clauses.append(f"do NOT contact via {cp.channel}")
+                    elif cp.cadence == "reduced":
+                        pref_clauses.append(f"do NOT send frequent/unsolicited {cp.channel} messages")
+                    elif cp.cadence == "specific_times":
+                        pref_clauses.append(f"respect time restrictions on {cp.channel}")
+
+            if pref_clauses:
+                pref_text = f"Specifically: {'; '.join(pref_clauses)}."
+            else:
+                pref_text = "Do NOT propose daily texting, unsolicited frequent messaging, or contact through restricted channels."
+
             contact_pref_directive = (
-                "6. CONTACT PREFERENCE RESTRICTION (CRITICAL): The prospect has set active contact restrictions (DO NOT DO: violating_contact_preference). "
-                "Do NOT propose daily texting, unsolicited frequent messaging, or contact through restricted channels. You must strictly honor their communication boundaries.\n"
+                f"6. CONTACT PREFERENCE RESTRICTION (CRITICAL): The prospect has set active contact restrictions (DO NOT DO: violating_contact_preference). "
+                f"{pref_text} You must strictly honor their communication boundaries.\n"
             )
 
         prohibited_line = f"7. MANDATORY CONSTRAINTS: Strictly obey all DO NOT DO prohibitions from Block 1: {', '.join(decision.do_not_do)}.\n" if decision.do_not_do else ""

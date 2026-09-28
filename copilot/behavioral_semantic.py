@@ -281,15 +281,26 @@ def extract_structured_contact_preference(
         prohibited_behavior = "daily texting" if channel == "sms" else "daily calling"
     elif any(re.search(p, cleaned) for p in SOFT_CONTACT_PREFERENCE_PATTERNS["channel_restriction"]):
         cadence = "no_preference"
-        if "email" in cleaned and ("instead" in cleaned or "rather" in cleaned or "prefer" in cleaned):
-            channel = "sms" if "text" in cleaned else "call"
-            allowed = False
-            prohibited_behavior = f"{channel} contact without email"
+        if "email" in cleaned and ("only" in cleaned or "instead" in cleaned or "rather" in cleaned or "prefer" in cleaned or "just" in cleaned):
+            channel = "email"
+            allowed = True
+            prohibited_behavior = "phone calls or texting (email only)"
+        elif "text" in cleaned and ("only" in cleaned or "instead" in cleaned or "rather" in cleaned or "prefer" in cleaned or "just" in cleaned):
+            channel = "sms"
+            allowed = True
+            prohibited_behavior = "phone calls (texting only)"
         else:
             prohibited_behavior = f"unsolicited {channel} contact"
     elif any(re.search(p, cleaned) for p in SOFT_CONTACT_PREFERENCE_PATTERNS["timing_restriction"]):
         cadence = "specific_times"
-        prohibited_behavior = "contact outside specified hours"
+        m_before = re.search(r"before\s+(\d{1,2}(?::\d{2})?\s*(?:am|pm)?)", cleaned)
+        m_after = re.search(r"after\s+(\d{1,2}(?::\d{2})?\s*(?:am|pm)?)", cleaned)
+        if m_before:
+            prohibited_behavior = f"calling before {m_before.group(1).strip()}"
+        elif m_after:
+            prohibited_behavior = f"calling after {m_after.group(1).strip()}"
+        else:
+            prohibited_behavior = "contact outside specified hours"
     else:
         return None
 

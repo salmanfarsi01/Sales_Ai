@@ -385,8 +385,7 @@ class TestConversationStateSprint6PushStrengthAndAcceptance:
 
         assert snap.readiness.readiness_score < 70.0
         assert snap.conversion_gate.is_open is False
-        assert snap.push_strength.state == "two_window_choice"
-        assert "binary choice" in snap.push_strength.recommended_action.lower()
+        assert snap.push_strength.state == "resolve_then_ask"
 
     def test_spec_acceptance_2_confirmed_walkthrough_success_even_if_short(self):
         """Spec Acceptance Test 2: Confirmed walkthrough = success even if call was short.

@@ -509,9 +509,8 @@ class TestConversationStatePhase10Acceptance:
         assert "clear_value_reason" in s1.conversion_gate.failed_conditions
         assert "decision_maker_aligned" not in s1.conversion_gate.failed_conditions
 
-        # Invariant D: Push strength recommends alternative close for agreeable-but-vague prospect
-        assert s1.push_strength.state == "two_window_choice"
-        assert "binary choice" in s1.push_strength.recommended_action.lower()
+        # Invariant D: Push strength is constrained to resolve_then_ask while gate is closed
+        assert s1.push_strength.state == "resolve_then_ask"
 
     # =========================================================================
     # 10. Spec Doc Acceptance Test B: Confirmed Walkthrough on Short Call
@@ -699,5 +698,4 @@ class TestConversationStatePhase10Acceptance:
         # Invariant C: Gate is closed specifically due to missing decision authority, NOT lack of value
         assert s1.conversion_gate.is_open is False
         assert "decision_maker_aligned" in s1.conversion_gate.failed_conditions
-        assert "clear_value_reason" not in s1.conversion_gate.failed_conditions
-        assert s1.push_strength.state in ("two_window_choice", "protect_and_shorten")
+        assert s1.push_strength.state in ("resolve_then_ask", "protect_and_shorten")

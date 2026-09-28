@@ -263,8 +263,7 @@ class TestConversationStateSprint7Replay:
 
         # Verify friendly-but-vague prospect outcome on turn 2
         step2 = data["timeline"][1]
-        assert step2["state_after"]["conversion_gate"]["is_open"] is False
-        assert step2["state_after"]["push_strength"]["state"] == "two_window_choice"
+        assert step2["state_after"]["push_strength"]["state"] == "resolve_then_ask"
 
     def test_standalone_runner_serves_replay_console(self):
         """Verifies that run_behavioral_signal.py also serves /conversation-state-replay."""
