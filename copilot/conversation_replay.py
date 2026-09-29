@@ -102,6 +102,8 @@ class ConversationReplayEngine:
         save_report: bool = True,
         source: str = "live_call",
         conversion_target: str = "appointment",
+        load_prospect_memory: bool = False,
+        prospect_id: Optional[str] = None,
     ) -> ConversationStateReplayReport:
         """Replays an ordered list of turn bundles through ConversationStateManager.
 
@@ -117,6 +119,8 @@ class ConversationReplayEngine:
             call_sid=call_sid,
             initial_snapshot=initial_state,
             conversion_target=conversion_target,
+            load_prospect_memory=load_prospect_memory,
+            prospect_id=prospect_id,
         )
 
         timeline: List[TurnReplayStep] = []
@@ -483,6 +487,8 @@ class ConversationReplayEngine:
         raw_turns: List[Dict[str, Any]],
         save_report: bool = True,
         conversion_target: str = "appointment",
+        load_prospect_memory: bool = False,
+        prospect_id: Optional[str] = None,
     ) -> ConversationStateReplayReport:
         """Helper to convert raw turn dicts into bundles and run replay.
 
@@ -568,6 +574,8 @@ class ConversationReplayEngine:
             save_report=save_report,
             source="synthetic_simulation",
             conversion_target=conversion_target,
+            load_prospect_memory=load_prospect_memory,
+            prospect_id=prospect_id,
         )
 
     def get_conversion_event_history(self, call_sid: str) -> List[Dict[str, Any]]:
@@ -587,6 +595,8 @@ class ReplayDialogueRequest(BaseModel):
     call_sid: Optional[str] = None
     conversion_target: Optional[str] = "appointment"
     turns: List[Dict[str, Any]] = Field(default_factory=list)
+    load_prospect_memory: bool = False
+    prospect_id: Optional[str] = None
 
 
 def get_conversation_replay_router(
@@ -649,6 +659,8 @@ def get_conversation_replay_router(
             raw_turns=req.turns,
             save_report=True,
             conversion_target=req.conversion_target or "appointment",
+            load_prospect_memory=req.load_prospect_memory,
+            prospect_id=req.prospect_id,
         )
         return report.model_dump()
 

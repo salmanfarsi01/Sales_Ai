@@ -56,7 +56,12 @@ class RequiredFactScope(BaseModel):
 class StrategicDecision(BaseModel):
     decision_id: str = Field(default_factory=lambda: f"dec_{uuid.uuid4().hex[:10]}")
     call_id: str
+    call_sid: Optional[str] = None
     source_state_version: int
+    source_turn_id: Optional[int] = None
+    source_event_id: Optional[str] = None
+    utterance_turn_id: Optional[int] = None
+    metrics_source_turn_id: Optional[int] = None
     should_prompt: bool = True
     strategic_objective: str
     primary_action: StrategicAction

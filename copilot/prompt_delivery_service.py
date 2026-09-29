@@ -30,8 +30,16 @@ class PromptDeliveryService:
         decision_manager: Optional[CoreDecisionManager] = None,
         retrieval_engine: Optional[ConditionalRetrievalEngine] = None,
         llm_gateway: Optional[LLMResponseGateway] = None,
+        call_sid: Optional[str] = None,
     ):
-        self.decision_manager = decision_manager or CoreDecisionManager(call_sid="default_call")
+        if decision_manager is not None:
+            self.decision_manager = decision_manager
+        elif call_sid:
+            self.decision_manager = CoreDecisionManager(call_sid=call_sid)
+        else:
+            raise ValueError(
+                "Either decision_manager or call_sid must be explicitly provided to PromptDeliveryService to prevent cross-call state leakage."
+            )
         self.retrieval_engine = retrieval_engine or ConditionalRetrievalEngine()
         self.llm_gateway = llm_gateway or LLMResponseGateway()
 

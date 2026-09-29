@@ -109,14 +109,29 @@ class ConversationStateManager:
         scoring_config: Optional[ConversationScoringConfig] = None,
         blocking_config: Optional[ConversionBlockingConfig] = None,
         conversion_target: str = "appointment",
+        load_prospect_memory: bool = False,
+        prospect_id: Optional[str] = None,
     ):
-        self.call_sid = call_sid
+        self.call_sid = str(call_sid)
         self.conversion_target = conversion_target
-        self.current_state = initial_snapshot or ConversationStateSnapshot(call_sid=call_sid)
-        self.facts_manager = PersistentFactsManager(initial_facts=self.current_state.facts)
+        self.prospect_id = prospect_id
+        
+        # Point 2: Guarantee clean-slate state isolation. If an initial snapshot is passed,
+        # deep-copy it so caller mutations never cross into this manager instance.
+        if initial_snapshot is not None:
+            self.current_state = initial_snapshot.model_copy(deep=True)
+            self.current_state.call_sid = self.call_sid
+        else:
+            self.current_state = ConversationStateSnapshot(call_sid=self.call_sid)
+
+        # Explicit Prospect Memory Loading (separate, intentional path)
+        if load_prospect_memory and prospect_id:
+            self._load_prospect_memory(prospect_id)
+
+        self.facts_manager = PersistentFactsManager(initial_facts=[f.model_copy(deep=True) for f in self.current_state.facts])
         dormancy_thresh = scoring_config.dormancy_turn_threshold if scoring_config else 3
         self.objections_engine = ObjectionLifecycleEngine(
-            initial_objections=self.current_state.objections,
+            initial_objections=[o.model_copy(deep=True) for o in self.current_state.objections],
             dormancy_turn_threshold=dormancy_thresh,
         )
         self.supersession_detector = TruthSupersessionDetector()
@@ -140,16 +155,47 @@ class ConversationStateManager:
         self.prior_bundle: Optional[BehavioralSignalInputBundle] = None
         self._bundle_history: List[BehavioralSignalInputBundle] = []
         self.has_prospect_spoken: bool = False
-        self._conversion_events: List[ConversionEventObject] = list(self.current_state.conversion_events)
+        self._conversion_events: List[ConversionEventObject] = [e.model_copy(deep=True) for e in self.current_state.conversion_events]
         if self.current_state.conversion_event and not any(e.event_id == self.current_state.conversion_event.event_id for e in self._conversion_events):
-            self._conversion_events.append(self.current_state.conversion_event)
-        self.deal_disposition: Optional[DealDispositionRecord] = self.current_state.deal_disposition or DealDispositionRecord(disposition=DealDispositionType.ACTIVELY_SELLING)
+            self._conversion_events.append(self.current_state.conversion_event.model_copy(deep=True))
+        self.deal_disposition: Optional[DealDispositionRecord] = (
+            self.current_state.deal_disposition.model_copy(deep=True)
+            if self.current_state.deal_disposition
+            else DealDispositionRecord(disposition=DealDispositionType.ACTIVELY_SELLING)
+        )
         self.current_state.deal_disposition = self.deal_disposition
-        self._deal_dispositions: List[DealDispositionRecord] = list(self.current_state.deal_dispositions)
+        self._deal_dispositions: List[DealDispositionRecord] = [d.model_copy(deep=True) for d in self.current_state.deal_dispositions]
         if self.deal_disposition and not any(d.disposition_id == self.deal_disposition.disposition_id for d in self._deal_dispositions):
             self._deal_dispositions.append(self.deal_disposition)
         self.current_state.deal_dispositions = list(self._deal_dispositions)
         self.last_materiality: Optional[MaterialityClassification] = None
+
+    def _load_prospect_memory(self, prospect_id: str) -> None:
+        """Explicitly loads historical prospect memory (e.g. contact preferences, persistent boundary constraints)
+        for returning prospects. This path is NEVER executed automatically on new calls unless explicitly requested.
+        """
+        try:
+            from .behavioral_baseline import ContactPreferenceStore
+            pref_store = ContactPreferenceStore()
+            rec = pref_store.get_preference(prospect_id)
+            if rec:
+                self.current_state.contact_compliance.contact_preference = rec.preference or "none"
+                self.current_state.contact_compliance.contact_preference_details = rec.details
+                self.current_state.contact_compliance.contact_preference_confidence = rec.confidence or 0.8
+                chan = rec.channel or ("sms" if "text" in (rec.details or "").lower() else "call")
+                self.current_state.contact_compliance.contact_preferences.append(
+                    ContactPreference(
+                        channel=chan,
+                        allowed=rec.allowed if getattr(rec, "allowed", None) is not None else True,
+                        cadence=rec.cadence or "reduced",
+                        prohibited_behavior=rec.prohibited_behavior or rec.details,
+                        source_turn_id=0,
+                        confidence=rec.confidence or 0.8,
+                    )
+                )
+        except Exception as exc:
+            LOGGER.warning("Could not load prospect memory for %s: %s", prospect_id, exc)
+
 
     def process_turn_bundle(
         self,

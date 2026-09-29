@@ -34,6 +34,7 @@ class PitchProXCoreIntelligenceEngine:
         turn_speaker: str = "prospect",
         turn_text: str = "",
         turn_timestamp_ms: int = 0,
+        turn_id: Optional[int] = None,
     ) -> DecisionEvaluationResult:
         context = self._build_context(snapshot)
         unresolved_objections = snapshot.get_unresolved_objections()
@@ -64,7 +65,7 @@ class PitchProXCoreIntelligenceEngine:
         self._apply_contact_compliance_constraints(snapshot, eval_res.decision, eval_res.context)
         self._apply_cross_metric_consistency_rules(snapshot, eval_res.decision, eval_res.context)
         self._finalize_decision_confidence(snapshot, eval_res.decision, eval_res.context)
-        self._attach_full_trace(eval_res.decision, eval_res.context, snapshot, turn_speaker, turn_text)
+        self._attach_full_trace(eval_res.decision, eval_res.context, snapshot, turn_speaker, turn_text, turn_id=turn_id)
         return eval_res
 
     def _build_context(self, snapshot: ConversationStateSnapshot) -> StrategicInterpretationContext:
@@ -675,11 +676,21 @@ class PitchProXCoreIntelligenceEngine:
         snapshot: ConversationStateSnapshot,
         turn_speaker: str,
         turn_text: str,
+        turn_id: Optional[int] = None,
     ) -> None:
         """Attaches full explainability trace to StrategicDecision: Evidence -> Interpretation -> Decision Contract.
         Client Principle: Core Intelligence strictly outputs structural decisions and constraints;
         it does NOT generate spoken teleprompter copy.
         """
+        effective_turn_id = turn_id if turn_id is not None else getattr(snapshot, "last_updated_turn_id", 0)
+        decision.call_sid = snapshot.call_sid
+        decision.call_id = snapshot.call_sid
+        decision.source_state_version = snapshot.state_version
+        decision.source_turn_id = effective_turn_id
+        decision.utterance_turn_id = effective_turn_id
+        decision.metrics_source_turn_id = effective_turn_id
+        decision.source_event_id = f"ev_turn_{effective_turn_id}_v{snapshot.state_version}"
+
         evidence: List[str] = []
         if turn_text:
             cleaned_text = turn_text.strip().replace("\n", " ")
