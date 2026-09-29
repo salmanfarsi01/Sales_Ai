@@ -1,31 +1,18 @@
-import json
+import json, glob
 
-with open("reports/synthetic/conversation_state_sim_mukmxsle.json", encoding="utf-8") as f:
-    d = json.load(f)
-
-print(f"Call SID: {d['call_sid']}")
-print(f"Total Turns: {len(d['timeline'])}\n")
-
-for t in d['timeline']:
-    sd = t.get('strategic_decision') or {}
-    sa = t.get('state_after') or {}
-    cc = sa.get('contact_compliance') or {}
-    gate = sa.get('conversion_gate') or {}
-    read = sa.get('readiness') or {}
-    
-    print(f"=== TURN {t['turn_id']} ({t['speaker_id']}) ===")
-    print(f"Spoken: \"{t['text']}\"")
-    print(f"State Version: V{sa.get('state_version')}")
-    print(f"Core Decision ID: {sd.get('decision_id')}")
-    print(f"  Primary Action:     {sd.get('primary_action')}")
-    print(f"  Secondary Action:   {sd.get('secondary_action')}")
-    print(f"  Push Strength:      {sd.get('push_strength')}")
-    print(f"  Objective:          {sd.get('strategic_objective')}")
-    print(f"  Reason Codes:       {sd.get('reason_codes')}")
-    print(f"  Do Not Do:          {sd.get('do_not_do')}")
-    print(f"  What To Protect:    {sd.get('what_to_protect')}")
-    print(f"  Conversion Gate:    {gate.get('status')}")
-    print(f"  Readiness Score:    {read.get('readiness_score')} (Blockers: {read.get('active_blocker_caps')})")
-    print(f"  Hard Boundary:      {cc.get('hard_boundary_active')} (Reason: {cc.get('hard_boundary_reason')})")
-    print(f"  Contact Prefs:      {[p.get('prohibited_behavior') for p in cc.get('contact_preferences', [])]}")
-    print()
+for arch in glob.glob('reports/synthetic/archive/conversation_state_sim_mukmxsle_*.json'):
+    try:
+        d = json.load(open(arch, encoding='utf-8'))
+        print(f"=== {arch} ===")
+        tl = d.get('timeline', [])
+        print(f"Total turns: {len(tl)}")
+        for step in tl:
+            sd = step.get('strategic_decision')
+            tid = step.get('turn_id')
+            spk = step.get('speaker_id')
+            text = step.get('text', '')[:25]
+            sd_v = sd.get('source_state_version') if sd else None
+            ev0 = sd.get('evidence_considered')[0] if (sd and sd.get('evidence_considered')) else 'None'
+            print(f"Turn {tid}: {spk} '{text}' sd_v={sd_v} ev0={ev0}")
+    except Exception as e:
+        print(f"Error: {e}")

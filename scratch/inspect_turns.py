@@ -1,17 +1,26 @@
-import sqlite3
 import json
 
-conn = sqlite3.connect("knowledge/evidence_log.db")
-c = conn.cursor()
-c.execute(
-    "SELECT timestamp_ms, snapshot_json FROM evidence_snapshots "
-    "WHERE call_sid = 'call_29d924fc' AND horizon = 'current_utterance' "
-    "ORDER BY timestamp_ms ASC"
-)
-for t, snap_str in c.fetchall():
-    data = json.loads(snap_str)
-    sem = data.get("semantic_features", {})
-    utt_id = sem.get("utterance_id")
-    print(f"Timestamp: {t}ms | Utt: {utt_id}")
-    print(f"  Boundary: {sem.get('boundary_score')} | Future: {sem.get('future_language_score')} | Spec: {sem.get('specificity_score')} | Agree: {sem.get('agreement_score')}")
-    print(f"  Extraction Mode: {sem.get('extraction_mode')}")
+for fname in ['reports/synthetic/conversation_state_sim_mufc4lsh.json', 'reports/synthetic/conversation_state_sim_mukmxsle.json', 'reports/synthetic/conversation_state_sim_mucj0p5s_golden.json']:
+    try:
+        d = json.load(open(fname, encoding='utf-8'))
+        print(f"=== {fname} ===")
+        tl = d.get('timeline', [])
+        for i in [2, 3, 4, 17]:
+            if i < len(tl):
+                step = tl[i]
+                sa = step.get('state_after', {})
+                sd = step.get('strategic_decision', {})
+                tid = step.get('turn_id')
+                sa_ver = sa.get('state_version')
+                gate_open = sa.get('conversion_gate', {}).get('is_open')
+                commit = sa.get('dimensions', {}).get('commitment')
+                sd_ver = sd.get('source_state_version') if sd else None
+                action = sd.get('primary_action') if sd else None
+                stub = sd.get('gateway_fallback_stub') if sd else None
+                ev = sd.get('evidence_considered', []) if sd else []
+                print(f"Turn {tid}: sa_version={sa_ver}, gate_open={gate_open}, commitment={commit}")
+                print(f"   sd_version={sd_ver}, action={action}")
+                print(f"   stub={stub}")
+                print(f"   ev={ev[:2]}")
+    except Exception as e:
+        print(f"Error on {fname}: {e}")

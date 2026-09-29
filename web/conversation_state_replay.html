@@ -985,6 +985,16 @@
         }
         populateReportSelect();
 
+        // Attach immediate onchange listener so user can select any report without requiring manual button click
+        if (select) {
+          select.onchange = () => {
+            if (select.value) {
+              activeTurnIndex = 0;
+              fetchAndRenderReport(select.value, 0);
+            }
+          };
+        }
+
         // Deep linking from query params
         const urlParams = new URLSearchParams(window.location.search);
         const targetSid = urlParams.get('call_sid');
@@ -1519,7 +1529,12 @@
             </div>
           </div>
         </div>
-      ` : ''}
+      ` : `
+        <div class="card-unit" style="border: 1px dashed #CBD5E1; background: #F8FAFC; margin-bottom: 12px; padding: 10px 12px; color: #64748B; font-size: 11.5px;">
+          <strong style="color: #475569;">No Strategic Decision in Historical Report:</strong>
+          This report was generated before Core Intelligence was attached to the replay pipeline. Click <em>Simulate</em> to run a live test with point-in-time strategic decisions.
+        </div>
+      `}
 
       <!-- Conversation Stage & Progression (Client Principle #1) -->
       ${sAfter.conversation_stage ? `

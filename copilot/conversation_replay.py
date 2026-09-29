@@ -166,6 +166,7 @@ class ConversationReplayEngine:
                 turn_speaker=bundle.speaker_id,
                 turn_text=bundle.utterance_text,
                 turn_timestamp_ms=bundle.timestamp_ms,
+                turn_id=bundle.turn_id,
             )
 
             # Surface the LLM Gateway's deterministic fallback stub in the offline replay trace
@@ -183,7 +184,7 @@ class ConversationReplayEngine:
                 materiality=manager.last_materiality or materiality,
                 state_changes=turn_changes,
                 state_after=state_after,
-                strategic_decision=eval_result.decision,
+                strategic_decision=eval_result.decision.model_copy(deep=True),
             )
             timeline.append(step)
             prior_bundle = bundle

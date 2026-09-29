@@ -29,6 +29,8 @@ class CoreDecisionManager:
         self.engine = engine or PitchProXCoreIntelligenceEngine(lead_type=lead_type)
         self.modifier_pipeline = modifier_pipeline or StrategyModifierPipeline()
         self.decision_history: List[StrategicDecision] = []
+        self.decisions_by_turn: Dict[int, StrategicDecision] = {}
+        self.decisions_by_version: Dict[int, StrategicDecision] = {}
         self.latest_decision: Optional[StrategicDecision] = None
         self.latest_evaluation_result: Optional[DecisionEvaluationResult] = None
 
@@ -40,6 +42,7 @@ class CoreDecisionManager:
         turn_speaker: str = "prospect",
         turn_text: str = "",
         turn_timestamp_ms: int = 0,
+        turn_id: Optional[int] = None,
     ) -> DecisionEvaluationResult:
         eval_result = self.engine.evaluate(
             snapshot=snapshot,
@@ -54,12 +57,28 @@ class CoreDecisionManager:
             calibration=calibration,
         )
 
-        eval_result.decision = final_decision
-        self.latest_decision = final_decision
+        # Ensure deep-copied immutable decision snapshot per turn
+        frozen_decision = final_decision.model_copy(deep=True)
+        eval_result.decision = frozen_decision
+        self.latest_decision = frozen_decision
         self.latest_evaluation_result = eval_result
-        self.decision_history.append(final_decision)
+        self.decision_history.append(frozen_decision)
+
+        effective_turn_id = turn_id if turn_id is not None else getattr(snapshot, "last_updated_turn_id", None)
+        if effective_turn_id is not None:
+            self.decisions_by_turn[int(effective_turn_id)] = frozen_decision
+        self.decisions_by_version[int(frozen_decision.source_state_version)] = frozen_decision
 
         return eval_result
+
+    def get_decision_for_turn(self, turn_id: int) -> Optional[StrategicDecision]:
+        """Returns the immutable StrategicDecision produced strictly at turn_id."""
+        return self.decisions_by_turn.get(int(turn_id))
+
+    def get_decision_for_version(self, state_version: int) -> Optional[StrategicDecision]:
+        """Returns the immutable StrategicDecision produced strictly for source_state_version."""
+        return self.decisions_by_version.get(int(state_version))
+
 
     def is_decision_stale(
         self,
