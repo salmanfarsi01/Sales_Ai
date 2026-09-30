@@ -343,9 +343,20 @@ class PitchProXCoreIntelligenceEngine:
         context: StrategicInterpretationContext,
         turn_timestamp_ms: int,
     ) -> DecisionEvaluationResult:
+        slot = None
+        if snapshot.conversion_gate and snapshot.conversion_gate.commitment_slot:
+            slot = snapshot.conversion_gate.commitment_slot
+        elif conv := snapshot.get_active_conversion_event():
+            slot = conv.start_at
+        if not slot:
+            meeting_fact = snapshot.get_active_fact("confirmed_meeting_time")
+            if meeting_fact:
+                slot = meeting_fact.fact_value
+
         decision = StrategicDecision(
             call_id=snapshot.call_sid,
             source_state_version=snapshot.state_version,
+            commitment_slot=slot,
             should_prompt=True,
             strategic_objective="Protect confirmed appointment, confirm logistics, and avoid reopening settled concerns.",
             primary_action=StrategicAction.ACKNOWLEDGE,
@@ -690,6 +701,15 @@ class PitchProXCoreIntelligenceEngine:
         decision.utterance_turn_id = effective_turn_id
         decision.metrics_source_turn_id = effective_turn_id
         decision.source_event_id = f"ev_turn_{effective_turn_id}_v{snapshot.state_version}"
+        if getattr(decision, "commitment_slot", None) is None:
+            if snapshot.conversion_gate and snapshot.conversion_gate.commitment_slot:
+                decision.commitment_slot = snapshot.conversion_gate.commitment_slot
+            elif conv := snapshot.get_active_conversion_event():
+                decision.commitment_slot = conv.start_at
+            else:
+                meeting_fact = snapshot.get_active_fact("confirmed_meeting_time")
+                if meeting_fact:
+                    decision.commitment_slot = meeting_fact.fact_value
 
         evidence: List[str] = []
         if turn_text:

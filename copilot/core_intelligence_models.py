@@ -88,6 +88,7 @@ class StrategicDecision(BaseModel):
     final_prompt_text: Optional[str] = Field(default=None, description="Alias for gateway_fallback_stub for backward compatibility")
     meeting_gate_open: Optional[bool] = Field(default=None, description="Current meeting gate status for invariant validation")
     conversion_confirmed: Optional[bool] = Field(default=None, description="Current conversion confirmation status for invariant validation")
+    commitment_slot: Optional[str] = Field(default=None, description="Concrete confirmed or proposed appointment slot")
 
     @model_validator(mode="after")
     def validate_action_gate_push_invariants(self) -> "StrategicDecision":

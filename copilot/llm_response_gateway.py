@@ -201,7 +201,7 @@ class LLMResponseGateway:
         if self.generator_func:
             raw_text = self.generator_func(context, working_decision.max_prompt_words)
         else:
-            raw_text = self._call_llm(context, working_decision)
+            raw_text = self._call_llm(context, working_decision, snapshot=snapshot)
 
         cleaned_text = self._clean_and_truncate(raw_text, working_decision.max_prompt_words)
 
@@ -215,7 +215,12 @@ class LLMResponseGateway:
             confidence=working_decision.confidence,
         )
 
-    def _call_llm(self, context: str, decision: StrategicDecision) -> str:
+    def _call_llm(
+        self,
+        context: str,
+        decision: StrategicDecision,
+        snapshot: Optional[ConversationStateSnapshot] = None,
+    ) -> str:
         # If client is configured and not mock, execute real LLM call
         if self.llm_client and hasattr(self.llm_client, "chat"):
             try:
@@ -233,9 +238,13 @@ class LLMResponseGateway:
                 LOGGER.warning("LLM call failed, falling back to deterministic formulation: %s", e)
 
         # Fallback deterministic formulation matching the strategic action
-        return self._deterministic_fallback(decision)
+        return self._deterministic_fallback(decision, snapshot=snapshot)
 
-    def _deterministic_fallback(self, decision: StrategicDecision) -> str:
+    def _deterministic_fallback(
+        self,
+        decision: StrategicDecision,
+        snapshot: Optional[ConversationStateSnapshot] = None,
+    ) -> str:
         action = decision.primary_action
         reasons = decision.reason_codes
 
@@ -256,7 +265,17 @@ class LLMResponseGateway:
 
         if action == StrategicAction.ACKNOWLEDGE:
             if "CONVERSION_CONFIRMED" in decision.reason_codes:
-                return "Perfect, I have Thursday at three confirmed on my calendar. I will see you both then."
+                slot = getattr(decision, "commitment_slot", None)
+                if not slot and snapshot:
+                    if snapshot.conversion_gate and snapshot.conversion_gate.commitment_slot:
+                        slot = snapshot.conversion_gate.commitment_slot
+                    elif conv := snapshot.get_active_conversion_event():
+                        slot = conv.start_at
+                    elif fact := snapshot.get_active_fact("confirmed_meeting_time"):
+                        slot = fact.fact_value
+                if slot:
+                    return f"Perfect, I have {slot} confirmed on my calendar. I will see you both then."
+                return "Perfect, I have that confirmed on my calendar. I will see you both then."
             return "I completely understand where you're coming from."
         elif action == StrategicAction.CLARIFY:
             return "Could you share a little more about what would make the biggest difference for your situation?"
@@ -268,7 +287,7 @@ class LLMResponseGateway:
             return "There is zero obligation—if our approach doesn't make total sense, you can walk away anytime."
         elif action == StrategicAction.COMMITMENT_CLOSE:
             if decision.secondary_action == StrategicAction.QUESTION or decision.push_strength == "two_window_choice":
-                return "Would Thursday at two or Friday morning work better for a brief walkthrough?"
+                return "Would mornings or afternoons generally work better for a brief walkthrough?"
             return "Let's schedule a twenty minute walkthrough so we can review the exact numbers in person."
         elif action == StrategicAction.QUANTIFY:
             return "When we sit down together, we can walk through the exact net sheet numbers side by side."

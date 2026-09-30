@@ -174,7 +174,7 @@ class ConversationReplayEngine:
             )
 
             # Surface the LLM Gateway's deterministic fallback stub in the offline replay trace
-            gateway_stub = gateway._deterministic_fallback(eval_result.decision)
+            gateway_stub = gateway._deterministic_fallback(eval_result.decision, snapshot=state_after)
             eval_result.decision.gateway_fallback_stub = gateway_stub
             eval_result.decision.final_prompt_text = gateway_stub
 
