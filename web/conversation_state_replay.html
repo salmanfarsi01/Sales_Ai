@@ -795,9 +795,19 @@
         Paste or choose a preset JSON dialogue to run through ConversationStateManager:
       </div>
       <div style="display: flex; gap: 8px; flex-wrap: wrap;">
-        <button type="button" class="btn-ghost" style="font-size: 11px; padding: 4px 10px;" onclick="loadSampleScript('default')">Preset: Standard (3 Turns)</button>
+        <button type="button" class="btn-ghost" style="font-size: 11px; padding: 4px 10px; font-weight:600; color:#4F46E5; background:#EEF2FF; border:1px solid #C7D2FE;" onclick="loadSampleScript('stress_test_18_turns')">Preset: 18-Turn Stress Test (Test A)</button>
+        <button type="button" class="btn-ghost" style="font-size: 11px; padding: 4px 10px; font-weight:600; color:#059669; background:#ECFDF5; border:1px solid #A7F3D0;" onclick="loadSampleScript('test_call_b')">Preset: Clean Call B (4 Turns)</button>
         <button type="button" class="btn-ghost" style="font-size: 11px; padding: 4px 10px;" onclick="loadSampleScript('commission_appt')">Preset: Commission Objection + Thursday at 4</button>
         <button type="button" class="btn-ghost" style="font-size: 11px; padding: 4px 10px;" onclick="loadSampleScript('boundary')">Preset: Hard Boundary (Exit)</button>
+        <button type="button" class="btn-ghost" style="font-size: 11px; padding: 4px 10px;" onclick="loadSampleScript('default')">Preset: Standard (3 Turns)</button>
+      </div>
+      <div style="display: flex; gap: 10px; align-items: center; margin: 4px 0;">
+        <label for="simConversionTarget" style="font-size: 12px; font-weight: 600; color: #1E293B;">Conversion Target:</label>
+        <select id="simConversionTarget" style="font-size: 11.5px; padding: 3px 8px; border: 1px solid var(--border); border-radius: 4px; background: #FFFFFF; font-family: inherit;">
+          <option value="appointment" selected>appointment (Default)</option>
+          <option value="signed_listing_agreement">signed_listing_agreement</option>
+          <option value="permission_to_follow_up">permission_to_follow_up</option>
+        </select>
       </div>
       <textarea id="simScriptText" style="height: 200px;" placeholder='[
   {"turn_id": 1, "speaker_id": "client", "text": "Hi, who is this?"},
@@ -892,6 +902,32 @@
         {"turn_id": 1, "speaker_id": "client", "text": "Who gave you this number?"},
         {"turn_id": 2, "speaker_id": "salesperson", "text": "We are reaching out to homeowners on Elm Street."},
         {"turn_id": 3, "speaker_id": "client", "text": "Do not call me again. Take me off your list immediately."}
+      ],
+      stress_test_18_turns: [
+        {"turn_id": 1, "speaker_id": "salesperson", "text": "Hi, thanks for making time today — tell me a bit about what's going on with the house."},
+        {"turn_id": 2, "speaker_id": "client", "text": "I'm the one making this decision, no one else needs to sign off."},
+        {"turn_id": 3, "speaker_id": "salesperson", "text": "Got it. What's driving the timing for you?"},
+        {"turn_id": 4, "speaker_id": "client", "text": "We might look at moving sometime next year, nothing urgent yet."},
+        {"turn_id": 5, "speaker_id": "client", "text": "Honestly, we're not sure this is the right time anymore."},
+        {"turn_id": 6, "speaker_id": "salesperson", "text": "That's fair — a lot of people feel that way before they see the actual numbers."},
+        {"turn_id": 7, "speaker_id": "client", "text": "Okay, that makes sense, I guess timing isn't the biggest issue."},
+        {"turn_id": 8, "speaker_id": "salesperson", "text": "Great — would sometime next week work for a walkthrough?"},
+        {"turn_id": 9, "speaker_id": "client", "text": "Maybe next week could work, let me think about it."},
+        {"turn_id": 10, "speaker_id": "client", "text": "Actually, my wife would really need to be part of this conversation before we go any further."},
+        {"turn_id": 11, "speaker_id": "salesperson", "text": "Of course, happy to loop her in whenever works."},
+        {"turn_id": 12, "speaker_id": "client", "text": "I guess I'm just worried this isn't really the right move for us financially with everything going on."},
+        {"turn_id": 13, "speaker_id": "salesperson", "text": "Totally understand — let's look at your net proceeds after all costs."},
+        {"turn_id": 14, "speaker_id": "client", "text": "That's actually really helpful, tell me more."},
+        {"turn_id": 15, "speaker_id": "client", "text": "Please don't start texting me every day before we meet, by the way."},
+        {"turn_id": 16, "speaker_id": "client", "text": "Mornings don't really work for us either, just so you know."},
+        {"turn_id": 17, "speaker_id": "salesperson", "text": "Noted on all of that. What day works best?"},
+        {"turn_id": 18, "speaker_id": "client", "text": "Thursday at 3 works, and my wife will be there."}
+      ],
+      test_call_b: [
+        {"turn_id": 1, "speaker_id": "salesperson", "text": "Hi, this is Alex with Premier Realty. How are you doing today?"},
+        {"turn_id": 2, "speaker_id": "client", "text": "I'm doing well, but I'm just curious about current home values in our neighborhood."},
+        {"turn_id": 3, "speaker_id": "salesperson", "text": "I'd be glad to share recent neighborhood sales. Have you considered selling anytime soon?"},
+        {"turn_id": 4, "speaker_id": "client", "text": "Maybe in a couple of years, no immediate plans."}
       ]
     };
 
@@ -1120,13 +1156,13 @@
       document.getElementById('kpiPush').innerHTML = `<span class="badge badge-push">${conv.push_strength || '—'}</span>`;
 
       // Momentum
-      const momScore = conv.momentum_score !== undefined ? conv.momentum_score.toFixed(0) : '—';
+      const momScore = formatNumber(conv.momentum_score, 0);
       const momTrend = conv.momentum_trend || 'stable';
       document.getElementById('kpiMomentum').textContent = `${momScore}% (${momTrend})`;
 
       // Readiness
       const readScore = (conv.readiness_score !== undefined && conv.readiness_score !== null)
-        ? `${conv.readiness_score.toFixed(0)}%`
+        ? `${formatNumber(conv.readiness_score, 0)}%`
         : 'UNKNOWN (Insufficient Evidence)';
       const blockerCount = conv.active_blockers ? conv.active_blockers.length : 0;
       document.getElementById('kpiReadiness').textContent = `${readScore} ${blockerCount > 0 ? '[Blockers: ' + blockerCount + ']' : ''}`;
@@ -1352,10 +1388,10 @@
       <div class="card-unit">
         <div class="card-unit-title">Semantic & Behavioral Features</div>
         <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;font-size:12px;color:#000000;">
-          <div>Specificity: <strong class="mono" style="color:#000000;">${ev.specificity_score !== undefined ? ev.specificity_score.toFixed(2) : '—'}</strong></div>
-          <div>Agreement: <strong class="mono" style="color:#000000;">${ev.agreement_score !== undefined ? ev.agreement_score.toFixed(2) : '—'}</strong></div>
-          <div>Future Lang: <strong class="mono" style="color:#000000;">${ev.future_language_score !== undefined ? ev.future_language_score.toFixed(2) : '—'}</strong></div>
-          <div>Boundary: <strong class="mono" style="${ev.boundary_score > 0.5 ? 'color:#DC2626' : 'color:#000000'}">${ev.boundary_score !== undefined ? ev.boundary_score.toFixed(2) : '0.00'}</strong></div>
+          <div>Specificity: <strong class="mono" style="color:#000000;">${formatNumber(ev.specificity_score, 2)}</strong></div>
+          <div>Agreement: <strong class="mono" style="color:#000000;">${formatNumber(ev.agreement_score, 2)}</strong></div>
+          <div>Future Lang: <strong class="mono" style="color:#000000;">${formatNumber(ev.future_language_score, 2)}</strong></div>
+          <div>Boundary: <strong class="mono" style="${(ev.boundary_score || 0) > 0.5 ? 'color:#DC2626' : 'color:#000000'}">${formatNumber(ev.boundary_score, 2, '0.00')}</strong></div>
         </div>
       </div>
 
@@ -1435,7 +1471,7 @@
             </span>
             <div style="display:flex; align-items:center; gap:6px;">
               <span class="mono" style="font-size:10.5px; color:#4338CA;">V${sd.source_state_version} · Turn ${step.turn_id}</span>
-              <span class="badge" style="background:#EEF2FF; color:#4338CA; border:1px solid #C7D2FE; font-weight:700; font-size:10px;">${(sd.confidence * 100).toFixed(0)}% CONF</span>
+              <span class="badge" style="background:#EEF2FF; color:#4338CA; border:1px solid #C7D2FE; font-weight:700; font-size:10px;">${formatNumber((sd.confidence || 0) * 100, 0)}% CONF</span>
             </div>
           </div>
 
@@ -1652,11 +1688,11 @@
             <span style="color:#000000; font-weight:700;">Composite Readiness (Sprint 5)</span>
             ${(sAfter.readiness.insufficient_evidence || sAfter.readiness.readiness_score === null || sAfter.readiness.readiness_score === undefined)
               ? '<span class="badge" style="background:#FEF3C7; color:#92400E; font-size:11px; font-weight:700;">UNKNOWN (Insufficient Evidence)</span>'
-              : `<span class="mono" style="font-size:14px; font-weight:700; color:#000000;">${sAfter.readiness.readiness_score.toFixed(1)}%</span>`}
+              : `<span class="mono" style="font-size:14px; font-weight:700; color:#000000;">${formatNumber(sAfter.readiness.readiness_score, 1)}%</span>`}
           </div>
           ${sAfter.readiness.active_blocker_caps && sAfter.readiness.active_blocker_caps.length > 0 ? `
             <div style="background: #FEF2F2; border: 1px solid #FECACA; border-radius: 4px; padding: 6px 8px; margin: 8px 0; font-size: 11px;">
-              <div style="color: #DC2626; font-weight: 700;">Blocker Cap Applied (Capped from ${sAfter.readiness.uncapped_score !== undefined ? sAfter.readiness.uncapped_score.toFixed(1) : '—'}%)</div>
+              <div style="color: #DC2626; font-weight: 700;">Blocker Cap Applied (Capped from ${formatNumber(sAfter.readiness.uncapped_score, 1)}%)</div>
               <div style="color: #000000; margin-top: 2px;">${escapeHtml(sAfter.readiness.capped_reason || sAfter.readiness.active_blocker_caps.join(', '))}</div>
             </div>
           ` : `
@@ -1664,16 +1700,16 @@
           `}
           <div style="display:grid; grid-template-columns: 1fr 1fr; gap: 6px; font-size: 11.5px; margin-top: 6px;">
             <div style="background: #F8FAFC; padding: 5px 8px; border-radius: 4px; border: 1px solid var(--border);">
-              <span style="color:#000000;">Emotional:</span> <strong class="mono" style="float:right; color:#000000;">${sAfter.readiness.emotional_readiness !== undefined ? sAfter.readiness.emotional_readiness.toFixed(0) : '—'}%</strong>
+              <span style="color:#000000;">Emotional:</span> <strong class="mono" style="float:right; color:#000000;">${formatNumber(sAfter.readiness.emotional_readiness, 0)}%</strong>
             </div>
             <div style="background: #F8FAFC; padding: 5px 8px; border-radius: 4px; border: 1px solid var(--border);">
-              <span style="color:#000000;">Logical:</span> <strong class="mono" style="float:right; color:#000000;">${sAfter.readiness.logical_readiness !== undefined ? sAfter.readiness.logical_readiness.toFixed(0) : '—'}%</strong>
+              <span style="color:#000000;">Logical:</span> <strong class="mono" style="float:right; color:#000000;">${formatNumber(sAfter.readiness.logical_readiness, 0)}%</strong>
             </div>
             <div style="background: #F8FAFC; padding: 5px 8px; border-radius: 4px; border: 1px solid var(--border);">
-              <span style="color:#000000;">Logistical:</span> <strong class="mono" style="float:right; color:#000000;">${sAfter.readiness.logistical_readiness !== undefined ? sAfter.readiness.logistical_readiness.toFixed(0) : '—'}%</strong>
+              <span style="color:#000000;">Logistical:</span> <strong class="mono" style="float:right; color:#000000;">${formatNumber(sAfter.readiness.logistical_readiness, 0)}%</strong>
             </div>
             <div style="background: #F8FAFC; padding: 5px 8px; border-radius: 4px; border: 1px solid var(--border);">
-              <span style="color:#000000;">Decision:</span> <strong class="mono" style="float:right; color:#000000;">${sAfter.readiness.decision_readiness !== undefined ? sAfter.readiness.decision_readiness.toFixed(0) : '—'}%</strong>
+              <span style="color:#000000;">Decision:</span> <strong class="mono" style="float:right; color:#000000;">${formatNumber(sAfter.readiness.decision_readiness, 0)}%</strong>
             </div>
           </div>
         </div>
@@ -1691,7 +1727,7 @@
             <div>Time/Slot: <strong style="color:#000000;">${escapeHtml(convEvt.start_at || 'Unscheduled')}</strong></div>
             ${convEvt.reversal_reason ? `<div style="color:#DC2626; font-size:11.5px; margin-top:2px;"><strong>Reversal Reason:</strong> ${escapeHtml(convEvt.reversal_reason)}</div>` : ''}
             ${convEvt.supersedes_event_id ? `<div style="font-size:11px;color:#475569; margin-top:2px;">↳ Supersedes: <span class="mono">${escapeHtml(convEvt.supersedes_event_id)}</span></div>` : ''}
-            <div>Confirmation Conf: <strong class="mono" style="color:#000000;">${(convEvt.confirmation_confidence * 100).toFixed(0)}%</strong></div>
+            <div>Confirmation Conf: <strong class="mono" style="color:#000000;">${formatNumber((convEvt.confirmation_confidence || 0) * 100, 0)}%</strong></div>
           </div>
           ${(sAfter.conversion_events && sAfter.conversion_events.length > 1) ? `
             <div style="margin-top:10px; border-top:1px solid var(--border); padding-top:8px;">
@@ -1810,6 +1846,11 @@
     `;
     }
 
+    function formatNumber(val, decimals = 0, fallback = '—') {
+      if (val === null || val === undefined || isNaN(Number(val))) return fallback;
+      return Number(val).toFixed(decimals);
+    }
+
     function escapeHtml(str) {
       if (str === null || str === undefined) return '';
       return String(str)
@@ -1831,7 +1872,7 @@
     function formatCondValue(val) {
       if (val === null || val === undefined) return '';
       if (typeof val === 'object') {
-        if (val.trust !== undefined && val.tension !== undefined) {
+        if (val.trust !== undefined && val.trust !== null && val.tension !== undefined && val.tension !== null) {
           return `Tr: ${Number(val.trust).toFixed(2)}, Ten: ${Number(val.tension).toFixed(2)}`;
         }
         return JSON.stringify(val);
@@ -1954,10 +1995,12 @@
         }
 
         const simSid = 'sim_' + Date.now().toString(36);
+        const targetSelect = document.getElementById('simConversionTarget');
+        const targetVal = targetSelect ? targetSelect.value : 'appointment';
         const res = await apiFetch('/api/conversation-state/replay-dialogue', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ call_sid: simSid, turns: turns })
+          body: JSON.stringify({ call_sid: simSid, turns: turns, conversion_target: targetVal })
         });
 
         if (!res.ok) {
