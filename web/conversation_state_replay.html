@@ -1457,7 +1457,108 @@
       const push = sAfter.push_strength || {};
       const convEvt = sAfter.conversion_event;
       const sd = step.strategic_decision;
-      const hasValidDecision = sd && (sd.source_state_version === sAfter.state_version);
+
+      // Complete 4-Key Decision Binding: call_sid + turn_id + source_state_version + source_event_id (Point 1)
+      function validateDecisionBinding(d, st, sa, repCallSid) {
+        if (!d) return { valid: false, reason: "No strategic decision recorded for turn." };
+
+        // 1. Validate call_sid (mandatory on both context and decision)
+        const expectedCallSid = repCallSid || (sa && sa.call_sid) || "";
+        const actualCallSid = d.call_sid || d.call_id || "";
+        if (!actualCallSid) {
+          return {
+            valid: false,
+            reason: "Missing call_sid on decision"
+          };
+        }
+        if (!expectedCallSid) {
+          return {
+            valid: false,
+            reason: "Missing call_sid in report/turn context"
+          };
+        }
+        if (expectedCallSid !== actualCallSid) {
+          return {
+            valid: false,
+            reason: `call_sid mismatch: expected '${expectedCallSid}', got '${actualCallSid}'`
+          };
+        }
+
+        // 2. Validate turn_id (mandatory on both step and decision)
+        if (st.turn_id === undefined || st.turn_id === null) {
+          return {
+            valid: false,
+            reason: "Missing turn_id on replay step"
+          };
+        }
+        const expectedTurn = Number(st.turn_id);
+        const actualTurn = (d.source_turn_id !== undefined && d.source_turn_id !== null)
+          ? Number(d.source_turn_id)
+          : (d.utterance_turn_id !== undefined && d.utterance_turn_id !== null ? Number(d.utterance_turn_id) : null);
+        if (actualTurn === null || isNaN(actualTurn)) {
+          return {
+            valid: false,
+            reason: "Missing turn_id on decision"
+          };
+        }
+        if (actualTurn !== expectedTurn) {
+          return {
+            valid: false,
+            reason: `turn_id mismatch: expected Turn ${expectedTurn}, got Turn ${actualTurn}`
+          };
+        }
+
+        // 3. Validate source_state_version (mandatory on both state_after and decision)
+        if (!sa || sa.state_version === undefined || sa.state_version === null) {
+          return {
+            valid: false,
+            reason: "Missing state_version on state_after"
+          };
+        }
+        const expectedVersion = Number(sa.state_version);
+        if (d.source_state_version === undefined || d.source_state_version === null) {
+          return {
+            valid: false,
+            reason: "Missing source_state_version on decision"
+          };
+        }
+        const actualVersion = Number(d.source_state_version);
+        if (actualVersion !== expectedVersion) {
+          return {
+            valid: false,
+            reason: `source_state_version mismatch: expected V${expectedVersion}, got V${actualVersion}`
+          };
+        }
+
+        // 4. Validate source_event_id (mandatory on both step and decision; null === null is strictly prohibited)
+        if (!d.source_event_id) {
+          return {
+            valid: false,
+            reason: "Missing source_event_id on decision: decision lacks explicit event provenance"
+          };
+        }
+        if (!st.source_event_id) {
+          return {
+            valid: false,
+            reason: "Missing source_event_id on replay step: turn step lacks explicit event provenance"
+          };
+        }
+        const actualEventId = String(d.source_event_id);
+        const expectedEventId = String(st.source_event_id);
+        const matchStrict = (actualEventId === expectedEventId);
+        const matchLegacy = (actualEventId === `ev_t${expectedTurn}` && expectedEventId === `ev_t${expectedTurn}`);
+        if (!matchStrict && !matchLegacy) {
+          return {
+            valid: false,
+            reason: `source_event_id mismatch: expected '${expectedEventId}', got '${actualEventId}'`
+          };
+        }
+
+        return { valid: true, reason: "All four keys valid (call_sid + turn_id + source_state_version + source_event_id)" };
+      }
+
+      const bindingCheck = validateDecisionBinding(sd, step, sAfter, currentReport ? currentReport.call_sid : null);
+      const hasValidDecision = bindingCheck.valid;
 
       const col4 = document.getElementById('col4Body');
       col4.innerHTML = `
@@ -1475,12 +1576,16 @@
             </div>
           </div>
 
-          <!-- Traceability Header: call_sid, decision_id, source_state_version, source_event_id/turn_id (Point 6) -->
-          <div style="display: grid; grid-template-columns: repeat(4, 1fr); gap: 6px; background: #EEF2FF; border: 1px solid #C7D2FE; border-radius: 6px; padding: 6px 8px; margin-bottom: 10px; font-size: 10px;">
+          <!-- Traceability Header: call_sid, decision_id, source_state_version, source_event_id/turn_id (Point 1 / Point 6) -->
+          <div style="display: grid; grid-template-columns: repeat(4, 1fr); gap: 6px; background: #EEF2FF; border: 1px solid #C7D2FE; border-radius: 6px; padding: 6px 8px; margin-bottom: 8px; font-size: 10px;">
             <div><span style="color: #4338CA; font-weight: 700; display:block;">CALL SID</span> <strong class="mono" style="color: #1E1B4B; font-size: 10.5px; word-break: break-all;">${escapeHtml(sd.call_sid || currentReport.call_sid || '—')}</strong></div>
             <div><span style="color: #4338CA; font-weight: 700; display:block;">DECISION ID</span> <strong class="mono" style="color: #1E1B4B; font-size: 10.5px; word-break: break-all;">${escapeHtml(sd.decision_id || '—')}</strong></div>
             <div><span style="color: #4338CA; font-weight: 700; display:block;">SOURCE VERSION</span> <strong class="mono" style="color: #1E1B4B; font-size: 10.5px;">V${sd.source_state_version}</strong></div>
             <div><span style="color: #4338CA; font-weight: 700; display:block;">SOURCE EVENT / TURN</span> <strong class="mono" style="color: #1E1B4B; font-size: 10.5px;">${escapeHtml(sd.source_event_id || ('ev_t' + step.turn_id))} (T${step.turn_id})</strong></div>
+          </div>
+          <div style="display:flex; justify-content:space-between; align-items:center; background:#DCFCE7; border:1px solid #BBF7D0; border-radius:4px; padding:3px 8px; margin-bottom:10px; font-size:9.5px; color:#15803D;">
+            <span><strong>4-Key Bound:</strong> call_sid + turn_id + source_state_version + source_event_id</span>
+            <span class="mono" style="font-weight:700;">PASSED</span>
           </div>
 
           <!-- Trace Step 1: Evidence Considered -->
@@ -1585,7 +1690,9 @@
             <span class="badge" style="background:#FEF3C7; color:#92400E; border:1px solid #FCD34D; font-size:10px; font-weight:700;">V${sAfter.state_version || 0} PENDING</span>
           </div>
           <div style="font-size: 11.5px; color: #92400E; line-height: 1.4;">
-            No valid Strategic Decision recorded for state version V${sAfter.state_version || 0} (Turn ${step.turn_id}). Silent fallback to later turns or final outcome is strictly prohibited.
+            No valid Strategic Decision bound for this turn (Turn ${step.turn_id}, V${sAfter.state_version || 0}).
+            ${sd ? `<div style="margin-top:4px; font-size:11px; color:#B45309; font-weight:600;">Binding rejected: ${escapeHtml(bindingCheck.reason || 'Decision metadata does not match turn context.')}</div>` : ''}
+            Silent fallback to later turns, un-bound decisions, or cross-call decisions is strictly prohibited.
           </div>
         </div>
       `}

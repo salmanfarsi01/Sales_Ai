@@ -39,6 +39,7 @@ class TurnReplayStep(BaseModel):
     materiality: MaterialityClassification
     state_changes: List[StateChangeRecord] = Field(default_factory=list)
     state_after: ConversationStateSnapshot
+    source_event_id: Optional[str] = None
     strategic_decision: Optional[StrategicDecision] = None
 
 
@@ -178,11 +179,13 @@ class ConversationReplayEngine:
             eval_result.decision.gateway_fallback_stub = gateway_stub
             eval_result.decision.final_prompt_text = gateway_stub
 
+            step_event_id = eval_result.decision.source_event_id if (eval_result.decision and eval_result.decision.source_event_id) else f"ev_turn_{bundle.turn_id}_v{state_after.state_version}"
             step = TurnReplayStep(
                 turn_id=bundle.turn_id,
                 speaker_id=bundle.speaker_id,
                 text=bundle.utterance_text,
                 timestamp_ms=bundle.timestamp_ms,
+                source_event_id=step_event_id,
                 state_before=state_before,
                 evidence_bundle=bundle.model_copy(deep=True),
                 materiality=manager.last_materiality or materiality,

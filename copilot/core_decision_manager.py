@@ -15,9 +15,12 @@ LOGGER = logging.getLogger("copilot.core_decision_manager")
 
 
 class StrategicDecisionCache:
-    """Explicit cache for StrategicDecision results keyed strictly on (call_sid, source_state_version).
-    Never keyed on turn number alone or un-scoped pointers (Client Requirement Point 3).
+    """Explicit cache for StrategicDecision results strictly keyed and validated on all four keys:
+    (call_sid, turn_id, source_state_version, source_event_id).
+    Matching versions alone are insufficient because multiple turns—and different calls—can share
+    the same version number (Client Requirement Point 1 & Point 3).
     """
+    _bound_cache: Dict[Tuple[str, int, int, str], StrategicDecision] = {}
     _cache: Dict[Tuple[str, int], StrategicDecision] = {}
     _call_turn_index: Dict[Tuple[str, int], StrategicDecision] = {}
 
@@ -27,21 +30,144 @@ class StrategicDecisionCache:
         call_sid: str,
         decision: StrategicDecision,
         turn_id: Optional[int] = None,
+        source_event_id: Optional[str] = None,
     ) -> None:
         if not call_sid:
             raise ValueError("call_sid is required to cache StrategicDecision; un-scoped caching is prohibited.")
-        version_key = (str(call_sid), int(decision.source_state_version))
+        eff_turn = turn_id if turn_id is not None else getattr(decision, "source_turn_id", None)
+        if eff_turn is None:
+            eff_turn = getattr(decision, "utterance_turn_id", 0)
+        eff_turn = int(eff_turn)
+        version_num = int(decision.source_state_version)
+        eff_event = str(source_event_id or getattr(decision, "source_event_id", None) or f"ev_turn_{eff_turn}_v{version_num}")
+
         frozen = decision.model_copy(deep=True)
-        cls._cache[version_key] = frozen
-        if turn_id is not None:
-            turn_key = (str(call_sid), int(turn_id))
-            cls._call_turn_index[turn_key] = frozen
+        frozen.call_sid = str(call_sid)
+        frozen.call_id = str(call_sid)
+        frozen.source_turn_id = eff_turn
+        frozen.source_state_version = version_num
+        frozen.source_event_id = eff_event
+
+        # 1. Primary 4-key binding cache: (call_sid, turn_id, source_state_version, source_event_id)
+        bound_key = (str(call_sid), eff_turn, version_num, eff_event)
+        cls._bound_cache[bound_key] = frozen
+
+        # 2. Auxiliary indices for compatibility
+        cls._cache[(str(call_sid), version_num)] = frozen
+        cls._call_turn_index[(str(call_sid), eff_turn)] = frozen
 
     @classmethod
-    def get(cls, call_sid: str, source_state_version: int) -> Optional[StrategicDecision]:
-        """Retrieves a cached decision strictly by (call_sid, source_state_version)."""
+    def get_strictly_bound(
+        cls,
+        call_sid: str,
+        turn_id: int,
+        source_state_version: int,
+        source_event_id: str,
+    ) -> Optional[StrategicDecision]:
+        """Validates all four keys together: call_sid + turn_id + source_state_version + source_event_id.
+        Rejects lookup if any key mismatches or is missing (Point 1).
+        """
+        if not call_sid or turn_id is None or source_state_version is None or not source_event_id:
+            return None
+
+        key = (str(call_sid), int(turn_id), int(source_state_version), str(source_event_id))
+        dec = cls._bound_cache.get(key)
+        if dec is not None:
+            actual_call = dec.call_sid or dec.call_id
+            actual_turn = dec.source_turn_id if dec.source_turn_id is not None else dec.utterance_turn_id
+            actual_version = dec.source_state_version
+            actual_event = dec.source_event_id
+            if (
+                actual_call
+                and actual_call == str(call_sid)
+                and actual_turn is not None
+                and actual_turn == int(turn_id)
+                and actual_version is not None
+                and actual_version == int(source_state_version)
+                and actual_event
+                and actual_event == str(source_event_id)
+            ):
+                return dec.model_copy(deep=True)
+        return None
+
+    @classmethod
+    def validate_binding(
+        cls,
+        decision: Optional[StrategicDecision],
+        call_sid: str,
+        turn_id: int,
+        source_state_version: int,
+        source_event_id: str,
+    ) -> Tuple[bool, str]:
+        """Validates that a decision strictly matches all 4 keys.
+        Fails if any key is missing or null on either side.
+        """
+        if decision is None:
+            return False, "decision is None"
+        if not call_sid:
+            return False, "Missing call_sid for binding validation"
+        if turn_id is None:
+            return False, "Missing turn_id for binding validation"
+        if source_state_version is None:
+            return False, "Missing source_state_version for binding validation"
+        if not source_event_id:
+            return False, "Missing source_event_id for binding validation"
+
+        actual_call = decision.call_sid or decision.call_id
+        if not actual_call:
+            return False, "Missing call_sid on StrategicDecision"
+        if actual_call != str(call_sid):
+            return False, f"call_sid mismatch: expected '{call_sid}', got '{actual_call}'"
+
+        actual_turn = decision.source_turn_id if decision.source_turn_id is not None else decision.utterance_turn_id
+        if actual_turn is None:
+            return False, "Missing turn_id on StrategicDecision"
+        if actual_turn != int(turn_id):
+            return False, f"turn_id mismatch: expected Turn {turn_id}, got Turn {actual_turn}"
+
+        if decision.source_state_version is None:
+            return False, "Missing source_state_version on StrategicDecision"
+        if int(decision.source_state_version) != int(source_state_version):
+            return False, f"source_state_version mismatch: expected V{source_state_version}, got V{decision.source_state_version}"
+
+        actual_event = decision.source_event_id
+        if not actual_event:
+            return False, "Missing source_event_id on StrategicDecision: decision lacks explicit event provenance"
+
+        expected_event = str(source_event_id)
+        if actual_event != expected_event and actual_event != f"ev_t{turn_id}":
+            return False, f"source_event_id mismatch: expected '{expected_event}', got '{actual_event}'"
+
+        return True, "Valid 4-key binding"
+
+    @classmethod
+    def get(
+        cls,
+        call_sid: str,
+        source_state_version: int,
+        turn_id: Optional[int] = None,
+        source_event_id: Optional[str] = None,
+    ) -> Optional[StrategicDecision]:
+        """Retrieves a cached decision. When turn_id and source_event_id are provided,
+        strictly validates all 4 keys together (call_sid, turn_id, source_state_version, source_event_id).
+        """
         if not call_sid:
             raise ValueError("call_sid is required to query cached StrategicDecision.")
+
+        if turn_id is not None and source_event_id is not None:
+            return cls.get_strictly_bound(
+                call_sid=call_sid,
+                turn_id=turn_id,
+                source_state_version=source_state_version,
+                source_event_id=source_event_id,
+            )
+
+        if turn_id is not None:
+            dec = cls._call_turn_index.get((str(call_sid), int(turn_id)))
+            if dec and dec.source_state_version == int(source_state_version):
+                return dec.model_copy(deep=True)
+            return None
+
         dec = cls._cache.get((str(call_sid), int(source_state_version)))
         return dec.model_copy(deep=True) if dec else None
 
@@ -59,10 +185,12 @@ class StrategicDecisionCache:
     def clear(cls, call_sid: Optional[str] = None) -> None:
         """Clears cache entries. If call_sid is specified, clears only that call's entries."""
         if call_sid is None:
+            cls._bound_cache.clear()
             cls._cache.clear()
             cls._call_turn_index.clear()
         else:
             sid_str = str(call_sid)
+            cls._bound_cache = {k: v for k, v in cls._bound_cache.items() if k[0] != sid_str}
             cls._cache = {k: v for k, v in cls._cache.items() if k[0] != sid_str}
             cls._call_turn_index = {k: v for k, v in cls._call_turn_index.items() if k[0] != sid_str}
 
@@ -101,11 +229,17 @@ class CoreDecisionManager:
         use_cache: bool = True,
     ) -> DecisionEvaluationResult:
         effective_turn_id = turn_id if turn_id is not None else getattr(snapshot, "last_updated_turn_id", None)
+        effective_event_id = f"ev_turn_{effective_turn_id}_v{snapshot.state_version}" if (effective_turn_id is not None and snapshot.state_version is not None) else None
 
-        # Point 3: Process-level cache check keyed strictly on (call_sid, source_state_version)
-        if use_cache and snapshot.state_version is not None and not playbook and not calibration:
-            cached_decision = StrategicDecisionCache.get(self.call_sid, snapshot.state_version)
-            if cached_decision is not None and (effective_turn_id is None or cached_decision.source_turn_id == effective_turn_id):
+        # Point 1 & Point 3: Process-level cache check validating all four keys
+        if use_cache and snapshot.state_version is not None and effective_turn_id is not None and effective_event_id and not playbook and not calibration:
+            cached_decision = StrategicDecisionCache.get_strictly_bound(
+                call_sid=self.call_sid,
+                turn_id=int(effective_turn_id),
+                source_state_version=int(snapshot.state_version),
+                source_event_id=effective_event_id,
+            )
+            if cached_decision is not None:
                 context = self.engine._build_context(snapshot)
                 eval_result = DecisionEvaluationResult(
                     decision=cached_decision,
@@ -114,8 +248,7 @@ class CoreDecisionManager:
                 self.latest_decision = cached_decision
                 self.latest_evaluation_result = eval_result
                 self.decision_history.append(cached_decision)
-                if effective_turn_id is not None:
-                    self.decisions_by_turn[int(effective_turn_id)] = cached_decision
+                self.decisions_by_turn[int(effective_turn_id)] = cached_decision
                 self.decisions_by_version[int(cached_decision.source_state_version)] = cached_decision
                 return eval_result
 
@@ -145,11 +278,12 @@ class CoreDecisionManager:
             self.decisions_by_turn[int(effective_turn_id)] = frozen_decision
         self.decisions_by_version[int(frozen_decision.source_state_version)] = frozen_decision
 
-        # Point 3: Populate cache strictly keyed on (call_sid, source_state_version)
+        # Point 1 & Point 3: Populate cache strictly keyed on all four keys
         StrategicDecisionCache.put(
             call_sid=self.call_sid,
             decision=frozen_decision,
             turn_id=effective_turn_id,
+            source_event_id=frozen_decision.source_event_id,
         )
 
         return eval_result
@@ -157,7 +291,9 @@ class CoreDecisionManager:
     def get_decision_for_turn(self, turn_id: int) -> Optional[StrategicDecision]:
         """Returns the immutable StrategicDecision produced strictly at turn_id for this call_sid."""
         if int(turn_id) in self.decisions_by_turn:
-            return self.decisions_by_turn[int(turn_id)]
+            dec = self.decisions_by_turn[int(turn_id)]
+            if (dec.call_sid or dec.call_id) == self.call_sid and (dec.source_turn_id == int(turn_id) or dec.utterance_turn_id == int(turn_id)):
+                return dec
         return StrategicDecisionCache.get_by_call_and_turn(self.call_sid, int(turn_id))
 
     def get_decision_for_version(self, state_version: int) -> Optional[StrategicDecision]:
@@ -169,6 +305,25 @@ class CoreDecisionManager:
     def get_cached_decision(self, source_state_version: int) -> Optional[StrategicDecision]:
         """Queries the cache by (call_sid, source_state_version)."""
         return StrategicDecisionCache.get(self.call_sid, int(source_state_version))
+
+    def get_strictly_bound_decision(
+        self,
+        call_sid: str,
+        turn_id: int,
+        source_state_version: int,
+        source_event_id: str,
+    ) -> Optional[StrategicDecision]:
+        """Retrieves and validates a decision matching all four keys together:
+        call_sid + turn_id + source_state_version + source_event_id (Point 1).
+        """
+        if str(call_sid) != self.call_sid:
+            return None
+        return StrategicDecisionCache.get_strictly_bound(
+            call_sid=str(call_sid),
+            turn_id=int(turn_id),
+            source_state_version=int(source_state_version),
+            source_event_id=str(source_event_id),
+        )
 
 
 

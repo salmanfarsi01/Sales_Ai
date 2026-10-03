@@ -84,8 +84,9 @@ def test_point4_pending_state_when_no_decision_recorded():
     assert html_path.exists()
     html_content = html_path.read_text(encoding="utf-8")
     assert "Pending / No Decision Recorded" in html_content
-    assert "hasValidDecision = sd && (sd.source_state_version === sAfter.state_version)" in html_content
-    assert "Silent fallback to later turns or final outcome is strictly prohibited" in html_content
+    assert "validateDecisionBinding" in html_content
+    assert "hasValidDecision = bindingCheck.valid" in html_content
+    assert "Silent fallback to later turns" in html_content
 
 
 def test_point5_evidence_consistency_single_coherent_snapshot():
