@@ -97,7 +97,10 @@ def test_absent_decision_maker_blocks_premature_close():
     result = engine.evaluate(snapshot)
     decision = result.decision
 
-    assert decision.primary_action == StrategicAction.DE_RISK
+    # Point 7: Stop auto-mapping decision-maker changes to DE_RISK.
+    # A request to include a spouse is coordination/clarification, not de-escalation/threat.
+    assert decision.primary_action == StrategicAction.CLARIFY
+    assert decision.strategic_posture == "coordinate"
     assert "DECISION_MAKER_ABSENT" in decision.reason_codes
     assert "press_for_single_party_commitment" in decision.do_not_do
     assert "collaborative_buy_in" in decision.what_to_protect

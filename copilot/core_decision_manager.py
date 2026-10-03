@@ -1,10 +1,12 @@
 from __future__ import annotations
 
 import logging
+import uuid
 from typing import Any, Dict, List, Optional, Tuple
 
 from .conversation_state_models import ConversationStateSnapshot
 from .core_intelligence_models import (
+    StrategicAction,
     StrategicDecision,
     DecisionEvaluationResult,
 )
@@ -250,6 +252,42 @@ class CoreDecisionManager:
                 self.decision_history.append(cached_decision)
                 self.decisions_by_turn[int(effective_turn_id)] = cached_decision
                 self.decisions_by_version[int(cached_decision.source_state_version)] = cached_decision
+                return eval_result
+
+        # Point 13: Preserve strategy across turns when nothing material changed
+        filler_acknowledgments = {"okay", "ok", "yeah", "sure", "uh huh", "uh-huh", "got it", "right", "i see"}
+        cleaned_turn = (turn_text or "").strip().lower().rstrip("!.,")
+        is_filler = cleaned_turn in filler_acknowledgments
+
+        if is_filler and self.latest_decision is not None and not playbook and not calibration:
+            prev_dec = self.latest_decision
+            if prev_dec.primary_action not in (StrategicAction.WAIT_SILENCE, StrategicAction.HOLD) and "HARD_BOUNDARY_ACTIVE" not in prev_dec.reason_codes:
+                carried_dec = prev_dec.model_copy(deep=True)
+                carried_dec.decision_id = f"dec_{uuid.uuid4().hex[:10]}"
+                carried_dec.source_turn_id = effective_turn_id
+                carried_dec.utterance_turn_id = effective_turn_id
+                carried_dec.metrics_source_turn_id = effective_turn_id
+                carried_dec.source_state_version = snapshot.state_version
+                carried_dec.source_event_id = effective_event_id
+                carried_dec.carried_forward_from_decision_id = prev_dec.decision_id
+                carried_dec.carried_forward_from_turn_id = prev_dec.source_turn_id
+                carried_dec.should_prompt = False  # Point 8: no new prompt needed for non-material filler
+                if "STRATEGY_CARRIED_FORWARD" not in carried_dec.reason_codes:
+                    carried_dec.reason_codes.append("STRATEGY_CARRIED_FORWARD")
+                carried_dec.strategic_objective = f"Carried forward from Turn {prev_dec.source_turn_id}: {prev_dec.strategic_objective}"
+                carried_dec.evidence_considered = [
+                    f'Turn utterance ({turn_speaker}): "{turn_text.strip()}"',
+                    f"Strategy carried forward from decision {prev_dec.decision_id} (Turn {prev_dec.source_turn_id})",
+                ]
+
+                context = self.engine._build_context(snapshot)
+                eval_result = DecisionEvaluationResult(decision=carried_dec, context=context)
+                self.latest_decision = carried_dec
+                self.latest_evaluation_result = eval_result
+                self.decision_history.append(carried_dec)
+                if effective_turn_id is not None:
+                    self.decisions_by_turn[int(effective_turn_id)] = carried_dec
+                self.decisions_by_version[int(carried_dec.source_state_version)] = carried_dec
                 return eval_result
 
         eval_result = self.engine.evaluate(

@@ -9,7 +9,7 @@ from copilot.behavioral_inference import (
 )
 from copilot.behavioral_semantic import SemanticFeatureSnapshot
 from copilot.conversation_state_contract import extract_behavioral_bundle, BehavioralSignalInputBundle
-from copilot.conversation_state_manager import ConversationStateManager
+from copilot.conversation_state_manager import ConversationStateManager, resolve_relative_hold_date
 from copilot.core_intelligence_engine import PitchProXCoreIntelligenceEngine
 from copilot.core_intelligence_models import (
     StrategicDecision,
@@ -184,7 +184,8 @@ def test_time_bounded_hold_sets_contact_not_before_and_bypasses_boundary_suspect
     s2 = manager.process_turn_bundle(t2)
 
     # 1. Stored in contact_compliance as absolute date
-    assert s2.contact_compliance.contact_not_before == "2026-10-01"
+    expected_hold = resolve_relative_hold_date("Thursday")
+    assert s2.contact_compliance.contact_not_before == expected_hold
     assert s2.contact_compliance.contact_not_before_turn_id == 2
     # 2. Does NOT trigger boundary_suspected!
     assert s2.contact_compliance.boundary_suspected is False
@@ -196,7 +197,7 @@ def test_time_bounded_hold_sets_contact_not_before_and_bypasses_boundary_suspect
     assert res.decision.primary_action == StrategicAction.ACKNOWLEDGE
     assert res.decision.push_strength == "protect_and_shorten"
     assert "HOLD_RESPECTED" in res.decision.reason_codes
-    assert "prohibited_contact_before_2026-10-01" in res.decision.do_not_do
+    assert f"prohibited_contact_before_{expected_hold}" in res.decision.do_not_do
 
 
 def test_daily_time_preference_is_not_a_hold_or_boundary():

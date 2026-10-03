@@ -191,6 +191,19 @@ class LLMResponseGateway:
                 working_decision = decision.model_copy(deep=True)
             working_decision.secondary_action = None
 
+        # Point 8: Allow WAIT / HOLD / no prompt at all
+        if not working_decision.should_prompt or working_decision.primary_action in (StrategicAction.WAIT_SILENCE, StrategicAction.HOLD):
+            return Prompt(
+                decision_id=working_decision.decision_id,
+                source_state_version=working_decision.source_state_version,
+                text="",
+                strategic_action=working_decision.primary_action,
+                strategic_objective=working_decision.strategic_objective,
+                max_prompt_words=working_decision.max_prompt_words,
+                confidence=working_decision.confidence,
+                status="skipped",
+            )
+
         context = self.assemble_context(
             decision=working_decision,
             snapshot=snapshot,
@@ -248,6 +261,10 @@ class LLMResponseGateway:
         action = decision.primary_action
         reasons = decision.reason_codes
 
+        # Point 8: No new prompt when should_prompt is False or HOLD/WAIT
+        if not decision.should_prompt or action in (StrategicAction.WAIT_SILENCE, StrategicAction.HOLD):
+            return ""
+
         if "HARD_BOUNDARY_ACTIVE" in reasons or action == StrategicAction.ACKNOWLEDGE and "COMPLIANCE_PRIORITY" in reasons:
             return "Understood, I completely respect that. Thank you for your time today, and take care."
 
@@ -261,6 +278,8 @@ class LLMResponseGateway:
             return "What would be the most important priority for you when evaluating your options?"
 
         if "DECISION_MAKER_ABSENT" in reasons:
+            if "GENUINE_DEAL_RISK" in reasons:
+                return "I completely understand their caution—there's no obligation whatsoever, and we can address any concerns directly together."
             return "It makes total sense to coordinate with your partner—would it be helpful if we found a time when you are both available?"
 
         if action == StrategicAction.ACKNOWLEDGE:

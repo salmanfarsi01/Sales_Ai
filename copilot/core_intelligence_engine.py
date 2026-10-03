@@ -14,6 +14,7 @@ from .conversation_state_models import (
 from .core_intelligence_models import (
     StrategicAction,
     StrategicDecision,
+    PushStrengthValue,
     StrategicInterpretationContext,
     DecisionEvaluationResult,
     Spec01ObjectionLadderStage,
@@ -54,7 +55,7 @@ class PitchProXCoreIntelligenceEngine:
             eval_res = self._build_objection_decision(snapshot, context, unresolved_objections, turn_timestamp_ms)
         # 4. Multi-Stakeholder and Absent Decision Maker Gate (Spec 09 §3)
         elif not context.decision_maker_present:
-            eval_res = self._build_absent_stakeholder_decision(snapshot, context, turn_timestamp_ms)
+            eval_res = self._build_absent_stakeholder_decision(snapshot, context, turn_timestamp_ms, turn_text=turn_text)
         # 5. Conversion Gate and Push Strength Alignment (Spec 09 §6, §7)
         elif context.meeting_gate_open:
             eval_res = self._build_meeting_gate_decision(snapshot, context, turn_timestamp_ms)
@@ -190,6 +191,21 @@ class PitchProXCoreIntelligenceEngine:
         decision.confidence = round(final_conf, 3)
         decision.confidence_breakdown = breakdown
 
+        # Point 10: Confidence must change behavior, not just be a displayed number.
+        # Below confidence threshold (0.65), constrain action selection to lower-risk options.
+        if final_conf < 0.65:
+            if decision.primary_action == StrategicAction.COMMITMENT_CLOSE:
+                decision.primary_action = StrategicAction.CLARIFY
+                decision.strategic_posture = "explore"
+                decision.push_strength = PushStrengthValue("low", legacy_alias="resolve_then_ask")
+                decision.secondary_action = StrategicAction.QUESTION
+                decision.secondary_action_reason = "Inquire regarding comfort level before advancing."
+                if "LOW_CONFIDENCE_ACTION_DOWNGRADE" not in decision.reason_codes:
+                    decision.reason_codes.append("LOW_CONFIDENCE_ACTION_DOWNGRADE")
+                decision.strategic_objective = "Clarify prospect alignment and verify comfort before attempting commitment due to lower confidence."
+                if "premature_close_on_low_confidence" not in decision.do_not_do:
+                    decision.do_not_do.append("premature_close_on_low_confidence")
+
     def _apply_contact_compliance_constraints(
         self,
         snapshot: ConversationStateSnapshot,
@@ -264,14 +280,17 @@ class PitchProXCoreIntelligenceEngine:
         comp = snapshot.contact_compliance
         hold_target = comp.contact_not_before if comp else "requested date"
         clean_tag = hold_target.lower().replace(' ', '_')
+        ref_facts = [f.fact_id for f in snapshot.facts if f.category == "preference" and f.status == "active"]
         decision = StrategicDecision(
             call_id=snapshot.call_sid,
             source_state_version=snapshot.state_version,
             should_prompt=True,
             strategic_objective=f"Acknowledge the prospect's requested contact hold until {hold_target} and gracefully confirm timing.",
             primary_action=StrategicAction.ACKNOWLEDGE,
+            strategic_posture="protect",
             secondary_action=None,
-            push_strength="protect_and_shorten",
+            push_strength=PushStrengthValue("none", legacy_alias="protect_and_shorten"),
+            referenced_fact_ids=ref_facts,
             reason_codes=["CONTACT_NOT_BEFORE_DECLARED", "HOLD_RESPECTED"],
             do_not_do=["press_for_earlier_time", "premature_close", f"prohibited_contact_before_{clean_tag}"],
             what_to_protect=["contact_not_before_hold", "prospect_trust"],
@@ -296,8 +315,9 @@ class PitchProXCoreIntelligenceEngine:
             should_prompt=True,
             strategic_objective="Acknowledge boundary, cease persuasion, and gracefully conclude call.",
             primary_action=StrategicAction.ACKNOWLEDGE,
+            strategic_posture="defend",
             secondary_action=None,
-            push_strength="respect_record_exit",
+            push_strength=PushStrengthValue("none", legacy_alias="respect_record_exit"),
             reason_codes=["HARD_BOUNDARY_ACTIVE", "COMPLIANCE_PRIORITY"],
             do_not_do=["persuade", "pitch", "schedule_meeting", "overcome_boundary"],
             what_to_protect=["legal_compliance", "prospect_boundary", "reputation"],
@@ -323,8 +343,9 @@ class PitchProXCoreIntelligenceEngine:
             should_prompt=True,
             strategic_objective="Stop persuading and issue a short clarify to confirm prospect comfort and boundaries.",
             primary_action=StrategicAction.CLARIFY,
+            strategic_posture="defend",
             secondary_action=None,
-            push_strength="respect_record_exit",
+            push_strength=PushStrengthValue("low", legacy_alias="respect_record_exit"),
             reason_codes=["BOUNDARY_SUSPECTED", "STOP_PERSUADING_CLARIFY"],
             do_not_do=["persuade", "pitch", "schedule_meeting", "overcome_boundary", "apply_pressure"],
             what_to_protect=["prospect_comfort", "conversation_safety", "legal_compliance"],
@@ -348,10 +369,11 @@ class PitchProXCoreIntelligenceEngine:
             slot = snapshot.conversion_gate.commitment_slot
         elif conv := snapshot.get_active_conversion_event():
             slot = conv.start_at
-        if not slot:
-            meeting_fact = snapshot.get_active_fact("confirmed_meeting_time")
-            if meeting_fact:
-                slot = meeting_fact.fact_value
+        meeting_fact = snapshot.get_active_fact("confirmed_meeting_time")
+        if not slot and meeting_fact:
+            slot = meeting_fact.fact_value
+
+        ref_facts = [meeting_fact.fact_id] if meeting_fact else []
 
         decision = StrategicDecision(
             call_id=snapshot.call_sid,
@@ -360,10 +382,13 @@ class PitchProXCoreIntelligenceEngine:
             should_prompt=True,
             strategic_objective="Protect confirmed appointment, confirm logistics, and avoid reopening settled concerns.",
             primary_action=StrategicAction.ACKNOWLEDGE,
+            strategic_posture="protect",
             secondary_action=StrategicAction.DE_RISK,
-            push_strength="confirm_and_protect",
+            secondary_action_reason="Protect agreement without adding sales pressure.",
+            push_strength=PushStrengthValue("none", legacy_alias="confirm_and_protect"),
             meeting_gate_open=context.meeting_gate_open,
             conversion_confirmed=True,
+            referenced_fact_ids=ref_facts,
             reason_codes=["CONVERSION_CONFIRMED", "CONFIRM_AND_PROTECT_ACTIVE"],
             do_not_do=["reopen_resolved_objections", "push_for_additional_commitments", "oversell", "prolong_call"],
             what_to_protect=["confirmed_appointment", "established_trust", "agreed_logistics"],
@@ -446,14 +471,41 @@ class PitchProXCoreIntelligenceEngine:
             reason_codes = ["OBJECTION_REPEATED_RESISTANCE_BRANCH", f"LADDER_{ladder_stage.value.upper()}"]
             max_words = 24
 
+        # Point 14: Use strategy history to avoid repeating failed approaches
+        failed_strategy_names = [str(s).lower() for s in failed_strategies]
+        if primary_action.value.lower() in failed_strategy_names:
+            failed_tactic = primary_action.value
+            candidates = [
+                (StrategicAction.QUANTIFY, "Quantify empirical differences and net financial value."),
+                (StrategicAction.DIFFERENTIATE, "Differentiate service model and structural methodology."),
+                (StrategicAction.DE_RISK, "De-risk commitment and remove downside exposure."),
+                (StrategicAction.CLARIFY, "Clarify underlying concern to discover core driver."),
+                (StrategicAction.QUESTION, "Inquire directly regarding remaining hesitations."),
+                (StrategicAction.VALIDATE, "Validate prospect perspective before advancing."),
+            ]
+            for candidate_action, candidate_obj in candidates:
+                if candidate_action.value.lower() not in failed_strategy_names and candidate_action != primary_action:
+                    primary_action = candidate_action
+                    objective = f"Pivoted from previously failed '{failed_tactic}' approach: {candidate_obj}"
+                    reason_codes.append(f"AVOIDED_FAILED_STRATEGY_{failed_tactic.upper()}")
+                    reason_codes.append("PIVOTED_TO_UNTRIED_STRATEGY")
+                    if failed_tactic not in do_not_do:
+                        do_not_do.append(failed_tactic)
+                    break
+
+        secondary_reason = "Support primary objection handling without aggressive closing." if secondary_action else None
+
         decision = StrategicDecision(
             call_id=snapshot.call_sid,
             source_state_version=snapshot.state_version,
             should_prompt=True,
             strategic_objective=objective,
             primary_action=primary_action,
+            strategic_posture="advance",
             secondary_action=secondary_action,
-            push_strength="resolve_then_ask",
+            secondary_action_reason=secondary_reason,
+            push_strength=PushStrengthValue("moderate", legacy_alias="resolve_then_ask"),
+            referenced_objection_ids=[primary_obj.objection_id],
             reason_codes=reason_codes,
             do_not_do=do_not_do,
             what_to_protect=what_to_protect,
@@ -471,19 +523,53 @@ class PitchProXCoreIntelligenceEngine:
         snapshot: ConversationStateSnapshot,
         context: StrategicInterpretationContext,
         turn_timestamp_ms: int,
+        turn_text: str = "",
     ) -> DecisionEvaluationResult:
         stakeholder_roles = [s.role for s in snapshot.decision_structure.stakeholders if s.presence != "on_call"]
         role_label = stakeholder_roles[0] if stakeholder_roles else "partner"
+        stakeholder_ids = [getattr(s, "stakeholder_id", f"stakeholder_{s.role}") for s in snapshot.decision_structure.stakeholders]
+
+        # Point 7: Stop auto-mapping "decision-maker changed" to DE_RISK.
+        # Classify reason: genuine deal risk / conflict / scam vs pure logistics / coordination
+        text_lower = (turn_text or "").lower()
+        risk_keywords = [
+            "scam", "fraud", "rip off", "ripoff", "rip-off", "suspicious", "lawyer",
+            "legal", "sue", "fighting", "divorce", "dispute", "against", "opposed",
+            "refuse", "angry", "distrust", "hostile", "skeptical"
+        ]
+        is_deal_risk = any(k in text_lower for k in risk_keywords)
+
+        if is_deal_risk:
+            # Genuine deal risk / relationship conflict / distrust -> DE_RISK
+            primary_action = StrategicAction.DE_RISK
+            secondary_action = StrategicAction.VALIDATE
+            secondary_reason = "Validate spouse skepticism to de-escalate deal risk before proceeding."
+            strategic_posture = "defend"
+            push_strength = PushStrengthValue("low", legacy_alias="resolve_then_ask")
+            objective = f"De-risk deal and address underlying stakeholder skepticism regarding absent {role_label}."
+            reason_codes = ["DECISION_MAKER_ABSENT", "GENUINE_DEAL_RISK", "STAKEHOLDER_CONCERN"]
+        else:
+            # Pure logistics / coordination (Turn 10 scenario) -> CLARIFY with coordination posture
+            primary_action = StrategicAction.CLARIFY
+            secondary_action = StrategicAction.FUTURE_PACE
+            secondary_reason = "Future pace a collaborative conversation once logistical alignment is established."
+            strategic_posture = "coordinate"
+            push_strength = PushStrengthValue("low", legacy_alias="resolve_then_ask")
+            objective = f"Coordinate logistics to include {role_label} collaboratively in the conversation or walkthrough."
+            reason_codes = ["DECISION_MAKER_ABSENT", "COORDINATION_LOGISTICS", "COLLABORATIVE_SCHEDULING"]
 
         decision = StrategicDecision(
             call_id=snapshot.call_sid,
             source_state_version=snapshot.state_version,
             should_prompt=True,
-            strategic_objective=f"Align on mutual value and position a collaborative walkthrough including absent {role_label}.",
-            primary_action=StrategicAction.DE_RISK,
-            secondary_action=StrategicAction.FUTURE_PACE,
-            push_strength="resolve_then_ask",
-            reason_codes=["DECISION_MAKER_ABSENT", "LOGISTICAL_READINESS_CAPPED"],
+            strategic_objective=objective,
+            primary_action=primary_action,
+            strategic_posture=strategic_posture,
+            secondary_action=secondary_action,
+            secondary_action_reason=secondary_reason,
+            push_strength=push_strength,
+            referenced_stakeholder_ids=stakeholder_ids,
+            reason_codes=reason_codes,
             do_not_do=["press_for_single_party_commitment", "ignore_absent_decision_maker", "force_immediate_agreement"],
             what_to_protect=["collaborative_buy_in", "stakeholder_harmony"],
             question_allowed=True,
@@ -536,8 +622,10 @@ class PitchProXCoreIntelligenceEngine:
                 should_prompt=True,
                 strategic_objective=objective,
                 primary_action=primary_action,
+                strategic_posture="explore",
                 secondary_action=secondary_action,
-                push_strength="resolve_then_ask",
+                secondary_action_reason="Explore missing gate criteria before closing.",
+                push_strength=PushStrengthValue("low", legacy_alias="resolve_then_ask"),
                 reason_codes=reason_codes,
                 do_not_do=["premature_close", "blind_commitment_close", "apply_manipulative_pressure"],
                 what_to_protect=["trust", "conversation_flow"],
@@ -555,11 +643,13 @@ class PitchProXCoreIntelligenceEngine:
         if push_state == "two_window_choice":
             primary_action = StrategicAction.COMMITMENT_CLOSE
             secondary_action = StrategicAction.QUESTION
+            secondary_reason = "Provide two options to reduce scheduling friction."
             objective = "Propose two specific calendar windows for the walkthrough."
             reason_codes = ["MEETING_GATE_OPEN", "TWO_WINDOW_CHOICE"]
         else:
             primary_action = StrategicAction.COMMITMENT_CLOSE
             secondary_action = None
+            secondary_reason = None
             objective = "Directly propose and secure confirmed property walkthrough."
             reason_codes = ["MEETING_GATE_OPEN", "DIRECT_ASK"]
 
@@ -571,8 +661,10 @@ class PitchProXCoreIntelligenceEngine:
             should_prompt=True,
             strategic_objective=objective,
             primary_action=primary_action,
+            strategic_posture="advance",
             secondary_action=secondary_action,
-            push_strength=push_state,
+            secondary_action_reason=secondary_reason,
+            push_strength=PushStrengthValue("high", legacy_alias=push_state),
             reason_codes=reason_codes,
             do_not_do=["reopen_discovery", "hesitate_on_logistics", "apply_manipulative_pressure"],
             what_to_protect=["positive_momentum", "readiness_peak"],
@@ -597,6 +689,7 @@ class PitchProXCoreIntelligenceEngine:
         if stage == ConversationStage.DISCOVERY:
             primary_action = StrategicAction.QUESTION
             secondary_action = StrategicAction.MIRROR
+            secondary_reason = "Mirror statements to facilitate open discovery."
             objective = "Uncover prospect goals, situation, and core priorities."
             reason_codes = ["STAGE_DISCOVERY", "EXPLORE_PROSPECT_NEEDS"]
             do_not_do = ["premature_close", "pitch_prematurely"]
@@ -604,6 +697,7 @@ class PitchProXCoreIntelligenceEngine:
         elif stage == ConversationStage.VALUE_WALKTHROUGH:
             primary_action = StrategicAction.EDUCATE
             secondary_action = StrategicAction.DIFFERENTIATE
+            secondary_reason = "Differentiate service model while educating on value."
             objective = "Demonstrate tailored value proposition and distinguish approach."
             reason_codes = ["STAGE_VALUE_WALKTHROUGH", "DEMONSTRATE_DIFFERENTIATION"]
             do_not_do = ["overwhelm_with_detail", "press_unready_prospect"]
@@ -611,6 +705,7 @@ class PitchProXCoreIntelligenceEngine:
         elif stage == ConversationStage.DECISION_RESOLUTION:
             primary_action = StrategicAction.CLARIFY
             secondary_action = StrategicAction.REFRAME
+            secondary_reason = "Reframe considerations to align decision criteria."
             objective = "Resolve remaining decision criteria and establish consensus."
             reason_codes = ["STAGE_DECISION_RESOLUTION", "CLARIFY_CRITERIA"]
             do_not_do = ["premature_close"]
@@ -621,6 +716,7 @@ class PitchProXCoreIntelligenceEngine:
             if not gate_ready:
                 primary_action = StrategicAction.QUESTION
                 secondary_action = StrategicAction.CLARIFY
+                secondary_reason = "Clarify scheduling constraints before proposing a time."
                 objective = "Discover scheduling preferences and uncover logistical details."
                 reason_codes = ["STAGE_SCHEDULING", "GATE_NOT_READY_DISCOVERY"]
                 do_not_do = ["premature_close", "blind_commitment_close"]
@@ -628,6 +724,7 @@ class PitchProXCoreIntelligenceEngine:
             else:
                 primary_action = StrategicAction.COMMITMENT_CLOSE
                 secondary_action = StrategicAction.CLARIFY
+                secondary_reason = "Clarify appointment details to finalize scheduling."
                 objective = "Coordinate logistical details and calendar commitment."
                 reason_codes = ["STAGE_SCHEDULING", "FINALIZE_TIME"]
                 do_not_do = ["reopen_discovery"]
@@ -635,6 +732,7 @@ class PitchProXCoreIntelligenceEngine:
         else:
             primary_action = StrategicAction.QUESTION
             secondary_action = StrategicAction.ACKNOWLEDGE
+            secondary_reason = "Acknowledge greeting and establish rapport."
             objective = "Engage prospect and build conversation foundation."
             reason_codes = ["STAGE_DEFAULT_ENGAGEMENT"]
             do_not_do = ["premature_close"]
@@ -642,6 +740,7 @@ class PitchProXCoreIntelligenceEngine:
 
         if trust_score < 40.0 and primary_action != StrategicAction.VALIDATE:
             secondary_action = primary_action
+            secondary_reason = f"Reinforce {secondary_action.value} after validating prospect."
             primary_action = StrategicAction.VALIDATE
             reason_codes.append("LOW_TRUST_VALIDATION_INJECTED")
 
@@ -665,8 +764,10 @@ class PitchProXCoreIntelligenceEngine:
             should_prompt=True,
             strategic_objective=objective,
             primary_action=primary_action,
+            strategic_posture="explore",
             secondary_action=secondary_action,
-            push_strength=push_st,
+            secondary_action_reason=secondary_reason,
+            push_strength=PushStrengthValue("low", legacy_alias=push_st),
             meeting_gate_open=context.meeting_gate_open,
             reason_codes=reason_codes,
             do_not_do=do_not_do,
@@ -737,12 +838,39 @@ class PitchProXCoreIntelligenceEngine:
             gate_st = "OPEN" if snapshot.conversion_gate.is_open else "CLOSED"
             unk = getattr(snapshot.conversion_gate, "unknown_conditions", [])
             evidence.append(f"Gate: {gate_st} (unknown: {unk if unk else 'none'})")
+        # Contact Compliance: Only include if compliance materially influenced this decision (Point 11)
+        material_compliance_reasons = {
+            "CONTACT_NOT_BEFORE_DECLARED", "HOLD_RESPECTED",
+            "PAST_CONTACT_FRICTION_HONORED", "HARD_BOUNDARY_ACTIVE", "COMPLIANCE_PRIORITY",
+            "BOUNDARY_SUSPECTED"
+        }
+        is_scheduling_or_closing = (
+            decision.primary_action == StrategicAction.COMMITMENT_CLOSE
+            or context.push_strength_state == "confirm_and_protect"
+            or context.conversion_confirmed
+            or getattr(snapshot.conversation_stage, "value", snapshot.conversation_stage) in ("scheduling", "closing")
+        )
+        is_utterance_contact_related = False
+        if turn_text:
+            t_low = turn_text.lower()
+            if any(k in t_low for k in ("text", "call", "morning", "afternoon", "evening", "contact", "reach", "email", "phone")):
+                is_utterance_contact_related = True
+        elif turn_id and any(p.source_turn_id == turn_id for p in snapshot.contact_compliance.contact_preferences if p.source_turn_id):
+            is_utterance_contact_related = True
+
+        reasons_set = set(decision.reason_codes)
+        is_compliance_influential = (
+            bool(material_compliance_reasons.intersection(reasons_set))
+            or is_scheduling_or_closing
+            or is_utterance_contact_related
+        )
+
         if snapshot.contact_compliance:
-            if snapshot.contact_compliance.hard_boundary_active:
+            if snapshot.contact_compliance.hard_boundary_active and ("HARD_BOUNDARY_ACTIVE" in reasons_set or "COMPLIANCE_PRIORITY" in reasons_set):
                 evidence.append("Hard boundary: ACTIVE")
-            elif snapshot.contact_compliance.boundary_suspected:
+            elif snapshot.contact_compliance.boundary_suspected and "BOUNDARY_SUSPECTED" in reasons_set:
                 evidence.append("Boundary suspected: AMBIGUOUS")
-            if snapshot.contact_compliance.contact_preferences:
+            if is_compliance_influential and snapshot.contact_compliance.contact_preferences:
                 evidence.append(f"Contact preferences: {len(snapshot.contact_compliance.contact_preferences)} active")
 
         decision.evidence_considered = evidence

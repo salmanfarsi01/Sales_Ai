@@ -10,6 +10,7 @@ from .conversation_state_models import PushStrengthState
 
 class StrategicAction(str, Enum):
     WAIT_SILENCE = "wait_silence"
+    HOLD = "hold"
     ACKNOWLEDGE = "acknowledge"
     CLARIFY = "clarify"
     VALIDATE = "validate"
@@ -31,6 +32,55 @@ class StrategicAction(str, Enum):
 
     def __hash__(self) -> int:
         return hash(self.value)
+
+
+class PushStrengthValue(str):
+    """Encapsulates independent push pressure (none/low/moderate/high) with backward-compatible legacy aliasing."""
+    _legacy_alias: Optional[str] = None
+
+    def __new__(cls, value: str, legacy_alias: Optional[str] = None):
+        str_val = str(value)
+        # If passed legacy name directly, map to canonical pressure level while keeping legacy alias
+        if str_val == "confirm_and_protect" and not legacy_alias:
+            str_val = "none"
+            legacy_alias = "confirm_and_protect"
+        elif str_val in ("protect_and_shorten", "respect_record_exit") and not legacy_alias:
+            legacy_alias = str_val
+            str_val = "none"
+        elif str_val == "resolve_then_ask" and not legacy_alias:
+            legacy_alias = str_val
+            str_val = "low"
+        elif str_val in ("two_window_choice", "direct_ask") and not legacy_alias:
+            legacy_alias = str_val
+            str_val = "high"
+
+        obj = super().__new__(cls, str_val)
+        obj._legacy_alias = legacy_alias
+        return obj
+
+    @property
+    def legacy_alias(self) -> Optional[str]:
+        return getattr(self, "_legacy_alias", None)
+
+    def __eq__(self, other: Any) -> bool:
+        if super().__eq__(other):
+            return True
+        alias = getattr(self, "_legacy_alias", None)
+        if alias and str(other) == str(alias):
+            return True
+        return False
+
+    def __hash__(self) -> int:
+        return super().__hash__()
+
+    @classmethod
+    def __get_pydantic_core_schema__(cls, source_type: Any, handler: Any) -> Any:
+        from pydantic_core import core_schema
+        return core_schema.no_info_plain_validator_function(
+            lambda v: v if isinstance(v, cls) else (
+                cls(v["value"], v.get("legacy_alias")) if isinstance(v, dict) else cls(str(v))
+            )
+        )
 
 
 class Spec01ObjectionLadderStage(str, Enum):
@@ -65,8 +115,15 @@ class StrategicDecision(BaseModel):
     should_prompt: bool = True
     strategic_objective: str
     primary_action: StrategicAction
+    strategic_posture: str = Field(default="explore", description="High-level posture: protect, advance, defend, coordinate, explore (Point 6)")
     secondary_action: Optional[StrategicAction] = None
-    push_strength: PushStrengthState = "resolve_then_ask"
+    secondary_action_reason: Optional[str] = Field(default=None, description="Explicit justification for secondary technique (Point 9)")
+    push_strength: Union[PushStrengthValue, PushStrengthState, str] = Field(default="resolve_then_ask", description="Push strength pressure: none, low, moderate, high (Point 6)")
+    carried_forward_from_decision_id: Optional[str] = Field(default=None, description="Decision ID when strategy is continued from prior turn (Point 13)")
+    carried_forward_from_turn_id: Optional[int] = Field(default=None, description="Turn ID when strategy is continued from prior turn (Point 13)")
+    referenced_fact_ids: List[str] = Field(default_factory=list, description="IDs of facts influencing this decision (Point 12)")
+    referenced_objection_ids: List[str] = Field(default_factory=list, description="IDs of objections influencing this decision (Point 12)")
+    referenced_stakeholder_ids: List[str] = Field(default_factory=list, description="IDs of stakeholders influencing this decision (Point 12)")
     reason_codes: List[str] = Field(default_factory=list)
     do_not_do: List[str] = Field(default_factory=list)
     what_to_protect: List[str] = Field(default_factory=list)
@@ -112,16 +169,16 @@ class StrategicDecision(BaseModel):
         violation_reason: Optional[str] = None
 
         # 1. Closed Gate Constraint: When meeting gate is explicitly closed,
-        # close-style pushes (direct_ask, two_window_choice) and COMMITMENT_CLOSE are strictly forbidden.
+        # close-style pushes (direct_ask, two_window_choice, high) and COMMITMENT_CLOSE are strictly forbidden.
         if gate_open is False:
             if self.primary_action == StrategicAction.COMMITMENT_CLOSE:
                 violation_reason = f"primary_action cannot be COMMITMENT_CLOSE when meeting gate is closed (decision_id={self.decision_id})"
-            elif self.push_strength in ("direct_ask", "two_window_choice"):
+            elif self.push_strength in ("direct_ask", "two_window_choice") or (str(self.push_strength) == "high" and self.primary_action == StrategicAction.COMMITMENT_CLOSE):
                 violation_reason = f"push_strength cannot be close-style '{self.push_strength}' when meeting gate is closed (decision_id={self.decision_id})"
-            elif self.push_strength == "confirm_and_protect" and not is_confirmed:
+            elif (self.push_strength == "confirm_and_protect" or self.strategic_posture == "protect") and not is_confirmed and "CONVERSION_CONFIRMED" in self.reason_codes:
                 violation_reason = f"push_strength cannot be confirm_and_protect when gate is closed without a confirmed conversion (decision_id={self.decision_id})"
 
-        # 2. Action & Push Harmony: Close-style push recommendations (two_window_choice, direct_ask)
+        # 2. Action & Push Harmony: Close-style push recommendations (two_window_choice, direct_ask, high)
         # must NOT accompany non-closing actions.
         non_closing_actions = {
             StrategicAction.QUESTION,
@@ -132,19 +189,24 @@ class StrategicDecision(BaseModel):
             StrategicAction.REFRAME,
             StrategicAction.MIRROR,
             StrategicAction.DIFFERENTIATE,
+            StrategicAction.WAIT_SILENCE,
+            StrategicAction.HOLD,
         }
-        if not violation_reason and self.primary_action in non_closing_actions and self.push_strength in ("direct_ask", "two_window_choice"):
+        if not violation_reason and self.primary_action in non_closing_actions and (self.push_strength in ("direct_ask", "two_window_choice") or (str(self.push_strength) == "high" and self.primary_action != StrategicAction.COMMITMENT_CLOSE)):
             violation_reason = f"push_strength '{self.push_strength}' cannot accompany non-closing primary_action '{self.primary_action.value}' (decision_id={self.decision_id})"
 
-        # 3. Confirm and Protect requires a confirmed meeting (Item 4):
-        # Distinguish tentative from confirmed. confirm_and_protect applies ONLY after confirmed meeting.
-        if not violation_reason and self.push_strength == "confirm_and_protect" and is_confirmed is False:
+        # 3. Confirm and Protect requires a confirmed meeting:
+        if not violation_reason and (self.push_strength == "confirm_and_protect" or (self.strategic_posture == "protect" and "CONVERSION_CONFIRMED" in self.reason_codes)) and is_confirmed is False:
             violation_reason = f"push_strength 'confirm_and_protect' is invalid without a confirmed appointment (decision_id={self.decision_id})"
 
         # 4. COMMITMENT_CLOSE requires an affirmative closing push strength or milestone confirmation
         if not violation_reason and self.primary_action == StrategicAction.COMMITMENT_CLOSE:
-            if self.push_strength in ("respect_record_exit", "protect_and_shorten", "explore_conditional_terms"):
+            if self.push_strength in ("respect_record_exit", "protect_and_shorten", "explore_conditional_terms") or str(self.push_strength) == "none":
                 violation_reason = f"primary_action COMMITMENT_CLOSE is incompatible with push_strength '{self.push_strength}' (decision_id={self.decision_id})"
+
+        # 5. Stacking discipline (Point 9): Ensure secondary action always has justification
+        if self.secondary_action is not None and not self.secondary_action_reason:
+            self.secondary_action_reason = f"Reinforces '{self.secondary_action.value}' to support primary action '{self.primary_action.value}'"
 
         if violation_reason:
             if strict_raise:
