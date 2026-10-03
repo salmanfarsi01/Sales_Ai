@@ -601,7 +601,7 @@ class MeetingConversionGateEngine:
             reason5 = "Decision authority unverified with prospect (clean slate — awaiting prospect confirmation)"
         elif dec.primary_decision_maker or dm_facts or any(f.category == "property" and f.status == "active" for f in current_state.facts):
             cond5_status = "met"
-            cond5_ev = dm_fact_turns if dm_fact_turns else ([2] if (2 in prospect_turns and dec.primary_decision_maker == "sole_decision_maker") else ([bundle.turn_id] if bundle.speaker_id == "client" else (prospect_turns[-1:] if prospect_turns else [])))
+            cond5_ev = dm_fact_turns if dm_fact_turns else ([2] if (2 in prospect_turns and "sole" in str(dec.primary_decision_maker).lower()) else ([bundle.turn_id] if bundle.speaker_id == "client" else (prospect_turns[-1:] if prospect_turns else [])))
             reason5 = f"Decision authority present and aligned ({dec.primary_decision_maker or 'self-authorized'})"
         else:
             cond5_status = "unknown"
@@ -1108,6 +1108,41 @@ class MeetingConversionGateEngine:
             confidence=conf,
         )
 
+    def _resolve_conversion_participants(
+        self,
+        current_state: ConversationStateSnapshot,
+        bundle: BehavioralSignalInputBundle,
+        previous_event: Optional[ConversionEventObject] = None,
+    ) -> List[str]:
+        base = ["Client", "Agent"]
+        if current_state and current_state.decision_structure:
+            for s in current_state.decision_structure.stakeholders:
+                label = s.role.title() if s.role else "Stakeholder"
+                if s.presence == "confirmed_attending" or (
+                    bundle and s.role and s.role.lower() in bundle.utterance_text.lower()
+                ):
+                    if label not in base:
+                        base.append(label)
+        if bundle and bundle.speaker_id == "client":
+            t_lower = bundle.utterance_text.lower()
+            if "wife" in t_lower and any(w in t_lower for w in ["there", "attend", "join", "come", "with me", "both"]):
+                if "Wife" not in base:
+                    base.append("Wife")
+            elif "husband" in t_lower and any(w in t_lower for w in ["there", "attend", "join", "come", "with me", "both"]):
+                if "Husband" not in base:
+                    base.append("Husband")
+            elif "spouse" in t_lower and any(w in t_lower for w in ["there", "attend", "join", "come", "with me", "both"]):
+                if "Spouse" not in base:
+                    base.append("Spouse")
+            elif "partner" in t_lower and any(w in t_lower for w in ["there", "attend", "join", "come", "with me", "both"]):
+                if "Partner" not in base:
+                    base.append("Partner")
+        if previous_event and previous_event.participants:
+            for p in previous_event.participants:
+                if p not in base:
+                    base.append(p)
+        return base
+
     def evaluate_conversion_event(
         self,
         bundle: BehavioralSignalInputBundle,
@@ -1315,7 +1350,7 @@ class MeetingConversionGateEngine:
                         status=ConversionEventStatus.TENTATIVE,
                         start_at=tentative_slot,
                         location_or_format="Property Address" if conv_type == "property_walkthrough" else "Scheduled Meeting",
-                        participants=["Client", "Agent"],
+                        participants=self._resolve_conversion_participants(current_state, bundle, previous_event),
                         confirmation_confidence=0.65,
                         source_turn_ids=sorted(list(set(previous_event.source_turn_ids + [bundle.turn_id]))),
                         blocking_items=[],
@@ -1333,7 +1368,7 @@ class MeetingConversionGateEngine:
                         status=ConversionEventStatus.TENTATIVE,
                         start_at=tentative_slot,
                         location_or_format="Property Address" if conv_type == "property_walkthrough" else "Scheduled Meeting",
-                        participants=["Client", "Agent"],
+                        participants=self._resolve_conversion_participants(current_state, bundle, previous_event),
                         confirmation_confidence=0.65,
                         source_turn_ids=sorted(list(set(previous_event.source_turn_ids + [bundle.turn_id]))),
                         blocking_items=[],
@@ -1348,7 +1383,7 @@ class MeetingConversionGateEngine:
                         status=ConversionEventStatus.TENTATIVE,
                         start_at=tentative_slot,
                         location_or_format="Property Address" if conv_type == "property_walkthrough" else "Scheduled Meeting",
-                        participants=["Client", "Agent"],
+                        participants=self._resolve_conversion_participants(current_state, bundle, previous_event),
                         confirmation_confidence=0.65,
                         source_turn_ids=[bundle.turn_id],
                         blocking_items=[],
@@ -1383,7 +1418,7 @@ class MeetingConversionGateEngine:
                             status=ConversionEventStatus.CONFIRMED,
                             start_at=extracted_time,
                             location_or_format="Property Address" if conv_type == "property_walkthrough" else "Scheduled Meeting",
-                            participants=["Client", "Agent"],
+                            participants=self._resolve_conversion_participants(current_state, bundle, previous_event),
                             confirmation_confidence=0.90,
                             source_turn_ids=sorted(list(set(previous_event.source_turn_ids + [bundle.turn_id]))),
                             blocking_items=[],
@@ -1401,7 +1436,7 @@ class MeetingConversionGateEngine:
                             status=ConversionEventStatus.CONFIRMED,
                             start_at=extracted_time,
                             location_or_format="Property Address" if conv_type == "property_walkthrough" else "Scheduled Meeting",
-                            participants=["Client", "Agent"],
+                            participants=self._resolve_conversion_participants(current_state, bundle, previous_event),
                             confirmation_confidence=0.90,
                             source_turn_ids=sorted(list(set(previous_event.source_turn_ids + [bundle.turn_id]))),
                             blocking_items=[],
@@ -1416,7 +1451,7 @@ class MeetingConversionGateEngine:
                             status=ConversionEventStatus.CONFIRMED,
                             start_at=extracted_time,
                             location_or_format="Property Address" if conv_type == "property_walkthrough" else "Scheduled Meeting",
-                            participants=["Client", "Agent"],
+                            participants=self._resolve_conversion_participants(current_state, bundle, previous_event),
                             confirmation_confidence=0.90,
                             source_turn_ids=[bundle.turn_id],
                             blocking_items=[],
@@ -1435,7 +1470,7 @@ class MeetingConversionGateEngine:
                 status=ConversionEventStatus.ELIGIBLE,
                 start_at=previous_event.start_at if previous_event else None,
                 location_or_format=previous_event.location_or_format if previous_event else None,
-                participants=previous_event.participants if previous_event else ["Client", "Agent"],
+                participants=self._resolve_conversion_participants(current_state, bundle, previous_event),
                 confirmation_confidence=0.60,
                 source_turn_ids=sorted(list(set((previous_event.source_turn_ids if previous_event else []) + [bundle.turn_id]))),
                 blocking_items=[],

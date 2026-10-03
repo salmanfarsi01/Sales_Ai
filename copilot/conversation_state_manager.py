@@ -285,9 +285,16 @@ class ConversationStateManager:
         # 1. Update Dimensions (Gated by Materiality)
         if "dimensions" in materiality.affected_targets:
             commit_val, commit_conf = self._compute_commitment(bundle)
+            trust_drivers = getattr(bundle.trust, "drivers", [])
+            trust_is_measured = (
+                bundle.trust.score != 0.50
+                or getattr(bundle.trust, "is_measured", False)
+                or any("confidence" not in str(d).lower() for d in trust_drivers)
+            )
             new_dims = DimensionScores(
                 trust=bundle.trust.score,
                 trust_confidence=bundle.trust.confidence,
+                trust_measured=trust_is_measured,
                 emotion_valence=bundle.emotion.expressed_valence,
                 emotion_tension=bundle.emotion.tension_level,
                 emotion_confidence=bundle.emotion.confidence,
@@ -1266,6 +1273,8 @@ class ConversationStateManager:
             has_absent = any(s.presence == "absent" for s in new_stakeholders)
             if not has_absent:
                 result["decision_maker_present"] = True
+                result["co_decision_required"] = True
+                result["primary_decision_maker"] = "sole decision maker, spouse confirmed attending"
 
         # 2. Direct absent decision maker patterns
         elif any(re.search(pat, text) for pat in ABSENT_DECISION_MAKER_PATTERNS):
@@ -1298,6 +1307,8 @@ class ConversationStateManager:
 
             result["decision_maker_present"] = False
             result["stakeholders"] = existing
+            result["co_decision_required"] = True
+            result["primary_decision_maker"] = "sole decision maker, spouse required for final approval"
 
         # 2. Affirmative confirmation of prior salesperson inquiry about third-party stakeholder
         elif (
@@ -1325,6 +1336,8 @@ class ConversationStateManager:
 
             result["decision_maker_present"] = False
             result["stakeholders"] = existing
+            result["co_decision_required"] = True
+            result["primary_decision_maker"] = "sole decision maker, spouse required for final approval"
 
         # 3. Sole decision maker declaration (e.g. Turn 2)
         elif any(re.search(p, text) for p in [
@@ -1335,6 +1348,7 @@ class ConversationStateManager:
             if not self.current_state.decision_structure.stakeholders:
                 result["decision_maker_present"] = True
                 result["primary_decision_maker"] = "sole_decision_maker"
+                result["co_decision_required"] = False
 
         # 4. Moving timeline horizon & urgency level (e.g. Turn 4)
         if any(re.search(p, text) for p in [

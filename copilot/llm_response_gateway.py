@@ -274,8 +274,8 @@ class LLMResponseGateway:
                     elif fact := snapshot.get_active_fact("confirmed_meeting_time"):
                         slot = fact.fact_value
                 if slot:
-                    return f"Perfect, I have {slot} confirmed on my calendar. I will see you both then."
-                return "Perfect, I have that confirmed on my calendar. I will see you both then."
+                    return f"Perfect, I've noted {slot} for us. I will see you both then."
+                return "Perfect, I have that noted down for us. I will see you both then."
             return "I completely understand where you're coming from."
         elif action == StrategicAction.CLARIFY:
             return "Could you share a little more about what would make the biggest difference for your situation?"

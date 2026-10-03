@@ -715,7 +715,13 @@ class PitchProXCoreIntelligenceEngine:
         if turn_text:
             cleaned_text = turn_text.strip().replace("\n", " ")
             evidence.append(f'Turn utterance ({turn_speaker}): "{cleaned_text[:80]}"')
-        evidence.append(f"Trust: {context.trust_score:.0f}% (confidence: {snapshot.dimensions.trust_confidence:.2f})")
+
+        # Differentiate measured trust from default baseline (Client Group 1 Point 5)
+        is_trust_measured = getattr(snapshot.dimensions, "trust_measured", False) or (context.trust_score != 50.0)
+        if is_trust_measured:
+            evidence.append(f"Trust: {context.trust_score:.0f}% (measured, confidence: {snapshot.dimensions.trust_confidence:.2f})")
+        else:
+            evidence.append(f"Trust: {context.trust_score:.0f}% (default, unmeasured)")
 
         # Insufficient evidence display: Show UNKNOWN instead of misleading 0.0%
         has_insufficient_ev = (snapshot.readiness and snapshot.readiness.insufficient_evidence) or (snapshot.readiness and snapshot.readiness.readiness_score is None)

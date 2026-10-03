@@ -100,6 +100,7 @@ class DecisionStakeholder(BaseModel):
 class DecisionStructure(BaseModel):
     primary_decision_maker: Optional[str] = None
     decision_maker_present: bool = True
+    co_decision_required: bool = False
     stakeholders: List[DecisionStakeholder] = Field(default_factory=list)
     timeline_horizon: Optional[str] = None
     urgency_level: Literal["low", "medium", "high", "critical", "unknown"] = "unknown"
@@ -238,6 +239,7 @@ class PersistentFactRecord(BaseModel):
 class DimensionScores(BaseModel):
     trust: float = Field(0.5, ge=0.0, le=1.0)
     trust_confidence: float = Field(0.7, ge=0.0, le=1.0)
+    trust_measured: bool = False
     emotion_valence: float = Field(0.0, ge=-1.0, le=1.0)
     emotion_tension: float = Field(0.0, ge=0.0, le=1.0)
     emotion_confidence: float = Field(0.7, ge=0.0, le=1.0)

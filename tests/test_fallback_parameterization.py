@@ -30,7 +30,7 @@ def test_deterministic_fallback_parameterizes_slot_from_decision():
     prompt_friday = gateway._deterministic_fallback(dec_friday)
     assert "Friday at 11am" in prompt_friday
     assert "Thursday" not in prompt_friday
-    assert prompt_friday == "Perfect, I have Friday at 11am confirmed on my calendar. I will see you both then."
+    assert prompt_friday == "Perfect, I've noted Friday at 11am for us. I will see you both then."
 
     # Test 2: Monday at 2pm
     dec_monday = StrategicDecision(
@@ -44,7 +44,7 @@ def test_deterministic_fallback_parameterizes_slot_from_decision():
     prompt_monday = gateway._deterministic_fallback(dec_monday)
     assert "Monday at 2pm" in prompt_monday
     assert "Thursday" not in prompt_monday
-    assert prompt_monday == "Perfect, I have Monday at 2pm confirmed on my calendar. I will see you both then."
+    assert prompt_monday == "Perfect, I've noted Monday at 2pm for us. I will see you both then."
 
 
 def test_deterministic_fallback_parameterizes_slot_from_snapshot_sources():
@@ -69,7 +69,7 @@ def test_deterministic_fallback_parameterizes_slot_from_snapshot_sources():
         ),
     )
     prompt_gate = gateway._deterministic_fallback(dec, snapshot=snap_gate)
-    assert prompt_gate == "Perfect, I have Wednesday at 10am confirmed on my calendar. I will see you both then."
+    assert prompt_gate == "Perfect, I've noted Wednesday at 10am for us. I will see you both then."
 
     # Source B: Active conversion event start_at
     snap_event = ConversationStateSnapshot(
@@ -84,7 +84,7 @@ def test_deterministic_fallback_parameterizes_slot_from_snapshot_sources():
         ],
     )
     prompt_event = gateway._deterministic_fallback(dec, snapshot=snap_event)
-    assert prompt_event == "Perfect, I have Tuesday at 4pm confirmed on my calendar. I will see you both then."
+    assert prompt_event == "Perfect, I've noted Tuesday at 4pm for us. I will see you both then."
 
     # Source C: Confirmed meeting time fact
     snap_fact = ConversationStateSnapshot(
@@ -101,13 +101,13 @@ def test_deterministic_fallback_parameterizes_slot_from_snapshot_sources():
         ],
     )
     prompt_fact = gateway._deterministic_fallback(dec, snapshot=snap_fact)
-    assert prompt_fact == "Perfect, I have Saturday morning confirmed on my calendar. I will see you both then."
+    assert prompt_fact == "Perfect, I've noted Saturday morning for us. I will see you both then."
 
     # Source D: No slot at all -> graceful time-neutral fallback (NEVER hardcodes Thursday)
     snap_empty = ConversationStateSnapshot(call_sid="call_empty", state_version=1)
     prompt_empty = gateway._deterministic_fallback(dec, snapshot=snap_empty)
     assert "Thursday" not in prompt_empty
-    assert prompt_empty == "Perfect, I have that confirmed on my calendar. I will see you both then."
+    assert prompt_empty == "Perfect, I have that noted down for us. I will see you both then."
 
 
 def test_commitment_close_two_window_choice_is_not_hardcoded():
@@ -147,13 +147,13 @@ def test_production_error_and_timeout_circuit_breaker():
 
     prompt = gateway.generate_prompt(decision=dec, snapshot=snapshot, facts=[])
     # Verifies graceful catch and dynamic slot injection even during LLM timeout
-    assert prompt.text == "Perfect, I have Friday at 11am confirmed on my calendar. I will see you both then."
+    assert prompt.text == "Perfect, I've noted Friday at 11am for us. I will see you both then."
     assert "Thursday" not in prompt.text
 
     # Rate limit test (HTTP 429)
     mock_llm_client.chat.completions.create.side_effect = RuntimeError("HTTP 429 Too Many Requests: Rate limit exceeded")
     prompt_ratelimit = gateway.generate_prompt(decision=dec, snapshot=snapshot, facts=[])
-    assert prompt_ratelimit.text == "Perfect, I have Friday at 11am confirmed on my calendar. I will see you both then."
+    assert prompt_ratelimit.text == "Perfect, I've noted Friday at 11am for us. I will see you both then."
 
 
 def test_early_turn_outage_does_not_fire_conversion_confirmed_fallback():
