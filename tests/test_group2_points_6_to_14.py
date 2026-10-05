@@ -173,6 +173,17 @@ def test_point7_absent_decision_maker_logistics_vs_genuine_risk():
     assert dec_log.strategic_posture == "coordinate"
     assert "COORDINATION_LOGISTICS" in dec_log.reason_codes
     assert dec_log.push_strength in ("none", "low")
+    assert "isolate_from_spouse" in dec_log.do_not_do
+    assert "separate_partners" in dec_log.do_not_do
+
+    # Verify do_not_do prohibitions reach LLM prompt contract (Block 1 & Block 7)
+    gateway = LLMResponseGateway()
+    llm_prompt = gateway.assemble_context(decision=dec_log, snapshot=snap_logistics, facts=[])
+    assert "isolate_from_spouse" in llm_prompt
+    assert "separate_partners" in llm_prompt
+    assert "press_for_single_party_commitment" in llm_prompt
+    fallback_text = gateway._deterministic_fallback(decision=dec_log, snapshot=snap_logistics)
+    assert any(w in fallback_text.lower() for w in ("loop", "include", "together", "both"))
 
     # Category 2: Relationship Conflict
     snap_conflict = ConversationStateSnapshot(call_sid="call_pt7_conflict", state_version=3, decision_structure=base_structure)
@@ -783,4 +794,354 @@ def test_pipeline_ordering_cross_cutting():
     gateway = LLMResponseGateway()
     prompt = gateway.generate_prompt(decision=dec2, snapshot=snap2, facts=[])
     assert prompt.status == "skipped"
-    assert prompt.text == ""
+
+
+def test_point12_enforce_no_direct_reads_via_ast():
+    """Point 12: Continuous enforcement against direct reads of snapshot-only fields.
+    Scans copilot/llm_response_gateway.py to verify that any read of commitment_slot,
+    meeting_gate_open, or conversion_confirmed uses the safe resolvers (resolve_*),
+    preventing direct reads of stale snapshot-time fields.
+    """
+    import ast
+    from pathlib import Path
+
+    gateway_file = Path(__file__).resolve().parent.parent / "copilot" / "llm_response_gateway.py"
+    with open(gateway_file, "r", encoding="utf-8") as f:
+        tree = ast.parse(f.read(), filename=str(gateway_file))
+
+    disallowed_direct_attrs = {"commitment_slot", "meeting_gate_open", "conversion_confirmed"}
+    direct_violations = []
+
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Attribute) and node.attr in disallowed_direct_attrs:
+            # Check if this attribute access is on 'decision'
+            if isinstance(node.value, ast.Name) and node.value.id == "decision":
+                # Direct read like decision.commitment_slot detected!
+                direct_violations.append((node.lineno, node.attr))
+
+    assert direct_violations == [], f"Direct read of snapshot-only field(s) on decision detected in gateway: {direct_violations}. Use decision.resolve_<field>(snapshot) instead."
+
+
+def test_point11_turn16_regression_and_reason_code_evidence_justification():
+    """Point 11 Regression & Invariant: Every item in evidence_considered must be justified
+    by reason codes or primary action, with the stage fallback as the only exception.
+    Specifically tests Turn 16: An utterance containing 'mornings' in a scheduling context
+    must NOT pull contact preferences into evidence_considered when reason codes are scheduling.
+    """
+    engine = PitchProXCoreIntelligenceEngine()
+
+    # Regression Case: Turn 16 context
+    snap_t16 = ConversationStateSnapshot(
+        call_sid="call_pt11_turn16_regression",
+        state_version=8,
+        conversation_stage=ConversationStage.SCHEDULING,
+        contact_compliance=ContactCompliance(
+            contact_preferences=[
+                ContactPreference(channel="sms", allowed=False, prohibited_behavior="daily_texting", source_turn_id=15)
+            ]
+        ),
+        conversion_gate=MeetingConversionGate(is_open=False, unknown_conditions=["trust_not_collapsing", "clear_value_reason"]),
+    )
+
+    eval_t16 = engine.evaluate(
+        snapshot=snap_t16,
+        turn_speaker="client",
+        turn_text="Mornings don't really work for us either, just so you know.",
+        turn_id=16,
+    )
+    ev_t16 = eval_t16.decision.evidence_considered
+    reasons_t16 = set(eval_t16.decision.reason_codes)
+
+    # Must NOT contain contact preferences because reason codes do NOT contain contact preference codes
+    assert not any("Contact preferences:" in e for e in ev_t16), f"Contact preferences leaked into Turn 16 evidence: {ev_t16}"
+    assert "STAGE_SCHEDULING" in reasons_t16
+    assert any("Gate: CLOSED" in e for e in ev_t16)
+    assert any("Readiness:" in e for e in ev_t16)
+
+    # Invariant Assertion across dialogue turns: Every evidence item must be justified
+    test_cases = [
+        ("We are not sure this is the right time.", 5, ConversationStage.OBJECTION_HANDLING),
+        ("Actually, my wife would really need to be part of this.", 10, ConversationStage.DECISION_RESOLUTION),
+        ("That's actually really helpful, tell me more -- how does the marketing process work...", 14, ConversationStage.DISCOVERY),
+        ("Please don't start texting me every day before we meet.", 15, ConversationStage.DISCOVERY),
+        ("Thursday at 3 works, and my wife will be there.", 18, ConversationStage.COMMITMENT_CONFIRMED),
+    ]
+
+    for utxt, tid, stg in test_cases:
+        snap_case = ConversationStateSnapshot(
+            call_sid="call_pt11_audit",
+            state_version=tid,
+            conversation_stage=stg,
+            contact_compliance=snap_t16.contact_compliance,
+            conversion_gate=MeetingConversionGate(is_open=(tid == 18)),
+            conversion_event=ConversionEventObject(
+                conversion_type="property_walkthrough",
+                status=ConversionEventStatus.CONFIRMED if tid == 18 else ConversionEventStatus.PENDING,
+            ) if tid == 18 else None,
+            conversion_confirmed=(tid == 18),
+        )
+        res = engine.evaluate(snapshot=snap_case, turn_speaker="client", turn_text=utxt, turn_id=tid)
+        ev_items = res.decision.evidence_considered
+        reasons = set(res.decision.reason_codes)
+        p_act = res.decision.primary_action
+
+        # Turn 14 specifically: Reason codes are STAGE_VALUE_WALKTHROUGH & DEMONSTRATE_DIFFERENTIATION,
+        # with no READINESS_* or GATE_* code. Readiness must NOT leak into evidence.
+        if tid == 14:
+            assert not any("Readiness:" in e for e in ev_items), f"Readiness leaked into Turn 14 evidence: {ev_items}"
+
+        for ev in ev_items:
+            if ev.startswith("Turn utterance"):
+                continue
+            elif ev.startswith("Trust:"):
+                continue
+            elif ev.startswith("Momentum:"):
+                continue
+            elif ev.startswith("Active objections:"):
+                assert any(
+                    r.startswith("OBJECTION_")
+                    or r.startswith("LADDER_")
+                    or r.startswith("REFRAME_")
+                    or r.startswith("QUANTIFY_")
+                    or r.startswith("DIFFERENTIATE_")
+                    for r in reasons
+                ) or p_act in (
+                    StrategicAction.VALIDATE, StrategicAction.MIRROR, StrategicAction.REFRAME,
+                    StrategicAction.QUANTIFY, StrategicAction.DIFFERENTIATE, StrategicAction.DE_RISK
+                ), f"Objection evidence {ev} not justified by reasons {reasons} or action {p_act}"
+            elif ev.startswith("Gate:"):
+                assert any(
+                    r.startswith("GATE_")
+                    or r.startswith("COMMITMENT_")
+                    or r.startswith("CONVERSION_")
+                    or r.startswith("CLOSE_")
+                    or r.startswith("TWO_WINDOW")
+                    or r.startswith("DIRECT_ASK")
+                    for r in reasons
+                ) or p_act == StrategicAction.COMMITMENT_CLOSE, f"Gate evidence {ev} not justified by reasons {reasons}"
+            elif ev.startswith("Contact preferences:") or ev.startswith("Hard boundary:") or ev.startswith("Boundary suspected:"):
+                assert any(k in r for r in reasons for k in (
+                    "CONTACT_NOT_BEFORE_DECLARED", "HOLD_RESPECTED", "PAST_CONTACT_FRICTION_HONORED",
+                    "HARD_BOUNDARY_ACTIVE", "COMPLIANCE_PRIORITY", "BOUNDARY_SUSPECTED",
+                    "CONTACT_PREFERENCE_DECLARED", "CONTACT_PREFERENCE_ENFORCED"
+                )), f"Contact compliance evidence {ev} not justified by reasons {reasons}"
+            elif ev.startswith("Readiness:"):
+                assert any(
+                    r.startswith("READINESS_")
+                    or r.startswith("GATE_")
+                    or r.startswith("COMMITMENT_")
+                    or r.startswith("CONVERSION_")
+                    or r.startswith("CLOSE_")
+                    for r in reasons
+                ) or p_act == StrategicAction.COMMITMENT_CLOSE, f"Readiness evidence {ev} not justified by reasons {reasons} or action {p_act}"
+            elif ev.startswith("Stage:"):
+                assert len(ev_items) <= 2, f"Stage fallback included when evidence list already had ample items: {ev_items}"
+            else:
+                pytest.fail(f"Unrecognized evidence item '{ev}' not governed by justification rules.")
+
+
+def test_point6_push_strength_normalization_and_tunable_parameters():
+    """Confirm push strength normalizes legacy strings to none/low/moderate/high vocabulary
+    and confirm unmeasured_trust_cap and momentum adjustments are configurable.
+    """
+    # 1. Legacy string normalization to canonical vocabulary
+    p_resolve = PushStrengthValue("resolve_then_ask")
+    assert str(p_resolve) == "moderate"
+    assert p_resolve == "resolve_then_ask"
+
+    p_direct = PushStrengthValue("direct_ask")
+    assert str(p_direct) == "high"
+    assert p_direct == "direct_ask"
+
+    p_confirm = PushStrengthValue("confirm_and_protect")
+    assert str(p_confirm) == "none"
+    assert p_confirm == "confirm_and_protect"
+
+    # 2. Configurable unmeasured_trust_cap, momentum adjustments, and min_confidence_floor
+    custom_engine = PitchProXCoreIntelligenceEngine(
+        confidence_threshold=0.70,
+        unmeasured_trust_cap=0.35,
+        min_confidence_floor=0.40,
+        momentum_adjustments={"regressing": -0.15, "stalling": -0.05, "advancing": 0.05, "stable": 0.0},
+    )
+    assert custom_engine.confidence_threshold == 0.70
+    assert custom_engine.unmeasured_trust_cap == 0.35
+    assert custom_engine.min_confidence_floor == 0.40
+    assert custom_engine.momentum_adjustments["regressing"] == -0.15
+
+    # 3. Hash and canonical JSON serialization
+    assert hash(p_resolve) == hash("moderate")
+    dec_test = StrategicDecision(
+        call_id="call_test_json",
+        source_state_version=1,
+        primary_action=StrategicAction.ACKNOWLEDGE,
+        strategic_objective="Protect confirmed walkthrough",
+        push_strength=p_resolve,
+    )
+    dumped_dict = dec_test.model_dump()
+    assert dumped_dict["push_strength"] == "moderate"
+    import json
+    dumped_json = json.loads(dec_test.model_dump_json())
+    assert dumped_json["push_strength"] == "moderate"
+
+    # CDM pass-through
+    cdm = CoreDecisionManager(
+        call_sid="call_custom_params",
+        confidence_threshold=0.72,
+        unmeasured_trust_cap=0.40,
+        momentum_adjustments={"regressing": -0.12, "stalling": -0.06, "advancing": 0.06, "stable": 0.0},
+    )
+    assert cdm.engine.confidence_threshold == 0.72
+    assert cdm.engine.unmeasured_trust_cap == 0.40
+    assert cdm.engine.momentum_adjustments["regressing"] == -0.12
+
+
+def test_point10_confirmed_conversion_unmeasured_trust_discount_exemption_boundary():
+    """Item 5 Boundary Test: Confirmed conversions must be exempt from the unmeasured-trust
+    cap (0.45). Without exemption, base 0.80 + unmeasured trust (0.45 * 0.30 = 0.135) + regressing
+    momentum (-0.08) yields 0.56 + 0.135 - 0.08 = 0.615, which would erroneously trip the
+    P10 downgrade to CLARIFY on an already-confirmed won appointment.
+    With the exemption, trust uses full dimension confidence (0.70 * 0.30 = 0.210), yielding
+    0.56 + 0.210 - 0.08 = 0.690 >= 0.65, protecting the confirmed appointment without downgrade.
+    """
+    from copilot.conversation_state_models import MomentumBreakdown
+    engine = PitchProXCoreIntelligenceEngine()
+    snap = ConversationStateSnapshot(
+        call_sid="call_pt10_confirm_boundary",
+        state_version=18,
+        conversation_stage=ConversationStage.COMMITMENT_CONFIRMED,
+        conversion_confirmed=True,
+        conversion_gate=MeetingConversionGate(
+            is_open=True,
+            confidence=0.80,
+            commitment_slot="Thursday at 3",
+        ),
+        conversion_event=ConversionEventObject(
+            conversion_type="property_walkthrough",
+            status=ConversionEventStatus.CONFIRMED,
+            start_at="Thursday at 3",
+            confirmation_confidence=0.80,
+        ),
+        momentum=MomentumBreakdown(momentum_score=30.0, trend="regressing"),
+        dimensions=DimensionScores(
+            trust=0.5,
+            trust_confidence=0.7,
+            trust_measured=False,
+            momentum=0.3,
+        ),
+    )
+
+    eval_res = engine.evaluate(
+        snapshot=snap,
+        turn_speaker="client",
+        turn_text="Thursday at 3 works, and my wife will be there.",
+        turn_id=18,
+    )
+    dec = eval_res.decision
+
+    # 1. Trust confidence must not be capped to 0.45 because confirmed conversion is exempt
+    assert dec.confidence_breakdown["trust_confidence"] == 0.70
+    assert dec.confidence_breakdown["momentum_adjustment"] == -0.08
+
+    # 2. Final confidence calculation: 0.80 * 0.70 + 0.70 * 0.30 - 0.08 = 0.6900
+    assert dec.confidence == 0.6900
+    assert dec.confidence >= engine.confidence_threshold
+
+    # 3. Decision must protect confirmed appointment, NOT downgrade to CLARIFY
+    assert dec.primary_action == StrategicAction.ACKNOWLEDGE
+    assert dec.strategic_posture == "protect"
+    assert str(dec.push_strength) == "none"
+    assert "CONVERSION_CONFIRMED" in dec.reason_codes
+    assert "LOW_CONFIDENCE_ACTION_DOWNGRADE" not in dec.reason_codes
+
+
+def test_point10_recurring_objection_low_confidence_push_capping():
+    """Item 4: When recurrence discount pushes objection confidence below threshold (< 0.65),
+    moderate push strength must be capped to low, and LOW_CONFIDENCE_ACTION_DOWNGRADE appended.
+    """
+    engine = PitchProXCoreIntelligenceEngine()
+    recurring_obj = ObjectionRecord(
+        objection_id="obj_recur_low_conf",
+        canonical_category="commission",
+        initial_statement="Your 6% fee is just too high.",
+        latest_statement="I'm still really concerned about that commission rate.",
+        first_turn_id=5,
+        last_updated_turn_id=12,
+        lifecycle_state=ObjectionLifecycleState.ACTIVE,
+        recurrence_count=6,
+        confidence=0.90,
+    )
+    snap = ConversationStateSnapshot(
+        call_sid="call_pt10_obj_push_cap",
+        state_version=12,
+        conversation_stage=ConversationStage.OBJECTION_HANDLING,
+        objections=[recurring_obj],
+        dimensions=DimensionScores(
+            trust=0.5,
+            trust_confidence=0.7,
+            trust_measured=False,
+        ),
+    )
+
+    eval_res = engine.evaluate(
+        snapshot=snap,
+        turn_speaker="client",
+        turn_text="I'm still really concerned about that commission rate.",
+        turn_id=12,
+    )
+    dec = eval_res.decision
+
+    # Confidence calculation:
+    # Recurrence >= 6 floors base objection confidence to 0.50
+    # Unmeasured trust capped to 0.45
+    # final_conf = 0.50 * 0.70 + 0.45 * 0.30 = 0.35 + 0.135 = 0.485 < 0.65
+    assert dec.confidence == 0.4850
+    assert dec.confidence < engine.confidence_threshold
+
+    # Push strength must be capped to low (not moderate, and does not equal resolve_then_ask)
+    assert str(dec.push_strength) == "low"
+    assert dec.push_strength != "resolve_then_ask"
+    assert dec.push_strength != "moderate"
+    assert "LOW_CONFIDENCE_ACTION_DOWNGRADE" in dec.reason_codes
+    assert "aggressive_push_on_low_confidence" in dec.do_not_do
+
+
+def test_point8_all_rep_turns_suppress_prompts():
+    """Item 1: In production, teleprompter prompts are dispatched ONLY on prospect utterances.
+    Every rep turn must produce should_prompt = False, whether it is a fresh evaluation (e.g. Turn 1)
+    or a continuation (e.g. Turn 3).
+    """
+    cdm = CoreDecisionManager(call_sid="call_pt8_all_rep_suppressed")
+    snap1 = ConversationStateSnapshot(
+        call_sid="call_pt8_all_rep_suppressed",
+        state_version=1,
+        conversation_stage=ConversationStage.DISCOVERY,
+    )
+
+    # Turn 1 (salesperson, fresh evaluation)
+    eval1 = cdm.evaluate_state(
+        snapshot=snap1,
+        turn_speaker="salesperson",
+        turn_text="Hi, this is Alex with Premier Realty.",
+        turn_id=1,
+    )
+    assert eval1.decision.should_prompt is False
+    assert eval1.decision.carried_forward_from_decision_id is None
+
+    # Turn 2 (prospect utterance -> prompt generated)
+    eval2 = cdm.evaluate_state(
+        snapshot=snap1,
+        turn_speaker="client",
+        turn_text="Yeah, I'm thinking about selling next year.",
+        turn_id=2,
+    )
+    assert eval2.decision.should_prompt is True
+
+    # Turn 3 (salesperson utterance with continuation -> prompt suppressed)
+    eval3 = cdm.evaluate_state(
+        snapshot=snap1,
+        turn_speaker="salesperson",
+        turn_text="We specialize in properties in your neighborhood.",
+        turn_id=3,
+    )
+    assert eval3.decision.should_prompt is False

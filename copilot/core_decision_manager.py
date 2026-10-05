@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import logging
+import re
 import uuid
 from typing import Any, Dict, List, Optional, Tuple
 
@@ -207,12 +208,23 @@ class CoreDecisionManager:
         engine: Optional[PitchProXCoreIntelligenceEngine] = None,
         modifier_pipeline: Optional[StrategyModifierPipeline] = None,
         max_carried_turns: int = 2,
+        confidence_threshold: Optional[float] = None,
+        unmeasured_trust_cap: Optional[float] = None,
+        momentum_adjustments: Optional[Dict[str, float]] = None,
     ):
         if not call_sid:
             raise ValueError("call_sid must be explicitly specified; anonymous or shared singletons are prohibited.")
         self.call_sid = str(call_sid)
         self.lead_type = lead_type
-        self.engine = engine or PitchProXCoreIntelligenceEngine(lead_type=lead_type)
+        if engine is not None:
+            self.engine = engine
+        else:
+            self.engine = PitchProXCoreIntelligenceEngine(
+                lead_type=lead_type,
+                confidence_threshold=confidence_threshold,
+                unmeasured_trust_cap=unmeasured_trust_cap,
+                momentum_adjustments=momentum_adjustments,
+            )
         self.modifier_pipeline = modifier_pipeline or StrategyModifierPipeline()
         self.max_carried_turns = max_carried_turns
         self.decision_history: List[StrategicDecision] = []
@@ -274,7 +286,7 @@ class CoreDecisionManager:
                 or prev_dec.strategic_posture == "coordinate"
                 or (bool(prev_dec.final_prompt_text) and prev_dec.final_prompt_text.strip().endswith("?"))
                 or (bool(prev_dec.gateway_fallback_stub) and prev_dec.gateway_fallback_stub.strip().endswith("?"))
-                or any(k in prev_dec.strategic_objective.lower() for k in ("ask", "inquire", "propose", "schedule", "question", "verify"))
+                or bool(re.search(r"\b(ask|inquire|propose|schedule|question|verify)\b", prev_dec.strategic_objective, re.I))
             )
 
         # Staleness limit: Max consecutive carried-forward turns before requiring fresh strategic evaluation
@@ -334,6 +346,44 @@ class CoreDecisionManager:
             playbook=playbook,
             calibration=calibration,
         )
+
+        # Rep turn continuation check (Point 13 & Point 8):
+        # If rep is speaking and the resulting strategy is an unchanged continuation of prev_dec,
+        # mark as carried forward and suppress prompt generation to prevent stale/redundant guidance.
+        if (
+            turn_speaker in ("salesperson", "rep", "agent")
+            and prev_dec is not None
+            and not playbook
+            and not calibration
+            and final_decision.primary_action == prev_dec.primary_action
+            and final_decision.strategic_posture == prev_dec.strategic_posture
+            and final_decision.push_strength == prev_dec.push_strength
+            and final_decision.secondary_action == prev_dec.secondary_action
+            and set(final_decision.reason_codes) == set(r for r in prev_dec.reason_codes if r != "STRATEGY_CARRIED_FORWARD")
+        ):
+            carried_dec = prev_dec.model_copy(deep=True)
+            carried_dec.decision_id = f"dec_{uuid.uuid4().hex[:10]}"
+            carried_dec.source_turn_id = effective_turn_id
+            carried_dec.utterance_turn_id = effective_turn_id
+            carried_dec.metrics_source_turn_id = effective_turn_id
+            carried_dec.source_state_version = snapshot.state_version
+            carried_dec.source_event_id = effective_event_id
+            carried_dec.carried_forward_from_decision_id = prev_dec.carried_forward_from_decision_id or prev_dec.decision_id
+            carried_dec.carried_forward_from_turn_id = prev_dec.carried_forward_from_turn_id or prev_dec.source_turn_id
+            carried_dec.should_prompt = False  # Point 8: Rep already spoke; suppress prompt generation
+            if "STRATEGY_CARRIED_FORWARD" not in carried_dec.reason_codes:
+                carried_dec.reason_codes.append("STRATEGY_CARRIED_FORWARD")
+            carried_dec.strategic_objective = f"Continuation from Turn {carried_dec.carried_forward_from_turn_id}: {prev_dec.strategic_objective}"
+            if carried_dec.evidence_considered:
+                carried_dec.evidence_considered = [f'Turn utterance ({turn_speaker}): "{turn_text.strip()}"'] + [e for e in carried_dec.evidence_considered if not e.startswith("Turn utterance")]
+            else:
+                carried_dec.evidence_considered = [f'Turn utterance ({turn_speaker}): "{turn_text.strip()}"']
+            final_decision = carried_dec
+
+        # Prompt dispatch happens only on prospect utterances (Point 8 invariant)
+        # Suppress prompts on all rep turns whether continuation or fresh evaluation
+        if turn_speaker in ("salesperson", "rep", "agent"):
+            final_decision.should_prompt = False
 
         # Ensure deep-copied immutable decision snapshot per turn
         frozen_decision = final_decision.model_copy(deep=True)

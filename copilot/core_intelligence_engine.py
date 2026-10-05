@@ -24,17 +24,35 @@ from .core_intelligence_models import (
 LOGGER = logging.getLogger("copilot.core_intelligence_engine")
 
 DEFAULT_CONFIDENCE_THRESHOLD = 0.65
+DEFAULT_UNMEASURED_TRUST_CAP = 0.45
+DEFAULT_MIN_CONFIDENCE_FLOOR = 0.40
+DEFAULT_MOMENTUM_ADJUSTMENTS: Dict[str, float] = {
+    "advancing": 0.04,
+    "stable": 0.0,
+    "stalling": -0.04,
+    "regressing": -0.08,
+}
 
 
 class PitchProXCoreIntelligenceEngine:
     """Core intelligence engine interpreting ConversationState and generating StrategicDecision."""
 
-    def __init__(self, lead_type: str = "general", confidence_threshold: Optional[float] = None):
+    def __init__(
+        self,
+        lead_type: str = "general",
+        confidence_threshold: Optional[float] = None,
+        unmeasured_trust_cap: Optional[float] = None,
+        momentum_adjustments: Optional[Dict[str, float]] = None,
+        min_confidence_floor: Optional[float] = None,
+    ):
         self.lead_type = lead_type
         if confidence_threshold is not None:
             self.confidence_threshold = float(confidence_threshold)
         else:
             self.confidence_threshold = float(os.environ.get("CORE_CONFIDENCE_THRESHOLD", str(DEFAULT_CONFIDENCE_THRESHOLD)))
+        self.unmeasured_trust_cap = float(unmeasured_trust_cap) if unmeasured_trust_cap is not None else DEFAULT_UNMEASURED_TRUST_CAP
+        self.momentum_adjustments = dict(momentum_adjustments) if momentum_adjustments is not None else dict(DEFAULT_MOMENTUM_ADJUSTMENTS)
+        self.min_confidence_floor = float(min_confidence_floor) if min_confidence_floor is not None else DEFAULT_MIN_CONFIDENCE_FLOOR
 
     def evaluate(
         self,
@@ -54,14 +72,28 @@ class PitchProXCoreIntelligenceEngine:
             eval_res = self._build_contact_not_before_decision(snapshot, context, turn_timestamp_ms)
         elif context.boundary_suspected:
             eval_res = self._build_boundary_suspected_decision(snapshot, context, turn_timestamp_ms)
+        # 1b. Turn-level contact preference or boundary declared on this turn
+        elif self._is_contact_preference_turn(snapshot, turn_text, turn_id):
+            eval_res = self._build_contact_preference_decision(snapshot, context, turn_timestamp_ms)
         # 2. Confirmed Conversion Protection Gate (Item 9: confirm_and_protect)
         elif context.conversion_confirmed or context.push_strength_state == "confirm_and_protect":
             eval_res = self._build_confirm_protect_decision(snapshot, context, turn_timestamp_ms)
         # 3. Active Objection Lifecycle and Spec 01 §6 6-Level Depth Ladder
-        elif unresolved_objections:
+        elif unresolved_objections and (
+            any(o.lifecycle_state in (ObjectionLifecycleState.ACTIVE, "active", "reactivated") for o in unresolved_objections)
+            or snapshot.conversation_stage == ConversationStage.OBJECTION_HANDLING
+            or (
+                any(o.lifecycle_state in (ObjectionLifecycleState.PARTIALLY_ADDRESSED, "partially_resolved", "clarified") for o in unresolved_objections)
+                and snapshot.conversation_stage not in (ConversationStage.SCHEDULING, ConversationStage.COMMITMENT_CONFIRMED, ConversationStage.VALUE_WALKTHROUGH)
+            )
+        ):
             eval_res = self._build_objection_decision(snapshot, context, unresolved_objections, turn_timestamp_ms)
         # 4. Multi-Stakeholder and Absent Decision Maker Gate (Spec 09 §3)
-        elif not context.decision_maker_present:
+        elif not context.decision_maker_present and (
+            snapshot.conversation_stage == ConversationStage.DECISION_RESOLUTION
+            or any(w in (turn_text or "").lower() for w in ("wife", "husband", "spouse", "partner", "decision maker", "sign off", "alone", "both of us", "consult", "lawyer", "attorney", "divorce"))
+            or (turn_id is None and not turn_text)
+        ):
             eval_res = self._build_absent_stakeholder_decision(snapshot, context, turn_timestamp_ms, turn_text=turn_text)
         # 5. Conversion Gate and Push Strength Alignment (Spec 09 §6, §7)
         elif context.meeting_gate_open:
@@ -70,10 +102,12 @@ class PitchProXCoreIntelligenceEngine:
         else:
             eval_res = self._build_stage_default_decision(snapshot, context, turn_timestamp_ms)
 
-        self._apply_contact_compliance_constraints(snapshot, eval_res.decision, eval_res.context)
+        self._apply_contact_compliance_constraints(snapshot, eval_res.decision, eval_res.context, turn_text=turn_text, turn_id=turn_id)
         self._apply_cross_metric_consistency_rules(snapshot, eval_res.decision, eval_res.context)
         self._finalize_decision_confidence(snapshot, eval_res.decision, eval_res.context)
         self._attach_full_trace(eval_res.decision, eval_res.context, snapshot, turn_speaker, turn_text, turn_id=turn_id)
+        if turn_speaker in ("salesperson", "rep", "agent"):
+            eval_res.decision.should_prompt = False
         return eval_res
 
     def _build_context(self, snapshot: ConversationStateSnapshot) -> StrategicInterpretationContext:
@@ -172,9 +206,29 @@ class PitchProXCoreIntelligenceEngine:
         if decision.primary_action in (StrategicAction.COMMITMENT_CLOSE,):
             base = snapshot.conversion_gate.confidence if snapshot.conversion_gate else 0.80
             breakdown["base_source"] = base
-        elif context.active_objections:
-            primary_obj = snapshot.get_unresolved_objections()[-1]
-            base = primary_obj.confidence
+        elif "CONVERSION_CONFIRMED" in decision.reason_codes or "CONFIRM_AND_PROTECT_ACTIVE" in decision.reason_codes:
+            conv = snapshot.get_active_conversion_event()
+            if conv and conv.confirmation_confidence > 0.0:
+                base = conv.confirmation_confidence
+            elif snapshot.conversion_gate and snapshot.conversion_gate.confidence > 0.0:
+                base = snapshot.conversion_gate.confidence
+            else:
+                base = 0.90
+            breakdown["base_source"] = base
+        elif any("OBJECTION" in r or "LADDER" in r for r in decision.reason_codes) or decision.primary_action in (
+            StrategicAction.VALIDATE, StrategicAction.MIRROR, StrategicAction.REFRAME,
+            StrategicAction.QUANTIFY, StrategicAction.DIFFERENTIATE, StrategicAction.DE_RISK
+        ):
+            primary_obj = snapshot.get_unresolved_objections()[-1] if snapshot.get_unresolved_objections() else None
+            base = primary_obj.confidence if primary_obj else snapshot.overall_confidence
+            if primary_obj and primary_obj.recurrence_count > 1:
+                base = max(0.50, base - (0.08 * (primary_obj.recurrence_count - 1)))
+            breakdown["base_source"] = base
+        elif any("DECISION_MAKER_ABSENT" in r for r in decision.reason_codes):
+            base = snapshot.decision_structure.confidence
+            breakdown["base_source"] = base
+        elif any("CONTACT" in r for r in decision.reason_codes):
+            base = 0.85
             breakdown["base_source"] = base
         elif context.hard_boundary_active:
             base = 1.0
@@ -183,17 +237,28 @@ class PitchProXCoreIntelligenceEngine:
             base = snapshot.overall_confidence
             breakdown["base_source"] = base
 
-        # Trust and engagement confidence weights
-        trust_conf = snapshot.dimensions.trust_confidence
+        # Trust confidence weight: if trust is unmeasured, discount its contribution
+        # Exemption: Explicitly confirmed conversions (Point 5 / Point 10 harmony)
+        is_confirmed_conversion = (
+            context.conversion_confirmed
+            or "CONVERSION_CONFIRMED" in decision.reason_codes
+            or "CONFIRM_AND_PROTECT_ACTIVE" in decision.reason_codes
+        )
+        is_trust_measured = getattr(snapshot.dimensions, "trust_measured", False) or (context.trust_score != 50.0) or is_confirmed_conversion
+        trust_conf = snapshot.dimensions.trust_confidence if is_trust_measured else min(self.unmeasured_trust_cap, snapshot.dimensions.trust_confidence)
         breakdown["trust_confidence"] = trust_conf
+
+        # Momentum adjustment (configurable via momentum_adjustments dict)
+        momentum_adj = self.momentum_adjustments.get(context.momentum_trend, 0.0)
+        breakdown["momentum_adjustment"] = momentum_adj
 
         # Cross-metric consistency penalty deduction
         penalties_count = len(context.cross_metric_penalties)
         penalty_deduction = penalties_count * 0.05
         breakdown["cross_metric_penalty"] = -penalty_deduction
 
-        final_conf = max(0.40, min(1.0, (base * 0.70) + (trust_conf * 0.30) - penalty_deduction))
-        final_conf = round(final_conf, 3)
+        final_conf = max(self.min_confidence_floor, min(1.0, (base * 0.70) + (trust_conf * 0.30) - penalty_deduction + momentum_adj))
+        final_conf = round(final_conf, 4)
         breakdown["final_confidence"] = final_conf
 
         decision.confidence = final_conf
@@ -201,7 +266,7 @@ class PitchProXCoreIntelligenceEngine:
 
         # Point 10: Confidence must change behavior, not just be a displayed number.
         # Below confidence threshold (configurable, default 0.65), constrain action selection to lower-risk options.
-        if final_conf < self.confidence_threshold:
+        if final_conf < (self.confidence_threshold - 1e-9):
             downgraded = False
             if decision.primary_action == StrategicAction.COMMITMENT_CLOSE:
                 decision.primary_action = StrategicAction.CLARIFY
@@ -228,9 +293,9 @@ class PitchProXCoreIntelligenceEngine:
                 decision.strategic_objective = "Inquire gently into prospect perspective rather than challenging under lower confidence."
                 downgraded = True
 
-            # Cap high push strength when confidence is low
-            if str(decision.push_strength) in ("high", "moderate") or decision.push_strength in ("direct_ask", "two_window_choice"):
-                decision.push_strength = PushStrengthValue("low", legacy_alias="resolve_then_ask")
+            # Cap high or moderate push strength when confidence is low
+            if str(decision.push_strength) in ("high", "moderate") or decision.push_strength in ("direct_ask", "two_window_choice", "resolve_then_ask"):
+                decision.push_strength = PushStrengthValue("low")
                 downgraded = True
 
             if downgraded:
@@ -246,6 +311,8 @@ class PitchProXCoreIntelligenceEngine:
         snapshot: ConversationStateSnapshot,
         decision: StrategicDecision,
         context: StrategicInterpretationContext,
+        turn_text: str = "",
+        turn_id: Optional[int] = None,
     ) -> None:
         """Enforces contact preferences and channel restrictions across all strategic decisions (Spec 01 §10)."""
         comp = snapshot.contact_compliance
@@ -302,8 +369,68 @@ class PitchProXCoreIntelligenceEngine:
             if "CONTACT_NOT_BEFORE_HONORED" not in decision.reason_codes:
                 decision.reason_codes.append("CONTACT_NOT_BEFORE_HONORED")
 
-        if has_active_preference and "CONTACT_PREFERENCE_ENFORCED" not in decision.reason_codes:
+        # Point 11: Only add CONTACT_PREFERENCE_ENFORCED if this turn is actively enforcing/declaring contact compliance
+        # Active contact preferences inject constraints into do_not_do and what_to_protect,
+        # but reason codes should only flag enforcement when not on a confirmed appointment close (Turn 18).
+        is_confirmed_close = (
+            context.conversion_confirmed
+            or snapshot.conversation_stage == ConversationStage.COMMITMENT_CONFIRMED
+            or "CONFIRM_AND_PROTECT_ACTIVE" in decision.reason_codes
+            or "CONVERSION_CONFIRMED" in decision.reason_codes
+        )
+        is_contact_turn = (
+            "CONTACT_PREFERENCE_DECLARED" in decision.reason_codes
+            or "CONTACT_NOT_BEFORE_HONORED" in decision.reason_codes
+            or self._is_contact_preference_turn(snapshot, turn_text, turn_id)
+            or (turn_id is None and not turn_text and not snapshot.objections and has_active_preference)
+        )
+        if has_active_preference and is_contact_turn and not is_confirmed_close and "CONTACT_PREFERENCE_ENFORCED" not in decision.reason_codes:
             decision.reason_codes.append("CONTACT_PREFERENCE_ENFORCED")
+
+    def _is_contact_preference_turn(
+        self,
+        snapshot: ConversationStateSnapshot,
+        turn_text: str,
+        turn_id: Optional[int],
+    ) -> bool:
+        effective_turn_id = turn_id if turn_id is not None else getattr(snapshot, "last_updated_turn_id", 0)
+        comp = snapshot.contact_compliance
+        if comp and any(getattr(p, "source_turn_id", None) == effective_turn_id for p in comp.contact_preferences):
+            return True
+        text_lower = (turn_text or "").lower()
+        if any(w in text_lower for w in ("text", "texting", "call", "calling", "email", "contact")) and any(neg in text_lower for neg in ("don't", "dont", "do not", "please don't", "stop", "never")):
+            return True
+        return False
+
+    def _build_contact_preference_decision(
+        self,
+        snapshot: ConversationStateSnapshot,
+        context: StrategicInterpretationContext,
+        turn_timestamp_ms: int,
+    ) -> DecisionEvaluationResult:
+        ref_facts = [f.fact_id for f in snapshot.facts if f.category == "preference" and f.status == "active"]
+        decision = StrategicDecision(
+            call_id=snapshot.call_sid,
+            source_state_version=snapshot.state_version,
+            should_prompt=True,
+            strategic_objective="Acknowledge contact preference respectfully and protect prospect communication boundaries.",
+            primary_action=StrategicAction.ACKNOWLEDGE,
+            strategic_posture="protect",
+            secondary_action=None,
+            secondary_action_reason=None,
+            push_strength=PushStrengthValue("none", legacy_alias="respect_record_exit"),
+            referenced_fact_ids=ref_facts,
+            reason_codes=["CONTACT_PREFERENCE_DECLARED", "PROTECT_PROSPECT_PREFERENCE"],
+            do_not_do=["violating_contact_preference", "high_pressure_closing", "scheduling_push"],
+            what_to_protect=["contact_preference", "prospect_trust"],
+            question_allowed=False,
+            retrieval_needed=False,
+            urgency="immediate",
+            max_prompt_words=18,
+            confidence=0.90,
+            created_at_ms=turn_timestamp_ms,
+        )
+        return DecisionEvaluationResult(decision=decision, context=context)
 
     def _build_contact_not_before_decision(
         self,
@@ -418,8 +545,8 @@ class PitchProXCoreIntelligenceEngine:
             strategic_objective="Protect confirmed appointment, confirm logistics, and avoid reopening settled concerns.",
             primary_action=StrategicAction.ACKNOWLEDGE,
             strategic_posture="protect",
-            secondary_action=StrategicAction.DE_RISK,
-            secondary_action_reason="Protect agreement without adding sales pressure.",
+            secondary_action=None,
+            secondary_action_reason=None,
             push_strength=PushStrengthValue("none", legacy_alias="confirm_and_protect"),
             meeting_gate_open=context.meeting_gate_open,
             conversion_confirmed=True,
@@ -454,10 +581,12 @@ class PitchProXCoreIntelligenceEngine:
 
         # Spec 01 Section 6 Canonical 6-Level Objection Ladder Logic
         # Ladder: Surface -> Underlying -> First pushback -> Repeated resistance -> Partial resolution -> Resolved
+        secondary_reason = None
         if primary_obj.lifecycle_state in (ObjectionLifecycleState.PARTIALLY_ADDRESSED, "partially_resolved", "clarified"):
             ladder_stage = Spec01ObjectionLadderStage.PARTIAL_RESOLUTION
             primary_action = StrategicAction.ACKNOWLEDGE
-            secondary_action = StrategicAction.CLARIFY
+            secondary_action = None
+            secondary_reason = None
             objective = f"Acknowledge partial alignment and narrow remaining concern on {category}."
             reason_codes = ["OBJECTION_PARTIAL_RESOLUTION", f"LADDER_{ladder_stage.value.upper()}"]
             max_words = 22
@@ -465,6 +594,7 @@ class PitchProXCoreIntelligenceEngine:
             ladder_stage = Spec01ObjectionLadderStage.SURFACE_OBJECTION
             primary_action = StrategicAction.VALIDATE
             secondary_action = StrategicAction.CLARIFY
+            secondary_reason = f"Clarify underlying {category} context while validating prospect perspective."
             objective = f"Validate concern regarding {category} and clarify underlying intent."
             reason_codes = ["OBJECTION_SURFACE_INITIAL", f"LADDER_{ladder_stage.value.upper()}", f"CATEGORY_{category.upper()}"]
             max_words = 22
@@ -472,6 +602,7 @@ class PitchProXCoreIntelligenceEngine:
             ladder_stage = Spec01ObjectionLadderStage.UNDERLYING_CONCERN
             primary_action = StrategicAction.MIRROR
             secondary_action = StrategicAction.REFRAME
+            secondary_reason = f"Reframe strategic perspective after mirroring core {category} concern."
             objective = f"Mirror underlying driver ({primary_obj.driver_layer.underlying_driver}) and reframe strategic target."
             reason_codes = ["OBJECTION_UNDERLYING_DRIVER", f"LADDER_{ladder_stage.value.upper()}"]
             max_words = 26
@@ -480,16 +611,19 @@ class PitchProXCoreIntelligenceEngine:
             if "commission" in category or "fee" in category or "financial" in category:
                 primary_action = StrategicAction.REFRAME
                 secondary_action = StrategicAction.QUANTIFY
+                secondary_reason = "Quantify net financial proceeds to concretely support reframe."
                 objective = "Reframe commission cost into net financial proceeds comparison."
                 reason_codes = ["OBJECTION_FIRST_PUSHBACK_SHIFT_ANGLE", "NET_PROCEEDS_REFRAME"]
             elif "timing" in category or "market" in category:
                 primary_action = StrategicAction.EDUCATE
                 secondary_action = StrategicAction.FUTURE_PACE
+                secondary_reason = "Illustrate future market timing scenarios."
                 objective = "Educate on market timing dynamics and illustrate future scenario."
                 reason_codes = ["OBJECTION_FIRST_PUSHBACK_SHIFT_ANGLE", "MARKET_TIMING_EDUCATION"]
             else:
                 primary_action = StrategicAction.DIFFERENTIATE
-                secondary_action = StrategicAction.CLARIFY
+                secondary_action = None
+                secondary_reason = None
                 objective = f"Differentiate approach and isolate primary reservation on {category}."
                 reason_codes = ["OBJECTION_FIRST_PUSHBACK_SHIFT_ANGLE", "DIFFERENTIATE_APPROACH"]
             reason_codes.append(f"LADDER_{ladder_stage.value.upper()}")
@@ -499,8 +633,10 @@ class PitchProXCoreIntelligenceEngine:
             primary_action = StrategicAction.DE_RISK
             if "social_proof" not in failed_strategies:
                 secondary_action = StrategicAction.SOCIAL_PROOF
+                secondary_reason = "Provide verified references to de-risk persistent concern."
             else:
                 secondary_action = StrategicAction.QUESTION
+                secondary_reason = f"Inquire into root blocker on persistent {category} objection."
 
             objective = f"De-risk commitment regarding persistent {category} objection without repeating failed strategies."
             reason_codes = ["OBJECTION_REPEATED_RESISTANCE_BRANCH", f"LADDER_{ladder_stage.value.upper()}"]
@@ -556,7 +692,7 @@ class PitchProXCoreIntelligenceEngine:
                     objective = f"All targeted strategies for {category} previously failed; falling back to open clarifying dialogue without repeating exhausted tactics."
                     reason_codes.append("ALL_OBJECTION_STRATEGIES_EXHAUSTED_FALLBACK_CLARIFY")
 
-        secondary_reason = "Support primary objection handling without aggressive closing." if secondary_action else None
+        secondary_reason = secondary_reason or (f"Reinforces {secondary_action.value} to support handling of {category}." if secondary_action else None)
 
         decision = StrategicDecision(
             call_id=snapshot.call_sid,
@@ -780,24 +916,24 @@ class PitchProXCoreIntelligenceEngine:
 
         if stage == ConversationStage.DISCOVERY:
             primary_action = StrategicAction.QUESTION
-            secondary_action = StrategicAction.MIRROR
-            secondary_reason = "Mirror statements to facilitate open discovery."
+            secondary_action = None
+            secondary_reason = None
             objective = "Uncover prospect goals, situation, and core priorities."
             reason_codes = ["STAGE_DISCOVERY", "EXPLORE_PROSPECT_NEEDS"]
             do_not_do = ["premature_close", "pitch_prematurely"]
             max_words = 20
         elif stage == ConversationStage.VALUE_WALKTHROUGH:
             primary_action = StrategicAction.EDUCATE
-            secondary_action = StrategicAction.DIFFERENTIATE
-            secondary_reason = "Differentiate service model while educating on value."
+            secondary_action = None
+            secondary_reason = None
             objective = "Demonstrate tailored value proposition and distinguish approach."
             reason_codes = ["STAGE_VALUE_WALKTHROUGH", "DEMONSTRATE_DIFFERENTIATION"]
             do_not_do = ["overwhelm_with_detail", "press_unready_prospect"]
             max_words = 26
         elif stage == ConversationStage.DECISION_RESOLUTION:
             primary_action = StrategicAction.CLARIFY
-            secondary_action = StrategicAction.REFRAME
-            secondary_reason = "Reframe considerations to align decision criteria."
+            secondary_action = None
+            secondary_reason = None
             objective = "Resolve remaining decision criteria and establish consensus."
             reason_codes = ["STAGE_DECISION_RESOLUTION", "CLARIFY_CRITERIA"]
             do_not_do = ["premature_close"]
@@ -807,24 +943,24 @@ class PitchProXCoreIntelligenceEngine:
             gate_ready = bool(gate and gate.is_open and not getattr(gate, "unknown_conditions", []) and (gate.confidence >= 0.60))
             if not gate_ready:
                 primary_action = StrategicAction.QUESTION
-                secondary_action = StrategicAction.CLARIFY
-                secondary_reason = "Clarify scheduling constraints before proposing a time."
+                secondary_action = None
+                secondary_reason = None
                 objective = "Discover scheduling preferences and uncover logistical details."
                 reason_codes = ["STAGE_SCHEDULING", "GATE_NOT_READY_DISCOVERY"]
                 do_not_do = ["premature_close", "blind_commitment_close"]
                 max_words = 20
             else:
                 primary_action = StrategicAction.COMMITMENT_CLOSE
-                secondary_action = StrategicAction.CLARIFY
-                secondary_reason = "Clarify appointment details to finalize scheduling."
+                secondary_action = None
+                secondary_reason = None
                 objective = "Coordinate logistical details and calendar commitment."
                 reason_codes = ["STAGE_SCHEDULING", "FINALIZE_TIME"]
                 do_not_do = ["reopen_discovery"]
                 max_words = 20
         else:
             primary_action = StrategicAction.QUESTION
-            secondary_action = StrategicAction.ACKNOWLEDGE
-            secondary_reason = "Acknowledge greeting and establish rapport."
+            secondary_action = None
+            secondary_reason = None
             objective = "Engage prospect and build conversation foundation."
             reason_codes = ["STAGE_DEFAULT_ENGAGEMENT"]
             do_not_do = ["premature_close"]
@@ -920,7 +1056,14 @@ class PitchProXCoreIntelligenceEngine:
 
         # 2. Readiness: Include only if readiness/gate is evaluating closing or materially influencing decision
         readiness_relevant = (
-            any(k in r for r in reasons_set for k in ("READINESS", "GATE", "CLOSE", "STAGE_VALUE", "STAGE_DECISION"))
+            any(
+                r.startswith("READINESS_")
+                or r.startswith("GATE_")
+                or r.startswith("COMMITMENT_")
+                or r.startswith("CONVERSION_")
+                or r.startswith("CLOSE_")
+                for r in reasons_set
+            )
             or decision.primary_action == StrategicAction.COMMITMENT_CLOSE
         )
         has_insufficient_ev = (snapshot.readiness and snapshot.readiness.insufficient_evidence) or (snapshot.readiness and snapshot.readiness.readiness_score is None)
@@ -931,13 +1074,20 @@ class PitchProXCoreIntelligenceEngine:
                 evidence.append(f"Readiness: {context.readiness_score:.1f}%")
 
         # 3. Momentum: Include only if non-stable or directly influential
-        momentum_relevant = context.momentum_trend != "stable" or any("MOMENTUM" in r for r in reasons_set)
+        momentum_relevant = context.momentum_trend != "stable" or any(r.startswith("MOMENTUM_") for r in reasons_set)
         if momentum_relevant:
             evidence.append(f"Momentum: {context.momentum_trend}")
 
         # 4. Active objections: Include only if handling an objection or objection prevents close
         objection_relevant = bool(context.active_objections) and (
-            any(k in r for r in reasons_set for k in ("OBJECTION", "LADDER", "REFRAME", "QUANTIFY", "DIFFERENTIATE"))
+            any(
+                r.startswith("OBJECTION_")
+                or r.startswith("LADDER_")
+                or r.startswith("REFRAME_")
+                or r.startswith("QUANTIFY_")
+                or r.startswith("DIFFERENTIATE_")
+                for r in reasons_set
+            )
             or decision.primary_action in (
                 StrategicAction.VALIDATE, StrategicAction.MIRROR, StrategicAction.REFRAME,
                 StrategicAction.QUANTIFY, StrategicAction.DIFFERENTIATE, StrategicAction.DE_RISK
@@ -948,7 +1098,15 @@ class PitchProXCoreIntelligenceEngine:
 
         # 5. Gate status: Include only if gate influenced the decision
         gate_relevant = bool(snapshot.conversion_gate) and (
-            any(k in r for r in reasons_set for k in ("GATE", "COMMITMENT", "CONVERSION", "CLOSE", "TWO_WINDOW", "DIRECT_ASK"))
+            any(
+                r.startswith("GATE_")
+                or r.startswith("COMMITMENT_")
+                or r.startswith("CONVERSION_")
+                or r.startswith("CLOSE_")
+                or r.startswith("TWO_WINDOW")
+                or r.startswith("DIRECT_ASK")
+                for r in reasons_set
+            )
             or decision.primary_action == StrategicAction.COMMITMENT_CLOSE
         )
         if gate_relevant:
@@ -960,26 +1118,16 @@ class PitchProXCoreIntelligenceEngine:
         material_compliance_reasons = {
             "CONTACT_NOT_BEFORE_DECLARED", "HOLD_RESPECTED",
             "PAST_CONTACT_FRICTION_HONORED", "HARD_BOUNDARY_ACTIVE", "COMPLIANCE_PRIORITY",
-            "BOUNDARY_SUSPECTED"
+            "BOUNDARY_SUSPECTED", "CONTACT_PREFERENCE_DECLARED", "CONTACT_PREFERENCE_ENFORCED"
         }
-        is_scheduling_or_closing = (
-            decision.primary_action == StrategicAction.COMMITMENT_CLOSE
-            or context.push_strength_state == "confirm_and_protect"
-            or context.conversion_confirmed
-            or getattr(snapshot.conversation_stage, "value", snapshot.conversation_stage) in ("scheduling", "closing")
+        is_confirmed_close = (
+            context.conversion_confirmed
+            or snapshot.conversation_stage == ConversationStage.COMMITMENT_CONFIRMED
+            or "CONFIRM_AND_PROTECT_ACTIVE" in decision.reason_codes
         )
-        is_utterance_contact_related = False
-        if turn_text:
-            t_low = turn_text.lower()
-            if any(k in t_low for k in ("text", "call", "morning", "afternoon", "evening", "contact", "reach", "email", "phone")):
-                is_utterance_contact_related = True
-        elif turn_id and any(p.source_turn_id == turn_id for p in snapshot.contact_compliance.contact_preferences if p.source_turn_id):
-            is_utterance_contact_related = True
-
         is_compliance_influential = (
-            bool(material_compliance_reasons.intersection(reasons_set))
-            or (is_scheduling_or_closing and bool(snapshot.contact_compliance.contact_preferences))
-            or is_utterance_contact_related
+            not is_confirmed_close
+            and bool(material_compliance_reasons.intersection(reasons_set))
         )
 
         if snapshot.contact_compliance:

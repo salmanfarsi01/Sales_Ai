@@ -49,8 +49,11 @@ class PushStrengthValue(str):
             str_val = "none"
         elif str_val == "resolve_then_ask" and not legacy_alias:
             legacy_alias = str_val
-            str_val = "low"
-        elif str_val in ("two_window_choice", "direct_ask") and not legacy_alias:
+            str_val = "moderate"
+        elif str_val == "two_window_choice" and not legacy_alias:
+            legacy_alias = str_val
+            str_val = "moderate"
+        elif str_val == "direct_ask" and not legacy_alias:
             legacy_alias = str_val
             str_val = "high"
 
@@ -164,6 +167,20 @@ class StrategicDecision(BaseModel):
                 if conv and getattr(conv, "start_at", None):
                     return conv.start_at
         return self.commitment_slot
+
+    def resolve_meeting_gate_open(self, snapshot: Optional[Any] = None) -> Optional[bool]:
+        """Dynamically resolves meeting gate status from canonical ConversationStateSnapshot via references (Point 12)."""
+        if snapshot is not None and getattr(snapshot, "conversion_gate", None) is not None:
+            return snapshot.conversion_gate.is_open
+        return self.meeting_gate_open
+
+    def resolve_conversion_confirmed(self, snapshot: Optional[Any] = None) -> Optional[bool]:
+        """Dynamically resolves conversion confirmed status from canonical ConversationStateSnapshot via references (Point 12)."""
+        if snapshot is not None and hasattr(snapshot, "get_active_conversion_event"):
+            conv = snapshot.get_active_conversion_event()
+            if conv is not None:
+                return str(conv.status).lower() in ("confirmed", "conversioneventstatus.confirmed")
+        return self.conversion_confirmed
 
     def resolve_fact(self, snapshot: Any, fact_id: str) -> Optional[Any]:
         """Resolves fact by ID reference directly from ConversationStateSnapshot."""

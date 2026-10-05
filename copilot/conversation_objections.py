@@ -591,7 +591,7 @@ class ObjectionLifecycleEngine:
                     first_turn_id=bundle.turn_id,
                     last_updated_turn_id=bundle.turn_id,
                     recurrence_count=1,
-                    confidence=bundle.semantic_confidence,
+                    confidence=min(0.90, bundle.semantic_confidence),
                     driver_layer=new_driver,
                 )
                 self._objections.append(new_obj)
