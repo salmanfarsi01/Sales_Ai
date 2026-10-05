@@ -9,8 +9,8 @@ from .conversation_state_models import PushStrengthState
 
 
 class StrategicAction(str, Enum):
-    WAIT_SILENCE = "wait_silence"
-    HOLD = "hold"
+    WAIT_SILENCE = "wait_silence"  # Tactical conversational pause (giving prospect 2-3s space to finish speaking/venting)
+    HOLD = "hold"                  # Strategic state hold / no new prompt stance (temporal hold, waiting on stakeholder)
     ACKNOWLEDGE = "acknowledge"
     CLARIFY = "clarify"
     VALIDATE = "validate"
@@ -147,6 +147,31 @@ class StrategicDecision(BaseModel):
     conversion_confirmed: Optional[bool] = Field(default=None, description="Current conversion confirmation status for invariant validation")
     commitment_slot: Optional[str] = Field(default=None, description="Concrete confirmed or proposed appointment slot")
 
+    def resolve_commitment_slot(self, snapshot: Optional[Any] = None) -> Optional[str]:
+        """Dynamically resolves commitment slot from canonical ConversationStateSnapshot via references (Point 12).
+        Guarantees that mutating ConversationState doesn't leave divergent stale copies.
+        """
+        if snapshot is not None:
+            if self.referenced_fact_ids:
+                for fid in self.referenced_fact_ids:
+                    f = snapshot.get_fact_by_id(fid) if hasattr(snapshot, "get_fact_by_id") else next((x for x in getattr(snapshot, "facts", []) if getattr(x, "fact_id", None) == fid), None)
+                    if f and getattr(f, "fact_key", None) == "confirmed_meeting_time" and getattr(f, "status", None) == "active":
+                        return f.fact_value
+            if getattr(snapshot, "conversion_gate", None) and getattr(snapshot.conversion_gate, "commitment_slot", None):
+                return snapshot.conversion_gate.commitment_slot
+            if hasattr(snapshot, "get_active_conversion_event"):
+                conv = snapshot.get_active_conversion_event()
+                if conv and getattr(conv, "start_at", None):
+                    return conv.start_at
+        return self.commitment_slot
+
+    def resolve_fact(self, snapshot: Any, fact_id: str) -> Optional[Any]:
+        """Resolves fact by ID reference directly from ConversationStateSnapshot."""
+        for f in getattr(snapshot, "facts", []):
+            if getattr(f, "fact_id", None) == fact_id:
+                return f
+        return None
+
     @model_validator(mode="after")
     def validate_action_gate_push_invariants(self) -> "StrategicDecision":
         import os
@@ -204,9 +229,18 @@ class StrategicDecision(BaseModel):
             if self.push_strength in ("respect_record_exit", "protect_and_shorten", "explore_conditional_terms") or str(self.push_strength) == "none":
                 violation_reason = f"primary_action COMMITMENT_CLOSE is incompatible with push_strength '{self.push_strength}' (decision_id={self.decision_id})"
 
-        # 5. Stacking discipline (Point 9): Ensure secondary action always has justification
-        if self.secondary_action is not None and not self.secondary_action_reason:
-            self.secondary_action_reason = f"Reinforces '{self.secondary_action.value}' to support primary action '{self.primary_action.value}'"
+        # 5. Stacking discipline (Point 9): Ensure secondary action always has meaningful justification
+        if self.secondary_action is not None:
+            if not self.secondary_action_reason:
+                self.secondary_action_reason = f"Reinforces '{self.secondary_action.value}' to support primary action '{self.primary_action.value}'"
+            else:
+                reason = self.secondary_action_reason.strip()
+                weak_placeholders = {"test", "n/a", "none", "secondary", "because", "secondary action", "stacking"}
+                if len(reason) < 15 or reason.lower() in weak_placeholders:
+                    if strict_raise:
+                        raise ValueError(f"secondary_action '{self.secondary_action.value}' requires a meaningful justification (at least 15 chars, got: '{reason}')")
+                    else:
+                        self.secondary_action_reason = f"Reinforces '{self.secondary_action.value}' to support primary action '{self.primary_action.value}'"
 
         if violation_reason:
             if strict_raise:

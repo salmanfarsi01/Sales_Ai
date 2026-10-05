@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 import logging
 from typing import Any, Dict, List, Optional
 
@@ -22,12 +23,18 @@ from .core_intelligence_models import (
 
 LOGGER = logging.getLogger("copilot.core_intelligence_engine")
 
+DEFAULT_CONFIDENCE_THRESHOLD = 0.65
+
 
 class PitchProXCoreIntelligenceEngine:
     """Core intelligence engine interpreting ConversationState and generating StrategicDecision."""
 
-    def __init__(self, lead_type: str = "general"):
+    def __init__(self, lead_type: str = "general", confidence_threshold: Optional[float] = None):
         self.lead_type = lead_type
+        if confidence_threshold is not None:
+            self.confidence_threshold = float(confidence_threshold)
+        else:
+            self.confidence_threshold = float(os.environ.get("CORE_CONFIDENCE_THRESHOLD", str(DEFAULT_CONFIDENCE_THRESHOLD)))
 
     def evaluate(
         self,
@@ -186,25 +193,44 @@ class PitchProXCoreIntelligenceEngine:
         breakdown["cross_metric_penalty"] = -penalty_deduction
 
         final_conf = max(0.40, min(1.0, (base * 0.70) + (trust_conf * 0.30) - penalty_deduction))
-        breakdown["final_confidence"] = round(final_conf, 3)
+        final_conf = round(final_conf, 3)
+        breakdown["final_confidence"] = final_conf
 
-        decision.confidence = round(final_conf, 3)
+        decision.confidence = final_conf
         decision.confidence_breakdown = breakdown
 
         # Point 10: Confidence must change behavior, not just be a displayed number.
-        # Below confidence threshold (0.65), constrain action selection to lower-risk options.
-        if final_conf < 0.65:
+        # Below confidence threshold (configurable, default 0.65), constrain action selection to lower-risk options.
+        if final_conf < self.confidence_threshold:
+            downgraded = False
             if decision.primary_action == StrategicAction.COMMITMENT_CLOSE:
                 decision.primary_action = StrategicAction.CLARIFY
                 decision.strategic_posture = "explore"
                 decision.push_strength = PushStrengthValue("low", legacy_alias="resolve_then_ask")
                 decision.secondary_action = StrategicAction.QUESTION
                 decision.secondary_action_reason = "Inquire regarding comfort level before advancing."
+                decision.strategic_objective = "Clarify prospect alignment and verify comfort before attempting commitment due to lower confidence."
+                downgraded = True
+            elif decision.primary_action == StrategicAction.CHALLENGE:
+                decision.primary_action = StrategicAction.QUESTION
+                decision.strategic_posture = "explore"
+                decision.secondary_action = StrategicAction.CLARIFY
+                decision.secondary_action_reason = "Explore prospect viewpoint without confrontational challenge under low confidence."
+                decision.strategic_objective = "Inquire gently into prospect perspective rather than challenging under lower confidence."
+                downgraded = True
+
+            # Cap high push strength when confidence is low
+            if str(decision.push_strength) in ("high", "moderate") or decision.push_strength in ("direct_ask", "two_window_choice"):
+                decision.push_strength = PushStrengthValue("low", legacy_alias="resolve_then_ask")
+                downgraded = True
+
+            if downgraded:
                 if "LOW_CONFIDENCE_ACTION_DOWNGRADE" not in decision.reason_codes:
                     decision.reason_codes.append("LOW_CONFIDENCE_ACTION_DOWNGRADE")
-                decision.strategic_objective = "Clarify prospect alignment and verify comfort before attempting commitment due to lower confidence."
                 if "premature_close_on_low_confidence" not in decision.do_not_do:
                     decision.do_not_do.append("premature_close_on_low_confidence")
+                if "aggressive_push_on_low_confidence" not in decision.do_not_do:
+                    decision.do_not_do.append("aggressive_push_on_low_confidence")
 
     def _apply_contact_compliance_constraints(
         self,
@@ -475,23 +501,51 @@ class PitchProXCoreIntelligenceEngine:
         failed_strategy_names = [str(s).lower() for s in failed_strategies]
         if primary_action.value.lower() in failed_strategy_names:
             failed_tactic = primary_action.value
-            candidates = [
-                (StrategicAction.QUANTIFY, "Quantify empirical differences and net financial value."),
-                (StrategicAction.DIFFERENTIATE, "Differentiate service model and structural methodology."),
-                (StrategicAction.DE_RISK, "De-risk commitment and remove downside exposure."),
-                (StrategicAction.CLARIFY, "Clarify underlying concern to discover core driver."),
-                (StrategicAction.QUESTION, "Inquire directly regarding remaining hesitations."),
-                (StrategicAction.VALIDATE, "Validate prospect perspective before advancing."),
-            ]
-            for candidate_action, candidate_obj in candidates:
-                if candidate_action.value.lower() not in failed_strategy_names and candidate_action != primary_action:
-                    primary_action = candidate_action
-                    objective = f"Pivoted from previously failed '{failed_tactic}' approach: {candidate_obj}"
-                    reason_codes.append(f"AVOIDED_FAILED_STRATEGY_{failed_tactic.upper()}")
-                    reason_codes.append("PIVOTED_TO_UNTRIED_STRATEGY")
-                    if failed_tactic not in do_not_do:
-                        do_not_do.append(failed_tactic)
-                    break
+            prior_outcome = next((o for o in reversed(primary_obj.strategy_outcomes) if o.strategy_tag.lower() == failed_tactic.lower()), None)
+
+            # Exception: "unless new evidence justifies retrying"
+            # If new substantive evidence/facts arrived since the attempt, retrying may be permitted
+            has_new_evidence = False
+            if prior_outcome and prior_outcome.attempted_at_turn_id:
+                new_facts = [f for f in snapshot.facts if f.source_turn_id is not None and f.source_turn_id > prior_outcome.attempted_at_turn_id and f.status == "active"]
+                if new_facts:
+                    has_new_evidence = True
+
+            if has_new_evidence:
+                objective = f"Retrying '{failed_tactic}' with new evidence on {category} from subsequent conversation turns."
+                reason_codes.append("RETRY_FAILED_STRATEGY_JUSTIFIED_BY_NEW_EVIDENCE")
+                if prior_outcome and prior_outcome.attempted_at_turn_id:
+                    reason_codes.append(f"PREVIOUS_ATTEMPT_TURN_{prior_outcome.attempted_at_turn_id}")
+            else:
+                candidates = [
+                    (StrategicAction.QUANTIFY, "Quantify empirical differences and net financial value."),
+                    (StrategicAction.DIFFERENTIATE, "Differentiate service model and structural methodology."),
+                    (StrategicAction.DE_RISK, "De-risk commitment and remove downside exposure."),
+                    (StrategicAction.CLARIFY, "Clarify underlying concern to discover core driver."),
+                    (StrategicAction.QUESTION, "Inquire directly regarding remaining hesitations."),
+                    (StrategicAction.VALIDATE, "Validate prospect perspective before advancing."),
+                ]
+                pivoted = False
+                for candidate_action, candidate_obj in candidates:
+                    if candidate_action.value.lower() not in failed_strategy_names and candidate_action != primary_action:
+                        primary_action = candidate_action
+                        attempt_str = f"Turn {prior_outcome.attempted_at_turn_id}" if prior_outcome and prior_outcome.attempted_at_turn_id else "earlier attempt"
+                        outcome_str = f"outcome: '{prior_outcome.prospect_response_summary}'" if prior_outcome and prior_outcome.prospect_response_summary else "ineffective outcome"
+                        objective = f"Pivoted from previously failed '{failed_tactic}' approach ({attempt_str}, {outcome_str}): {candidate_obj}"
+                        reason_codes.append(f"AVOIDED_FAILED_STRATEGY_{failed_tactic.upper()}")
+                        if prior_outcome and prior_outcome.effectiveness:
+                            reason_codes.append(f"FAILED_OUTCOME_{prior_outcome.effectiveness.upper()}")
+                        reason_codes.append("PIVOTED_TO_UNTRIED_STRATEGY")
+                        if failed_tactic not in do_not_do:
+                            do_not_do.append(failed_tactic)
+                        pivoted = True
+                        break
+
+                if not pivoted:
+                    # Edge case: All candidates have failed
+                    primary_action = StrategicAction.CLARIFY
+                    objective = f"All targeted strategies for {category} previously failed; falling back to open clarifying dialogue without repeating exhausted tactics."
+                    reason_codes.append("ALL_OBJECTION_STRATEGIES_EXHAUSTED_FALLBACK_CLARIFY")
 
         secondary_reason = "Support primary objection handling without aggressive closing." if secondary_action else None
 
@@ -530,26 +584,55 @@ class PitchProXCoreIntelligenceEngine:
         stakeholder_ids = [getattr(s, "stakeholder_id", f"stakeholder_{s.role}") for s in snapshot.decision_structure.stakeholders]
 
         # Point 7: Stop auto-mapping "decision-maker changed" to DE_RISK.
-        # Classify reason: genuine deal risk / conflict / scam vs pure logistics / coordination
+        # Classify reason into four distinct categories:
+        # 1. Relationship conflict -> VALIDATE / posture mediate
+        # 2. Trust concern -> VALIDATE / posture reassure
+        # 3. Genuine deal risk -> DE_RISK / posture defend
+        # 4. Logistics / coordination -> CLARIFY / posture coordinate
         text_lower = (turn_text or "").lower()
-        risk_keywords = [
-            "scam", "fraud", "rip off", "ripoff", "rip-off", "suspicious", "lawyer",
-            "legal", "sue", "fighting", "divorce", "dispute", "against", "opposed",
-            "refuse", "angry", "distrust", "hostile", "skeptical"
-        ]
-        is_deal_risk = any(k in text_lower for k in risk_keywords)
 
-        if is_deal_risk:
-            # Genuine deal risk / relationship conflict / distrust -> DE_RISK
-            primary_action = StrategicAction.DE_RISK
-            secondary_action = StrategicAction.VALIDATE
-            secondary_reason = "Validate spouse skepticism to de-escalate deal risk before proceeding."
-            strategic_posture = "defend"
+        conflict_keywords = [
+            "divorce", "fighting", "dispute", "disagree", "we don't agree",
+            "not on the same page", "conflict", "opposed while i want", "divided"
+        ]
+        trust_keywords = [
+            "distrust", "skeptical", "suspicious", "doesn't trust", "don't trust",
+            "rip off", "ripoff", "rip-off", "taken advantage", "sleazy", "shady", "sales pitch"
+        ]
+        risk_keywords = [
+            "scam", "fraud", "lawyer", "attorney", "legal", "sue",
+            "refuse to sign", "hard veto", "forbid", "prohibit", "against selling"
+        ]
+
+        if any(k in text_lower for k in conflict_keywords):
+            # Category 1: Relationship Conflict
+            primary_action = StrategicAction.VALIDATE
+            secondary_action = StrategicAction.QUESTION
+            secondary_reason = "Explore shared household priorities neutrally without taking sides in the relationship conflict."
+            strategic_posture = "mediate"
+            push_strength = PushStrengthValue("none")
+            objective = f"Validate differing perspectives neutrally and explore shared priorities with absent {role_label}."
+            reason_codes = ["DECISION_MAKER_ABSENT", "RELATIONSHIP_CONFLICT", "EXPLORE_SHARED_GOALS"]
+        elif any(k in text_lower for k in trust_keywords):
+            # Category 2: Trust Concern
+            primary_action = StrategicAction.VALIDATE
+            secondary_action = StrategicAction.SOCIAL_PROOF
+            secondary_reason = "Provide transparent verified references to address stakeholder skepticism."
+            strategic_posture = "reassure"
             push_strength = PushStrengthValue("low", legacy_alias="resolve_then_ask")
-            objective = f"De-risk deal and address underlying stakeholder skepticism regarding absent {role_label}."
-            reason_codes = ["DECISION_MAKER_ABSENT", "GENUINE_DEAL_RISK", "STAKEHOLDER_CONCERN"]
+            objective = f"Validate stakeholder skepticism and offer transparent third-party proof to address {role_label}'s trust concern."
+            reason_codes = ["DECISION_MAKER_ABSENT", "STAKEHOLDER_TRUST_CONCERN", "BUILD_THIRD_PARTY_TRUST"]
+        elif any(k in text_lower for k in risk_keywords):
+            # Category 3: Genuine Deal Risk
+            primary_action = StrategicAction.DE_RISK
+            secondary_action = StrategicAction.QUESTION
+            secondary_reason = "Inquire into specific legal or structural constraints before attempting next steps."
+            strategic_posture = "defend"
+            push_strength = PushStrengthValue("none")
+            objective = f"De-risk deal and isolate specific legal or existential blocker regarding {role_label}."
+            reason_codes = ["DECISION_MAKER_ABSENT", "GENUINE_DEAL_RISK", "PROTECT_AGREEMENT_VIABILITY"]
         else:
-            # Pure logistics / coordination (Turn 10 scenario) -> CLARIFY with coordination posture
+            # Category 4: Pure Logistics / Coordination (e.g., Turn 10 scenario)
             primary_action = StrategicAction.CLARIFY
             secondary_action = StrategicAction.FUTURE_PACE
             secondary_reason = "Future pace a collaborative conversation once logistical alignment is established."
@@ -817,28 +900,54 @@ class PitchProXCoreIntelligenceEngine:
             cleaned_text = turn_text.strip().replace("\n", " ")
             evidence.append(f'Turn utterance ({turn_speaker}): "{cleaned_text[:80]}"')
 
-        # Differentiate measured trust from default baseline (Client Group 1 Point 5)
+        reasons_set = set(decision.reason_codes)
+
+        # 1. Trust: Visibly tag default/unmeasured trust vs measured trust (Point 5)
         is_trust_measured = getattr(snapshot.dimensions, "trust_measured", False) or (context.trust_score != 50.0)
         if is_trust_measured:
             evidence.append(f"Trust: {context.trust_score:.0f}% (measured, confidence: {snapshot.dimensions.trust_confidence:.2f})")
         else:
             evidence.append(f"Trust: {context.trust_score:.0f}% (default, unmeasured)")
 
-        # Insufficient evidence display: Show UNKNOWN instead of misleading 0.0%
+        # 2. Readiness: Include only if readiness/gate is evaluating closing or materially influencing decision
+        readiness_relevant = (
+            any(k in r for r in reasons_set for k in ("READINESS", "GATE", "CLOSE", "STAGE_VALUE", "STAGE_DECISION"))
+            or decision.primary_action == StrategicAction.COMMITMENT_CLOSE
+        )
         has_insufficient_ev = (snapshot.readiness and snapshot.readiness.insufficient_evidence) or (snapshot.readiness and snapshot.readiness.readiness_score is None)
-        if has_insufficient_ev:
-            evidence.append("Readiness: UNKNOWN (Insufficient Evidence)")
-        else:
-            evidence.append(f"Readiness: {context.readiness_score:.1f}%")
+        if readiness_relevant:
+            if has_insufficient_ev:
+                evidence.append("Readiness: UNKNOWN (Insufficient Evidence)")
+            else:
+                evidence.append(f"Readiness: {context.readiness_score:.1f}%")
 
-        evidence.append(f"Momentum: {context.momentum_trend}")
-        if context.active_objections:
+        # 3. Momentum: Include only if non-stable or directly influential
+        momentum_relevant = context.momentum_trend != "stable" or any("MOMENTUM" in r for r in reasons_set)
+        if momentum_relevant:
+            evidence.append(f"Momentum: {context.momentum_trend}")
+
+        # 4. Active objections: Include only if handling an objection or objection prevents close
+        objection_relevant = bool(context.active_objections) and (
+            any(k in r for r in reasons_set for k in ("OBJECTION", "LADDER", "REFRAME", "QUANTIFY", "DIFFERENTIATE"))
+            or decision.primary_action in (
+                StrategicAction.VALIDATE, StrategicAction.MIRROR, StrategicAction.REFRAME,
+                StrategicAction.QUANTIFY, StrategicAction.DIFFERENTIATE, StrategicAction.DE_RISK
+            )
+        )
+        if objection_relevant:
             evidence.append(f"Active objections: {context.active_objections}")
-        if snapshot.conversion_gate:
+
+        # 5. Gate status: Include only if gate influenced the decision
+        gate_relevant = bool(snapshot.conversion_gate) and (
+            any(k in r for r in reasons_set for k in ("GATE", "COMMITMENT", "CONVERSION", "CLOSE", "TWO_WINDOW", "DIRECT_ASK"))
+            or decision.primary_action == StrategicAction.COMMITMENT_CLOSE
+        )
+        if gate_relevant:
             gate_st = "OPEN" if snapshot.conversion_gate.is_open else "CLOSED"
             unk = getattr(snapshot.conversion_gate, "unknown_conditions", [])
             evidence.append(f"Gate: {gate_st} (unknown: {unk if unk else 'none'})")
-        # Contact Compliance: Only include if compliance materially influenced this decision (Point 11)
+
+        # 6. Contact Compliance: Only include if compliance materially influenced this decision (Point 11)
         material_compliance_reasons = {
             "CONTACT_NOT_BEFORE_DECLARED", "HOLD_RESPECTED",
             "PAST_CONTACT_FRICTION_HONORED", "HARD_BOUNDARY_ACTIVE", "COMPLIANCE_PRIORITY",
@@ -858,10 +967,9 @@ class PitchProXCoreIntelligenceEngine:
         elif turn_id and any(p.source_turn_id == turn_id for p in snapshot.contact_compliance.contact_preferences if p.source_turn_id):
             is_utterance_contact_related = True
 
-        reasons_set = set(decision.reason_codes)
         is_compliance_influential = (
             bool(material_compliance_reasons.intersection(reasons_set))
-            or is_scheduling_or_closing
+            or (is_scheduling_or_closing and bool(snapshot.contact_compliance.contact_preferences))
             or is_utterance_contact_related
         )
 
@@ -872,6 +980,11 @@ class PitchProXCoreIntelligenceEngine:
                 evidence.append("Boundary suspected: AMBIGUOUS")
             if is_compliance_influential and snapshot.contact_compliance.contact_preferences:
                 evidence.append(f"Contact preferences: {len(snapshot.contact_compliance.contact_preferences)} active")
+
+        # 7. Fail-safe: If evidence contains 1 or fewer items, include conversation stage so evidence is never empty
+        if len(evidence) <= 1:
+            stage_str = str(getattr(snapshot.conversation_stage, "value", snapshot.conversation_stage))
+            evidence.append(f"Stage: {stage_str.upper()}")
 
         decision.evidence_considered = evidence
         decision.meeting_gate_open = context.meeting_gate_open

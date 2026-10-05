@@ -218,6 +218,7 @@ class CoreDecisionManager:
         self.decisions_by_version: Dict[int, StrategicDecision] = {}
         self.latest_decision: Optional[StrategicDecision] = None
         self.latest_evaluation_result: Optional[DecisionEvaluationResult] = None
+        self.consecutive_carried_count: int = 0
 
     def evaluate_state(
         self,
@@ -259,9 +260,31 @@ class CoreDecisionManager:
         cleaned_turn = (turn_text or "").strip().lower().rstrip("!.,")
         is_filler = cleaned_turn in filler_acknowledgments
 
-        if is_filler and self.latest_decision is not None and not playbook and not calibration:
-            prev_dec = self.latest_decision
+        # Question pending check: if the previous action was an explicit question or closing ask,
+        # 'okay' / 'yeah' is an affirmative answer to the prompt, NOT an aimless filler backchannel!
+        prev_dec = self.latest_decision
+        has_pending_question = False
+        if prev_dec is not None:
+            has_pending_question = (
+                prev_dec.primary_action in (StrategicAction.QUESTION, StrategicAction.COMMITMENT_CLOSE)
+                or prev_dec.secondary_action == StrategicAction.QUESTION
+                or "QUESTION" in prev_dec.strategic_objective.upper()
+            )
+
+        # Staleness limit: Max 2 consecutive carried-forward turns before requiring fresh strategic evaluation
+        MAX_CONSECUTIVE_CARRIED_TURNS = 2
+        staleness_limit_reached = self.consecutive_carried_count >= MAX_CONSECUTIVE_CARRIED_TURNS
+
+        if (
+            is_filler
+            and prev_dec is not None
+            and not has_pending_question
+            and not staleness_limit_reached
+            and not playbook
+            and not calibration
+        ):
             if prev_dec.primary_action not in (StrategicAction.WAIT_SILENCE, StrategicAction.HOLD) and "HARD_BOUNDARY_ACTIVE" not in prev_dec.reason_codes:
+                self.consecutive_carried_count += 1
                 carried_dec = prev_dec.model_copy(deep=True)
                 carried_dec.decision_id = f"dec_{uuid.uuid4().hex[:10]}"
                 carried_dec.source_turn_id = effective_turn_id
@@ -269,15 +292,16 @@ class CoreDecisionManager:
                 carried_dec.metrics_source_turn_id = effective_turn_id
                 carried_dec.source_state_version = snapshot.state_version
                 carried_dec.source_event_id = effective_event_id
-                carried_dec.carried_forward_from_decision_id = prev_dec.decision_id
-                carried_dec.carried_forward_from_turn_id = prev_dec.source_turn_id
+                # Chained carry-forward: always point to the original root decision and turn
+                carried_dec.carried_forward_from_decision_id = prev_dec.carried_forward_from_decision_id or prev_dec.decision_id
+                carried_dec.carried_forward_from_turn_id = prev_dec.carried_forward_from_turn_id or prev_dec.source_turn_id
                 carried_dec.should_prompt = False  # Point 8: no new prompt needed for non-material filler
                 if "STRATEGY_CARRIED_FORWARD" not in carried_dec.reason_codes:
                     carried_dec.reason_codes.append("STRATEGY_CARRIED_FORWARD")
-                carried_dec.strategic_objective = f"Carried forward from Turn {prev_dec.source_turn_id}: {prev_dec.strategic_objective}"
+                carried_dec.strategic_objective = f"Carried forward from Turn {carried_dec.carried_forward_from_turn_id}: {prev_dec.strategic_objective}"
                 carried_dec.evidence_considered = [
                     f'Turn utterance ({turn_speaker}): "{turn_text.strip()}"',
-                    f"Strategy carried forward from decision {prev_dec.decision_id} (Turn {prev_dec.source_turn_id})",
+                    f"Strategy carried forward from decision {carried_dec.carried_forward_from_decision_id} (Turn {carried_dec.carried_forward_from_turn_id})",
                 ]
 
                 context = self.engine._build_context(snapshot)
@@ -289,6 +313,8 @@ class CoreDecisionManager:
                     self.decisions_by_turn[int(effective_turn_id)] = carried_dec
                 self.decisions_by_version[int(carried_dec.source_state_version)] = carried_dec
                 return eval_result
+        else:
+            self.consecutive_carried_count = 0
 
         eval_result = self.engine.evaluate(
             snapshot=snapshot,
