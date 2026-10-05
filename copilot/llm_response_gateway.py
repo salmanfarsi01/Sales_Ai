@@ -293,8 +293,11 @@ class LLMResponseGateway:
                     elif fact := snapshot.get_active_fact("confirmed_meeting_time"):
                         slot = fact.fact_value
                 if slot:
-                    return f"Perfect, I've noted {slot} for us. I will see you both then."
+                    cleaned_slot = re.sub(r"\bAt\b", "at", str(slot))
+                    return f"Perfect, I've noted {cleaned_slot} for us. I will see you both then."
                 return "Perfect, I have that noted down for us. I will see you both then."
+            if "CONTACT_PREFERENCE_DECLARED" in reasons or "CONTACT_PREFERENCE_ENFORCED" in reasons or "PROTECT_PROSPECT_PREFERENCE" in reasons:
+                return "I completely understand, no problem at all. We will respect your preferences."
             return "I completely understand where you're coming from."
         elif action == StrategicAction.CLARIFY:
             return "Could you share a little more about what would make the biggest difference for your situation?"
@@ -313,6 +316,31 @@ class LLMResponseGateway:
         elif action == StrategicAction.SOCIAL_PROOF:
             return "Let's focus on what matters for your specific situation."
         elif action == StrategicAction.QUESTION:
+            # 1. Scheduling Stage (Turns 8, 9, 16, 17)
+            if "STAGE_SCHEDULING" in reasons or (snapshot and "scheduling" in str(getattr(snapshot, "conversation_stage", "")).lower()):
+                has_constraint = False
+                if snapshot:
+                    if getattr(snapshot, "facts", None) and any(getattr(f, "fact_key", None) == "scheduling_constraint" or "morning" in str(getattr(f, "fact_value", "")).lower() for f in snapshot.facts):
+                        has_constraint = True
+                    elif getattr(snapshot, "contact_compliance", None) and any(getattr(p, "time_restriction", None) for p in snapshot.contact_compliance.contact_preferences):
+                        has_constraint = True
+                if has_constraint:
+                    return "What days or times usually work best for your schedule when reviewing options?"
+                return "Would Tuesday or Thursday afternoon work better for your schedule?"
+
+            # 2. Walkthrough transition / exploration (Turn 7)
+            if "STAGE_DEFAULT_ENGAGEMENT" in reasons:
+                return "Would sometime next week work for a quick 15-minute walkthrough?"
+
+            # 3. Discovery & timeline exploration
+            if "STAGE_DISCOVERY" in reasons or "EXPLORE_PROSPECT_NEEDS" in reasons:
+                has_timeline = False
+                if snapshot and getattr(snapshot, "facts", None):
+                    has_timeline = any(getattr(f, "fact_key", None) == "timeline_horizon" for f in snapshot.facts)
+                if has_timeline:
+                    return "Understood, what is driving your timeline for making a move?"
+                return "What would be the most important priority for you when evaluating your options?"
+
             return "What would be the most important outcome for you if you were to make a move?"
         elif action == StrategicAction.EDUCATE:
             return "Current market inventory is moving faster than last quarter, which directly impacts your pricing window."

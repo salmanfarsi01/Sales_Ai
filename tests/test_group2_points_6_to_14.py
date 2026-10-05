@@ -292,7 +292,51 @@ def test_point9_discipline_on_primary_secondary_strategy_stacking():
                 secondary_action_reason="test",  # Weak placeholder < 15 chars
             )
 
-        # Gibberish repetition like 'xxxxxxxxxxxxxxx' is rejected
+        # Boundary check: Exactly 14 characters is rejected
+        with pytest.raises(ValueError, match="requires a meaningful justification"):
+            StrategicDecision(
+                call_id="call_pt9_14chars",
+                source_state_version=1,
+                strategic_objective="Test 14 char justification",
+                primary_action=StrategicAction.QUESTION,
+                secondary_action=StrategicAction.MIRROR,
+                secondary_action_reason="Short reason..",  # exactly 14 characters
+            )
+
+        # Technically two-word non-answer ("not applicable") is rejected via placeholder dictionary
+        with pytest.raises(ValueError, match="requires a meaningful justification"):
+            StrategicDecision(
+                call_id="call_pt9_not_applicable",
+                source_state_version=1,
+                strategic_objective="Test non-answer justification",
+                primary_action=StrategicAction.QUESTION,
+                secondary_action=StrategicAction.MIRROR,
+                secondary_action_reason="not applicable",  # technically 2 words and 14 chars
+            )
+
+        # Repetitive words with >= 15 chars ('reframe reframe reframe') is rejected
+        with pytest.raises(ValueError, match="requires a meaningful justification"):
+            StrategicDecision(
+                call_id="call_pt9_repeated_words",
+                source_state_version=1,
+                strategic_objective="Test repeated words",
+                primary_action=StrategicAction.QUESTION,
+                secondary_action=StrategicAction.MIRROR,
+                secondary_action_reason="reframe reframe reframe",  # 23 chars, 3 words, but 1 unique word
+            )
+
+        # Low-entropy adversarial repetition ('abc abc abc abc') is rejected
+        with pytest.raises(ValueError, match="requires a meaningful justification"):
+            StrategicDecision(
+                call_id="call_pt9_low_entropy",
+                source_state_version=1,
+                strategic_objective="Test low entropy",
+                primary_action=StrategicAction.QUESTION,
+                secondary_action=StrategicAction.MIRROR,
+                secondary_action_reason="abc abc abc abc",  # 15 chars, 4 words, but only 3 unique characters
+            )
+
+        # Gibberish single-char repetition like 'xxxxxxxxxxxxxxx' is rejected
         with pytest.raises(ValueError, match="requires a meaningful justification"):
             StrategicDecision(
                 call_id="call_pt9_gibberish",
@@ -314,6 +358,18 @@ def test_point9_discipline_on_primary_secondary_strategy_stacking():
         )
         assert dec_valid.secondary_action is not None
         assert len(dec_valid.secondary_action_reason) >= 15
+
+        # Substantive reason containing phrase like 'as discussed' also passes cleanly
+        dec_valid_discussed = StrategicDecision(
+            call_id="call_pt9_valid_discussed",
+            source_state_version=1,
+            strategic_objective="Test valid justification with conversational phrase",
+            primary_action=StrategicAction.CLARIFY,
+            secondary_action=StrategicAction.QUESTION,
+            secondary_action_reason="As discussed with the homeowner during discovery, explore property timeline.",
+        )
+        assert dec_valid_discussed.secondary_action is not None
+        assert len(dec_valid_discussed.secondary_action_reason) >= 15
     finally:
         os.environ.pop("STRICT_INVARIANT_RAISE", None)
 

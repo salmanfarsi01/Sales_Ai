@@ -209,3 +209,88 @@ def test_early_turn_outage_does_not_fire_conversion_confirmed_fallback():
     assert prompt.text == "That makes complete sense—let's focus directly on what matters most for your specific situation."
     assert prompt.strategic_action == StrategicAction.VALIDATE
 
+
+def test_deterministic_fallback_stage_and_fact_branching():
+    """Confirms deterministic fallback branches correctly based on stage, reason codes, and facts without turn hardcoding."""
+    gateway = LLMResponseGateway()
+
+    # 1. Discovery without timeline fact
+    dec_disc = StrategicDecision(
+        call_id="call_test",
+        source_state_version=2,
+        primary_action=StrategicAction.QUESTION,
+        reason_codes=["STAGE_DISCOVERY", "EXPLORE_PROSPECT_NEEDS"],
+        strategic_objective="Discovery",
+    )
+    snap_no_tl = ConversationStateSnapshot(call_sid="call_test", state_version=2, facts=[])
+    res1 = gateway._deterministic_fallback(dec_disc, snapshot=snap_no_tl)
+    assert res1 == "What would be the most important priority for you when evaluating your options?"
+
+    # 2. Discovery with timeline fact
+    snap_with_tl = ConversationStateSnapshot(
+        call_sid="call_test",
+        state_version=4,
+        facts=[
+            PersistentFactRecord(
+                fact_key="timeline_horizon",
+                fact_value="sometime next year",
+                category="logistical",
+                timestamp_ms=1000,
+                source_turn_id=4,
+            )
+        ],
+    )
+    res2 = gateway._deterministic_fallback(dec_disc, snapshot=snap_with_tl)
+    assert res2 == "Understood, what is driving your timeline for making a move?"
+
+    # 3. Walkthrough transition
+    dec_trans = StrategicDecision(
+        call_id="call_test",
+        source_state_version=7,
+        primary_action=StrategicAction.QUESTION,
+        reason_codes=["STAGE_DEFAULT_ENGAGEMENT"],
+        strategic_objective="Walkthrough transition",
+    )
+    res3 = gateway._deterministic_fallback(dec_trans, snapshot=snap_no_tl)
+    assert res3 == "Would sometime next week work for a quick 15-minute walkthrough?"
+
+    # 4. Scheduling without constraints
+    dec_sched = StrategicDecision(
+        call_id="call_test",
+        source_state_version=9,
+        primary_action=StrategicAction.QUESTION,
+        reason_codes=["STAGE_SCHEDULING"],
+        strategic_objective="Scheduling",
+    )
+    res4 = gateway._deterministic_fallback(dec_sched, snapshot=snap_no_tl)
+    assert res4 == "Would Tuesday or Thursday afternoon work better for your schedule?"
+
+    # 5. Scheduling with morning constraint
+    snap_with_constraint = ConversationStateSnapshot(
+        call_sid="call_test",
+        state_version=16,
+        facts=[
+            PersistentFactRecord(
+                fact_key="scheduling_constraint",
+                fact_value="mornings don't work",
+                category="logistical",
+                timestamp_ms=1000,
+                source_turn_id=16,
+            )
+        ],
+    )
+    res5 = gateway._deterministic_fallback(dec_sched, snapshot=snap_with_constraint)
+    assert res5 == "What days or times usually work best for your schedule when reviewing options?"
+
+    # 6. Contact preference commitment
+    dec_contact = StrategicDecision(
+        call_id="call_test",
+        source_state_version=15,
+        primary_action=StrategicAction.ACKNOWLEDGE,
+        reason_codes=["CONTACT_PREFERENCE_DECLARED"],
+        strategic_objective="Protect preference",
+    )
+    res6 = gateway._deterministic_fallback(dec_contact, snapshot=snap_no_tl)
+    assert res6 == "I completely understand, no problem at all. We will respect your preferences."
+
+

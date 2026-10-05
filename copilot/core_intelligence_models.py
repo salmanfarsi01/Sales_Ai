@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 import uuid
 from enum import Enum
 from typing import Any, Dict, List, Literal, Optional, Union
@@ -252,11 +253,28 @@ class StrategicDecision(BaseModel):
                 self.secondary_action_reason = f"Reinforces '{self.secondary_action.value}' to support primary action '{self.primary_action.value}'"
             else:
                 reason = self.secondary_action_reason.strip()
-                weak_placeholders = {"test", "n/a", "none", "secondary", "because", "secondary action", "stacking"}
-                is_gibberish = len(set(reason.lower())) < 4 or len(reason.split()) < 2
-                if len(reason) < 15 or reason.lower() in weak_placeholders or is_gibberish:
+                clean_reason = re.sub(r"[^\w\s]", "", reason.lower()).strip()
+                words = clean_reason.split()
+                unique_words = set(words)
+                weak_placeholders = {
+                    "test", "na", "n/a", "none", "secondary", "because", "secondary action",
+                    "stacking", "not applicable", "as discussed", "see above", "just because",
+                    "no reason", "placeholder reason", "placeholder", "tbd", "todo",
+                    "reinforces action", "support primary", "general reason"
+                }
+                is_placeholder = clean_reason in weak_placeholders or (
+                    len(words) <= 4 and any(clean_reason == p or clean_reason.startswith(p + " ") for p in ("not applicable", "placeholder", "as discussed", "see above", "tbd"))
+                )
+                is_low_entropy = len(set(c for c in clean_reason if not c.isspace())) < 5
+                is_repetitive_words = len(words) >= 2 and len(unique_words) < 2
+                is_too_short = len(reason) < 15 or len(words) < 2
+
+                if is_too_short or is_placeholder or is_low_entropy or is_repetitive_words:
                     if strict_raise:
-                        raise ValueError(f"secondary_action '{self.secondary_action.value}' requires a meaningful justification (at least 15 chars, 2 words, non-repetitive, got: '{reason}')")
+                        raise ValueError(
+                            f"secondary_action '{self.secondary_action.value}' requires a meaningful justification "
+                            f"(at least 15 chars, 2 unique words, non-repetitive, non-placeholder, got: '{reason}')"
+                        )
                     else:
                         self.secondary_action_reason = f"Reinforces '{self.secondary_action.value}' to support primary action '{self.primary_action.value}'"
 
