@@ -300,6 +300,81 @@ def test_situation_1_same_user_same_prospect_eligible_memory_loads_under_policy(
     assert len(mgr.current_state.contact_compliance.contact_preferences) == 1
     cp = mgr.current_state.contact_compliance.contact_preferences[0]
     assert cp.source_turn_id == 15, "Compliance entry must carry original turn provenance"
+    
+    # Rule (b): An applied historical preference is tagged as historical with its source call
+    assert cp.is_historical is True, "Rule (b): Applied historical preference must be tagged as is_historical=True"
+    assert cp.source_call_sid == "call_david_call1", "Rule (b): Applied historical preference must record its source_call_sid"
+
+    # Rule (a): Timeline and fact memories do not change contact_compliance
+    store_non_compliance = ProspectMemoryStore()
+    store_non_compliance.save_record(
+        user_id=user,
+        prospect_id="prospect_timeline_only",
+        source_call_sid="call_david_prior",
+        memory_type="timeline",
+        key="timeline_horizon",
+        value="six_months",
+        content="Moving in six months",
+        source_turn_id=2,
+    )
+    store_non_compliance.save_record(
+        user_id=user,
+        prospect_id="prospect_timeline_only",
+        source_call_sid="call_david_prior",
+        memory_type="fact",
+        key="property_type",
+        value="condo",
+        content="Selling a 2-bedroom condo",
+        source_turn_id=3,
+    )
+    mgr_non_compliance = ConversationStateManager(
+        call_sid="call_david_test_non_comp",
+        user_id=user,
+        prospect_id="prospect_timeline_only",
+        load_prospect_memory=True,
+        memory_store=store_non_compliance,
+    )
+    assert mgr_non_compliance.current_state.contact_compliance.contact_preference == "none", "Rule (a): timeline/facts must not change contact_preference"
+    assert len(mgr_non_compliance.current_state.contact_compliance.contact_preferences) == 0, "Rule (a): timeline/facts must not populate contact_preferences"
+
+    # Rule (c): A historical preference cannot override a newer in-call one
+    # In the normal flow: historical preference was loaded at turn 0 (sms, reduced_frequency, is_historical=True)
+    # At turn 1, client provides an updated in-call preference on the same channel (sms)
+    from copilot.conversation_state_contract import BehavioralSignalInputBundle, DimensionScore, EmotionState
+    incall_bundle = BehavioralSignalInputBundle(
+        call_sid="call_david_call2",
+        turn_id=1,
+        speaker_id="client",
+        utterance_text="Please don't text me before 10am, that's my main preference.",
+        timestamp_ms=1000,
+        trust=DimensionScore(score=0.5, confidence=0.85, primary_horizon="last_20_30s"),
+        emotion=EmotionState(expressed_valence=0.0, tension_level=0.2, confidence=0.85),
+        pacing=DimensionScore(score=0.6, confidence=0.8, primary_horizon="current_utterance"),
+        engagement=DimensionScore(score=0.5, confidence=0.85, primary_horizon="last_20_30s"),
+        momentum=DimensionScore(score=0.5, confidence=0.8, primary_horizon="last_60_90s"),
+        readiness=DimensionScore(score=0.5, confidence=0.8, primary_horizon="last_60_90s"),
+        contact_preference="timing_restriction",
+        contact_preference_details="no texts before 10am",
+        contact_preference_confidence=0.95,
+    )
+    mgr.process_turn_bundle(incall_bundle)
+
+    # Assert Rule (c) Normal Flow: In-call preference replaces the historical one on the same channel
+    assert len(mgr.current_state.contact_compliance.contact_preferences) == 1
+    active_pref = mgr.current_state.contact_compliance.contact_preferences[0]
+    assert active_pref.channel == "sms"
+    assert active_pref.is_historical is False, "Rule (c): In-call preference must not be marked historical"
+    assert active_pref.source_call_sid == "call_david_call2", "Rule (c): In-call preference source must be current call_sid"
+    assert mgr.current_state.contact_compliance.contact_preference == "timing_restriction", \
+        "Rule (c): Effective preference must follow the newer in-call declaration"
+
+    # Even if _load_prospect_memory is re-run with historical data, it CANNOT override the newer in-call preference
+    mgr._load_prospect_memory(prospect_id=prospect, user_id=user)
+    assert len(mgr.current_state.contact_compliance.contact_preferences) == 1
+    still_active = mgr.current_state.contact_compliance.contact_preferences[0]
+    assert still_active.is_historical is False, "Rule (c): Historical memory cannot overwrite newer in-call preference"
+    assert still_active.source_call_sid == "call_david_call2"
+    assert mgr.current_state.contact_compliance.contact_preference == "timing_restriction"
 
 
 def test_situation_2_new_call_same_user_same_prospect_fresh_state_with_provenance_tagged_memory(memory_store):
@@ -556,3 +631,13 @@ def test_point18_no_team_or_shared_memory_retrieval_guard(memory_store):
     csm_source = inspect.getsource(ConversationStateManager._load_prospect_memory)
     assert "user_id" in csm_source
     assert "Point 18 fail-closed" in csm_source
+
+    # 5. Verify clear() is test-gated and cannot be invoked without explicit test context
+    import os
+    orig_env = os.environ.pop("PYTEST_CURRENT_TEST", None)
+    try:
+        with pytest.raises(RuntimeError, match="restricted to test environments"):
+            memory_store.clear()
+    finally:
+        if orig_env is not None:
+            os.environ["PYTEST_CURRENT_TEST"] = orig_env

@@ -267,6 +267,8 @@ class ContactPreference(BaseModel):
     boundary_strength: Literal["preference", "hard_restriction"] = "preference"
     source_turn_id: int
     confidence: float = 1.0
+    is_historical: bool = False
+    source_call_sid: Optional[str] = None
 
 
 class ContactComplianceState(BaseModel):

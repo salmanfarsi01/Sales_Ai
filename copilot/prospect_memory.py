@@ -355,8 +355,15 @@ class ProspectMemoryStore:
             self._persist()
             return count
 
-    def clear(self) -> None:
-        """Clears all records in memory and on disk (for test fixture setup)."""
+    def clear(self, test_only_confirmation: bool = False) -> None:
+        """Clears all records in memory and on disk (strictly for test fixture setup)."""
+        import os
+        is_test_env = "PYTEST_CURRENT_TEST" in os.environ or test_only_confirmation
+        if not is_test_env:
+            raise RuntimeError(
+                "ProspectMemoryStore.clear() is restricted to test environments. "
+                "Production callers must not invoke unpartitioned clear operations."
+            )
         self._storage.clear()
         if self.store_path.exists():
             try:

@@ -134,11 +134,21 @@ class ContactPreferenceRecord(BaseModel):
 
 
 class ContactPreferenceStore:
+    """DEPRECATED: Legacy unpartitioned prospect preference store.
+    
+    Superseded by copilot.prospect_memory.ProspectMemoryStore which enforces
+    mandatory user_id partitioning and Point 15-18 isolation invariants.
+    Retained solely for test fixture compatibility.
+    """
     def __init__(self, store_path: Optional[Path] = None):
         if store_path is None:
             base_dir = Path(__file__).resolve().parent.parent / "knowledge"
             base_dir.mkdir(parents=True, exist_ok=True)
             self.store_path = base_dir / "prospect_preferences.json"
+            LOGGER.warning(
+                "ContactPreferenceStore is deprecated and unpartitioned (Point 18). "
+                "Use ProspectMemoryStore with mandatory user_id."
+            )
         else:
             self.store_path = store_path
 
@@ -147,12 +157,18 @@ class ContactPreferenceStore:
             return {}
         try:
             with open(self.store_path, "r", encoding="utf-8") as f:
-                return json.load(f)
+                data = json.load(f)
+                if isinstance(data, dict) and data.get("_STATUS") == "QUARANTINED_DEPRECATED":
+                    return {}
+                return data if isinstance(data, dict) else {}
         except Exception as exc:
             LOGGER.warning("Could not read contact preference store: %s", exc)
             return {}
 
     def _write_data(self, data: Dict[str, Any]) -> None:
+        if self.store_path.name == "prospect_preferences.json":
+            LOGGER.warning("Refusing to write to quarantined legacy prospect_preferences.json")
+            return
         try:
             self.store_path.parent.mkdir(parents=True, exist_ok=True)
             with open(self.store_path, "w", encoding="utf-8") as f:

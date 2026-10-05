@@ -203,11 +203,21 @@ class ConversationStateManager:
                 # If this memory item represents contact compliance/preference, also register in compliance state
                 if rec.memory_type == "contact_preference":
                     pref_data = rec.metadata or {}
+                    chan = pref_data.get("channel", "sms" if "text" in rec.content.lower() else "call")
+
+                    # Rule (c): A historical preference cannot override a newer in-call preference
+                    has_newer_incall_pref = any(
+                        p.channel == chan and not getattr(p, "is_historical", False)
+                        for p in self.current_state.contact_compliance.contact_preferences
+                    )
+                    if has_newer_incall_pref:
+                        LOGGER.info("Skipping historical contact preference for %s: superseded by newer in-call preference", chan)
+                        continue
+
                     pref_val = rec.value if isinstance(rec.value, str) else pref_data.get("preference", "reduced_frequency")
                     self.current_state.contact_compliance.contact_preference = pref_val
                     self.current_state.contact_compliance.contact_preference_details = rec.content
                     self.current_state.contact_compliance.contact_preference_confidence = rec.confidence
-                    chan = pref_data.get("channel", "sms" if "text" in rec.content.lower() else "call")
                     self.current_state.contact_compliance.contact_preferences.append(
                         ContactPreference(
                             channel=chan,
@@ -216,6 +226,8 @@ class ConversationStateManager:
                             prohibited_behavior=pref_data.get("prohibited_behavior", rec.content),
                             source_turn_id=rec.source_turn_id or 0,
                             confidence=rec.confidence,
+                            is_historical=True,
+                            source_call_sid=rec.source_call_sid,
                         )
                     )
         except Exception as exc:
@@ -689,6 +701,8 @@ class ConversationStateManager:
                 confidence=bundle.contact_preference_confidence or 0.90,
             )
             if new_pref:
+                new_pref.source_call_sid = self.call_sid
+                new_pref.is_historical = False
                 existing_idx = next((i for i, p in enumerate(prefs) if p.channel == new_pref.channel), None)
                 if existing_idx is not None:
                     prefs[existing_idx] = new_pref
