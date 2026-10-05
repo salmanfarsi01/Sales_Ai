@@ -1,0 +1,119 @@
+{
+  "legacy_migrated_user": {
+    "test_prospect_001": [
+      {
+        "memory_id": "mem_migrated_001",
+        "user_id": "legacy_migrated_user",
+        "prospect_id": "test_prospect_001",
+        "source_call_sid": "test_call_001",
+        "timestamp": 320698,
+        "memory_type": "contact_preference",
+        "source_turn_id": 91,
+        "source_event_id": "ev_migrated_001",
+        "key": "contact_preference",
+        "value": "reduced_frequency",
+        "content": "don't start texting me every day",
+        "confidence": 0.9,
+        "metadata": {
+          "preference": "reduced_frequency",
+          "channel": "sms",
+          "allowed": true,
+          "cadence": "reduced",
+          "prohibited_behavior": "don't start texting me every day"
+        }
+      }
+    ],
+    "test_prospect_023": [
+      {
+        "memory_id": "mem_migrated_023",
+        "user_id": "legacy_migrated_user",
+        "prospect_id": "test_prospect_023",
+        "source_call_sid": "test_call_023",
+        "timestamp": 15204,
+        "memory_type": "contact_preference",
+        "source_turn_id": 5,
+        "source_event_id": "ev_migrated_023",
+        "key": "contact_preference",
+        "value": "reduced_frequency",
+        "content": "don't start texting me every day",
+        "confidence": 0.9,
+        "metadata": {
+          "preference": "reduced_frequency",
+          "channel": "sms",
+          "allowed": true,
+          "cadence": "reduced",
+          "prohibited_behavior": "don't start texting me every day"
+        }
+      }
+    ],
+    "test_prospect_033": [
+      {
+        "memory_id": "mem_migrated_033",
+        "user_id": "legacy_migrated_user",
+        "prospect_id": "test_prospect_033",
+        "source_call_sid": "test_call_033",
+        "timestamp": 32465,
+        "memory_type": "contact_preference",
+        "source_turn_id": 4,
+        "source_event_id": "ev_migrated_033",
+        "key": "contact_preference",
+        "value": "reduced_frequency",
+        "content": "don't start texting me every day",
+        "confidence": 0.9,
+        "metadata": {
+          "preference": "reduced_frequency",
+          "channel": "sms",
+          "allowed": true,
+          "cadence": "reduced",
+          "prohibited_behavior": "don't start texting me every day"
+        }
+      }
+    ],
+    "test_prospect_055": [
+      {
+        "memory_id": "mem_migrated_055",
+        "user_id": "legacy_migrated_user",
+        "prospect_id": "test_prospect_055",
+        "source_call_sid": "test_call_055",
+        "timestamp": 7841,
+        "memory_type": "contact_preference",
+        "source_turn_id": 2,
+        "source_event_id": "ev_migrated_055",
+        "key": "contact_preference",
+        "value": "reduced_frequency",
+        "content": "don't start texting me every day",
+        "confidence": 0.9,
+        "metadata": {
+          "preference": "reduced_frequency",
+          "channel": "sms",
+          "allowed": true,
+          "cadence": "reduced",
+          "prohibited_behavior": "don't start texting me every day"
+        }
+      }
+    ],
+    "test_prospect_063": [
+      {
+        "memory_id": "mem_migrated_063",
+        "user_id": "legacy_migrated_user",
+        "prospect_id": "test_prospect_063",
+        "source_call_sid": "test_call_063",
+        "timestamp": 7192,
+        "memory_type": "contact_preference",
+        "source_turn_id": 2,
+        "source_event_id": "ev_migrated_063",
+        "key": "contact_preference",
+        "value": "reduced_frequency",
+        "content": "don't start texting me every day",
+        "confidence": 0.9,
+        "metadata": {
+          "preference": "reduced_frequency",
+          "channel": "sms",
+          "allowed": true,
+          "cadence": "reduced",
+          "prohibited_behavior": "don't start texting me every day"
+        }
+      }
+    ]
+  }
+}

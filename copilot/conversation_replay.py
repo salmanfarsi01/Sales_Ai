@@ -105,6 +105,7 @@ class ConversationReplayEngine:
         conversion_target: str = "appointment",
         load_prospect_memory: bool = False,
         prospect_id: Optional[str] = None,
+        user_id: Optional[str] = None,
     ) -> ConversationStateReplayReport:
         """Replays an ordered list of turn bundles through ConversationStateManager.
 
@@ -122,6 +123,7 @@ class ConversationReplayEngine:
             conversion_target=conversion_target,
             load_prospect_memory=load_prospect_memory,
             prospect_id=prospect_id,
+            user_id=user_id,
         )
 
         timeline: List[TurnReplayStep] = []
@@ -492,6 +494,7 @@ class ConversationReplayEngine:
         conversion_target: str = "appointment",
         load_prospect_memory: bool = False,
         prospect_id: Optional[str] = None,
+        user_id: Optional[str] = None,
     ) -> ConversationStateReplayReport:
         """Helper to convert raw turn dicts into bundles and run replay.
 
@@ -579,6 +582,7 @@ class ConversationReplayEngine:
             conversion_target=conversion_target,
             load_prospect_memory=load_prospect_memory,
             prospect_id=prospect_id,
+            user_id=user_id,
         )
 
     def get_conversion_event_history(self, call_sid: str) -> List[Dict[str, Any]]:

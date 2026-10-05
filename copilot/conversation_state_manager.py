@@ -111,10 +111,14 @@ class ConversationStateManager:
         conversion_target: str = "appointment",
         load_prospect_memory: bool = False,
         prospect_id: Optional[str] = None,
+        user_id: Optional[str] = None,
+        memory_store: Optional[Any] = None,
     ):
         self.call_sid = str(call_sid)
         self.conversion_target = conversion_target
         self.prospect_id = prospect_id
+        self.user_id = user_id
+        self.memory_store = memory_store
         
         # Point 2: Guarantee clean-slate state isolation. If an initial snapshot is passed,
         # deep-copy it so caller mutations never cross into this manager instance.
@@ -124,9 +128,12 @@ class ConversationStateManager:
         else:
             self.current_state = ConversationStateSnapshot(call_sid=self.call_sid)
 
-        # Explicit Prospect Memory Loading (separate, intentional path)
-        if load_prospect_memory and prospect_id:
-            self._load_prospect_memory(prospect_id)
+        # Explicit Prospect Memory Loading (separate, intentional path per Group 3)
+        if load_prospect_memory:
+            if not self.user_id or not str(self.user_id).strip():
+                LOGGER.warning("load_prospect_memory=True passed without mandatory user_id. Failing closed: zero memory loaded (Point 18).")
+            elif prospect_id:
+                self._load_prospect_memory(prospect_id, user_id=self.user_id)
 
         self.facts_manager = PersistentFactsManager(initial_facts=[f.model_copy(deep=True) for f in self.current_state.facts])
         dormancy_thresh = scoring_config.dormancy_turn_threshold if scoring_config else 3
@@ -170,31 +177,80 @@ class ConversationStateManager:
         self.current_state.deal_dispositions = list(self._deal_dispositions)
         self.last_materiality: Optional[MaterialityClassification] = None
 
-    def _load_prospect_memory(self, prospect_id: str) -> None:
+    def _load_prospect_memory(self, prospect_id: str, user_id: Optional[str] = None) -> None:
         """Explicitly loads historical prospect memory (e.g. contact preferences, persistent boundary constraints)
         for returning prospects. This path is NEVER executed automatically on new calls unless explicitly requested.
+
+        Point 15 & Point 18 Security Invariants:
+        1. Retrieval is strictly scoped: user_id -> prospect_id.
+        2. If user_id is missing or empty, execution fails closed (zero memory loaded).
+           Universal or unscoped retrieval across users is structurally prohibited (Point 18).
+        3. Memories are loaded into self.current_state.loaded_prospect_memory with complete provenance
+           and kept separate from current-call facts to prevent silent fact conflation (Point 17 Situation 2).
         """
+        if not user_id or not str(user_id).strip():
+            LOGGER.warning("Refusing to load prospect memory without mandatory user_id (Point 18 fail-closed).")
+            return
+
         try:
-            from .behavioral_baseline import ContactPreferenceStore
-            pref_store = ContactPreferenceStore()
-            rec = pref_store.get_preference(prospect_id)
-            if rec:
-                self.current_state.contact_compliance.contact_preference = rec.preference or "none"
-                self.current_state.contact_compliance.contact_preference_details = rec.details
-                self.current_state.contact_compliance.contact_preference_confidence = rec.confidence or 0.8
-                chan = rec.channel or ("sms" if "text" in (rec.details or "").lower() else "call")
-                self.current_state.contact_compliance.contact_preferences.append(
-                    ContactPreference(
-                        channel=chan,
-                        allowed=rec.allowed if getattr(rec, "allowed", None) is not None else True,
-                        cadence=rec.cadence or "reduced",
-                        prohibited_behavior=rec.prohibited_behavior or rec.details,
-                        source_turn_id=0,
-                        confidence=rec.confidence or 0.8,
+            from .prospect_memory import ProspectMemoryStore
+            store = self.memory_store or ProspectMemoryStore()
+            records = store.retrieve_memories(user_id=user_id, prospect_id=prospect_id)
+            for rec in records:
+                loaded_item = rec.to_loaded_memory()
+                self.current_state.loaded_prospect_memory.append(loaded_item)
+                
+                # If this memory item represents contact compliance/preference, also register in compliance state
+                if rec.memory_type == "contact_preference":
+                    pref_data = rec.metadata or {}
+                    pref_val = rec.value if isinstance(rec.value, str) else pref_data.get("preference", "reduced_frequency")
+                    self.current_state.contact_compliance.contact_preference = pref_val
+                    self.current_state.contact_compliance.contact_preference_details = rec.content
+                    self.current_state.contact_compliance.contact_preference_confidence = rec.confidence
+                    chan = pref_data.get("channel", "sms" if "text" in rec.content.lower() else "call")
+                    self.current_state.contact_compliance.contact_preferences.append(
+                        ContactPreference(
+                            channel=chan,
+                            allowed=pref_data.get("allowed", True),
+                            cadence=pref_data.get("cadence", "reduced"),
+                            prohibited_behavior=pref_data.get("prohibited_behavior", rec.content),
+                            source_turn_id=rec.source_turn_id or 0,
+                            confidence=rec.confidence,
+                        )
                     )
-                )
         except Exception as exc:
-            LOGGER.warning("Could not load prospect memory for %s: %s", prospect_id, exc)
+            LOGGER.warning("Could not load prospect memory for user %s, prospect %s: %s", user_id, prospect_id, exc)
+
+    def save_prospect_memory(
+        self,
+        memory_type: str,
+        key: str,
+        value: Any,
+        content: str,
+        source_turn_id: Optional[int] = None,
+        source_event_id: Optional[str] = None,
+        confidence: float = 1.0,
+        metadata: Optional[Dict[str, Any]] = None,
+    ) -> Optional[Any]:
+        """Saves a memory record strictly scoped to this manager's user_id and prospect_id (Point 15)."""
+        if not self.user_id or not self.prospect_id:
+            LOGGER.warning("Cannot save prospect memory: user_id and prospect_id are required (Point 15)")
+            return None
+        from .prospect_memory import ProspectMemoryStore
+        store = self.memory_store or ProspectMemoryStore()
+        return store.save_record(
+            user_id=self.user_id,
+            prospect_id=self.prospect_id,
+            source_call_sid=self.call_sid,
+            memory_type=memory_type,
+            key=key,
+            value=value,
+            content=content,
+            source_turn_id=source_turn_id,
+            source_event_id=source_event_id,
+            confidence=confidence,
+            metadata=metadata,
+        )
 
 
     def process_turn_bundle(

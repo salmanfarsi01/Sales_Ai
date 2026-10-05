@@ -80,25 +80,37 @@ def test_point2_new_call_initialization_zero_shared_state():
 
 
 def test_point2_prospect_memory_explicit_loading_isolation():
-    """Point 2: Prospect memory is ONLY loaded when load_prospect_memory=True is explicitly passed."""
+    """Point 2: Prospect memory is ONLY loaded when load_prospect_memory=True is explicitly passed with authorized user_id."""
     # When load_prospect_memory is False (default): clean slate
     mgr_fresh = ConversationStateManager(
         call_sid="call_fresh_prospect",
+        user_id="legacy_migrated_user",
         prospect_id="test_prospect_001",
         load_prospect_memory=False,
     )
     assert len(mgr_fresh.current_state.contact_compliance.contact_preferences) == 0
     assert mgr_fresh.current_state.contact_compliance.contact_preference == "none"
 
-    # When load_prospect_memory is True: intentionally loads saved prospect boundary
-    mgr_returning = ConversationStateManager(
-        call_sid="call_returning_prospect",
+    # When load_prospect_memory is True without user_id: fails closed (Point 18 security invariant)
+    mgr_no_user = ConversationStateManager(
+        call_sid="call_no_user",
+        user_id=None,
         prospect_id="test_prospect_001",
         load_prospect_memory=True,
     )
-    # test_prospect_001 has reduced_frequency in prospect_preferences.json
+    assert len(mgr_no_user.current_state.contact_compliance.contact_preferences) == 0
+    assert len(mgr_no_user.current_state.loaded_prospect_memory) == 0
+
+    # When load_prospect_memory is True with authorized user_id: intentionally loads saved prospect boundary
+    mgr_returning = ConversationStateManager(
+        call_sid="call_returning_prospect",
+        user_id="legacy_migrated_user",
+        prospect_id="test_prospect_001",
+        load_prospect_memory=True,
+    )
     assert mgr_returning.current_state.contact_compliance.contact_preference == "reduced_frequency"
     assert len(mgr_returning.current_state.contact_compliance.contact_preferences) >= 1
+    assert len(mgr_returning.current_state.loaded_prospect_memory) >= 1
 
 
 def test_point3_cache_isolation_keying():

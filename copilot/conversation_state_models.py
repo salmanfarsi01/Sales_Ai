@@ -5,6 +5,8 @@ from enum import Enum
 from typing import Any, Dict, List, Literal, Optional
 from pydantic import BaseModel, Field
 
+from .prospect_memory import LoadedProspectMemory
+
 class ObjectionLifecycleState(str, Enum):
     ACTIVE = "active"
     PARTIALLY_ADDRESSED = "partially_addressed"
@@ -475,6 +477,19 @@ class ConversationStateSnapshot(BaseModel):
     compliance_events: List[ComplianceEvent] = Field(default_factory=list)
     overall_confidence: float = Field(0.75, ge=0.0, le=1.0)
     change_history: List[StateChangeRecord] = Field(default_factory=list)
+    loaded_prospect_memory: List[LoadedProspectMemory] = Field(
+        default_factory=list,
+        description="Eligible historical prospect memory records loaded with provenance, kept separate from current-call facts (Point 17).",
+    )
+
+    def get_loaded_prospect_memories(self) -> List[LoadedProspectMemory]:
+        return list(self.loaded_prospect_memory)
+
+    def get_loaded_prospect_memory(self, key: str) -> Optional[LoadedProspectMemory]:
+        for m in reversed(self.loaded_prospect_memory):
+            if m.key == key:
+                return m
+        return None
 
     def get_active_facts(self) -> List[PersistentFactRecord]:
         return [f for f in self.facts if f.status == "active"]
