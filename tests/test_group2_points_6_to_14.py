@@ -281,6 +281,17 @@ def test_point9_discipline_on_primary_secondary_strategy_stacking():
                 secondary_action_reason="test",  # Weak placeholder < 15 chars
             )
 
+        # Gibberish repetition like 'xxxxxxxxxxxxxxx' is rejected
+        with pytest.raises(ValueError, match="requires a meaningful justification"):
+            StrategicDecision(
+                call_id="call_pt9_gibberish",
+                source_state_version=1,
+                strategic_objective="Test gibberish justification",
+                primary_action=StrategicAction.QUESTION,
+                secondary_action=StrategicAction.MIRROR,
+                secondary_action_reason="xxxxxxxxxxxxxxx",  # 15 chars but single character gibberish
+            )
+
         # Valid meaningful reason passes cleanly
         dec_valid = StrategicDecision(
             call_id="call_pt9_valid",
@@ -388,6 +399,37 @@ def test_point10_confidence_downgrades_commitment_close_to_cautious_action():
     eval_custom = engine_custom.evaluate(snapshot=snap_boundary, turn_speaker="client", turn_text="Thursday at 3 works.", turn_id=18)
     # 0.65 is below custom 0.80 -> downgrades!
     assert eval_custom.decision.primary_action == StrategicAction.CLARIFY
+
+    # Case E: Otherwise 'confirm' scenario (confirm_and_protect path) with low confidence
+    # If an appointment is confirmed but overall confidence is low (< 0.65), it must downgrade to CLARIFY to verify understanding
+    snap_confirm_low = ConversationStateSnapshot(
+        call_sid="call_pt10_confirm_low",
+        state_version=6,
+        conversation_stage=ConversationStage.COMMITMENT_CONFIRMED,
+        conversion_gate=MeetingConversionGate(
+            is_open=True,
+            confidence=0.40,
+            commitment_slot="Thursday at 3:00 PM",
+            unknown_conditions=[],
+        ),
+        conversion_event=ConversionEventObject(
+            event_id="conv_pt10_low",
+            conversion_type="in_person_meeting",
+            status=ConversionEventStatus.CONFIRMED,
+            start_at="Thursday at 3:00 PM",
+            location_or_format="Scheduled Meeting",
+            participants=["Client", "Agent"],
+            confirmation_confidence=0.40,
+            source_turn_ids=[18],
+        ),
+        dimensions=DimensionScores(trust=0.40, trust_confidence=0.40, trust_measured=True),
+    )
+    eval_confirm_low = engine.evaluate(snapshot=snap_confirm_low, turn_speaker="client", turn_text="Thursday at 3 works.", turn_id=18)
+    dec_confirm_low = eval_confirm_low.decision
+    assert dec_confirm_low.primary_action == StrategicAction.CLARIFY
+    assert dec_confirm_low.strategic_posture == "explore"
+    assert "LOW_CONFIDENCE_ACTION_DOWNGRADE" in dec_confirm_low.reason_codes
+    assert "Verify understanding" in (dec_confirm_low.secondary_action_reason or "")
 
 
 def test_point11_evidence_considered_filters_irrelevant_metrics():
@@ -588,6 +630,28 @@ def test_point13_preserve_strategy_across_filler_turns():
     eval_ans = cdm2.evaluate_state(snapshot=snap_q, turn_speaker="client", turn_text="okay", turn_id=2)
     # Must NOT be carried forward because a question was pending!
     assert "STRATEGY_CARRIED_FORWARD" not in eval_ans.decision.reason_codes
+
+    # Prompt ending in '?' guard: Even if action was ACKNOWLEDGE, if the prompt asked 'Would Tuesday work?', 'yeah' is an answer!
+    cdm_prompt = CoreDecisionManager(call_sid="call_pt13_prompt_q")
+    eval_p = cdm_prompt.evaluate_state(snapshot=snap_q, turn_speaker="salesperson", turn_text="Got it.", turn_id=1)
+    eval_p.decision.primary_action = StrategicAction.ACKNOWLEDGE
+    eval_p.decision.final_prompt_text = "Would Tuesday at 4 work for you?"
+    cdm_prompt.latest_decision = eval_p.decision
+    eval_ans2 = cdm_prompt.evaluate_state(snapshot=snap_q, turn_speaker="client", turn_text="yeah", turn_id=2)
+    assert "STRATEGY_CARRIED_FORWARD" not in eval_ans2.decision.reason_codes
+
+    # Configurable max_carried_turns test (e.g. limit = 1)
+    cdm_custom = CoreDecisionManager(call_sid="call_pt13_custom_limit", max_carried_turns=1)
+    snap_c = ConversationStateSnapshot(call_sid="call_pt13_custom_limit", state_version=1, conversation_stage=ConversationStage.DISCOVERY)
+    ev_c1 = cdm_custom.evaluate_state(snapshot=snap_c, turn_speaker="client", turn_text="We might move.", turn_id=1)
+    ev_c1.decision.primary_action = StrategicAction.ACKNOWLEDGE
+    cdm_custom.latest_decision = ev_c1.decision
+    # 1st carried turn -> carried forward
+    ev_c2 = cdm_custom.evaluate_state(snapshot=snap_c, turn_speaker="client", turn_text="okay", turn_id=2)
+    assert "STRATEGY_CARRIED_FORWARD" in ev_c2.decision.reason_codes
+    # 2nd carried turn -> exceeds limit of 1 -> fresh evaluation
+    ev_c3 = cdm_custom.evaluate_state(snapshot=snap_c, turn_speaker="client", turn_text="yeah", turn_id=3)
+    assert "STRATEGY_CARRIED_FORWARD" not in ev_c3.decision.reason_codes
 
 
 def test_point14_use_strategy_history_avoids_repeating_failed_approaches():

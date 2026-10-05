@@ -211,6 +211,15 @@ class PitchProXCoreIntelligenceEngine:
                 decision.secondary_action_reason = "Inquire regarding comfort level before advancing."
                 decision.strategic_objective = "Clarify prospect alignment and verify comfort before attempting commitment due to lower confidence."
                 downgraded = True
+            elif "CONFIRM_AND_PROTECT_ACTIVE" in decision.reason_codes or (decision.strategic_posture == "protect" and "CONVERSION_CONFIRMED" in decision.reason_codes):
+                # Point 10: In an otherwise 'confirm' scenario with low confidence, downgrade to CLARIFY to verify understanding
+                decision.primary_action = StrategicAction.CLARIFY
+                decision.strategic_posture = "explore"
+                decision.push_strength = PushStrengthValue("low", legacy_alias="resolve_then_ask")
+                decision.secondary_action = StrategicAction.QUESTION
+                decision.secondary_action_reason = "Verify understanding and confirm appointment details due to low confidence."
+                decision.strategic_objective = "Clarify and verify agreed appointment details before locking confirmation due to lower confidence."
+                downgraded = True
             elif decision.primary_action == StrategicAction.CHALLENGE:
                 decision.primary_action = StrategicAction.QUESTION
                 decision.strategic_posture = "explore"
@@ -629,7 +638,7 @@ class PitchProXCoreIntelligenceEngine:
             secondary_reason = "Inquire into specific legal or structural constraints before attempting next steps."
             strategic_posture = "defend"
             push_strength = PushStrengthValue("none")
-            objective = f"De-risk deal and isolate specific legal or existential blocker regarding {role_label}."
+            objective = f"De-risk deal and address specific legal or structural blocker regarding {role_label} collaboratively."
             reason_codes = ["DECISION_MAKER_ABSENT", "GENUINE_DEAL_RISK", "PROTECT_AGREEMENT_VIABILITY"]
         else:
             # Category 4: Pure Logistics / Coordination (e.g., Turn 10 scenario)
@@ -653,7 +662,7 @@ class PitchProXCoreIntelligenceEngine:
             push_strength=push_strength,
             referenced_stakeholder_ids=stakeholder_ids,
             reason_codes=reason_codes,
-            do_not_do=["press_for_single_party_commitment", "ignore_absent_decision_maker", "force_immediate_agreement"],
+            do_not_do=["press_for_single_party_commitment", "ignore_absent_decision_maker", "force_immediate_agreement", "separate_partners", "isolate_from_spouse"],
             what_to_protect=["collaborative_buy_in", "stakeholder_harmony"],
             question_allowed=True,
             retrieval_needed=False,

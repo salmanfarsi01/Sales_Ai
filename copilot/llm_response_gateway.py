@@ -284,7 +284,7 @@ class LLMResponseGateway:
 
         if action == StrategicAction.ACKNOWLEDGE:
             if "CONVERSION_CONFIRMED" in decision.reason_codes:
-                slot = getattr(decision, "commitment_slot", None)
+                slot = decision.resolve_commitment_slot(snapshot) if hasattr(decision, "resolve_commitment_slot") else getattr(decision, "commitment_slot", None)
                 if not slot and snapshot:
                     if snapshot.conversion_gate and snapshot.conversion_gate.commitment_slot:
                         slot = snapshot.conversion_gate.commitment_slot

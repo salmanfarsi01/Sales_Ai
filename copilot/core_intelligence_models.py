@@ -143,9 +143,9 @@ class StrategicDecision(BaseModel):
     strategic_interpretation: Dict[str, Any] = Field(default_factory=dict)
     gateway_fallback_stub: Optional[str] = Field(default=None, description="Surfaces LLM Gateway's deterministic fallback stub in offline replay trace")
     final_prompt_text: Optional[str] = Field(default=None, description="Alias for gateway_fallback_stub for backward compatibility")
-    meeting_gate_open: Optional[bool] = Field(default=None, description="Current meeting gate status for invariant validation")
-    conversion_confirmed: Optional[bool] = Field(default=None, description="Current conversion confirmation status for invariant validation")
-    commitment_slot: Optional[str] = Field(default=None, description="Concrete confirmed or proposed appointment slot")
+    meeting_gate_open: Optional[bool] = Field(default=None, description="SNAPSHOT-ONLY: Frozen gate status at decision time. Do not use for live reads.")
+    conversion_confirmed: Optional[bool] = Field(default=None, description="SNAPSHOT-ONLY: Frozen conversion status at decision time. Do not use for live reads.")
+    commitment_slot: Optional[str] = Field(default=None, description="DEPRECATED/SNAPSHOT-ONLY: Frozen slot at decision time. Use resolve_commitment_slot(snapshot) for live reads.")
 
     def resolve_commitment_slot(self, snapshot: Optional[Any] = None) -> Optional[str]:
         """Dynamically resolves commitment slot from canonical ConversationStateSnapshot via references (Point 12).
@@ -236,9 +236,10 @@ class StrategicDecision(BaseModel):
             else:
                 reason = self.secondary_action_reason.strip()
                 weak_placeholders = {"test", "n/a", "none", "secondary", "because", "secondary action", "stacking"}
-                if len(reason) < 15 or reason.lower() in weak_placeholders:
+                is_gibberish = len(set(reason.lower())) < 4 or len(reason.split()) < 2
+                if len(reason) < 15 or reason.lower() in weak_placeholders or is_gibberish:
                     if strict_raise:
-                        raise ValueError(f"secondary_action '{self.secondary_action.value}' requires a meaningful justification (at least 15 chars, got: '{reason}')")
+                        raise ValueError(f"secondary_action '{self.secondary_action.value}' requires a meaningful justification (at least 15 chars, 2 words, non-repetitive, got: '{reason}')")
                     else:
                         self.secondary_action_reason = f"Reinforces '{self.secondary_action.value}' to support primary action '{self.primary_action.value}'"
 

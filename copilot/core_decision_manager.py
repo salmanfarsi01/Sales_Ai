@@ -206,6 +206,7 @@ class CoreDecisionManager:
         lead_type: str = "general",
         engine: Optional[PitchProXCoreIntelligenceEngine] = None,
         modifier_pipeline: Optional[StrategyModifierPipeline] = None,
+        max_carried_turns: int = 2,
     ):
         if not call_sid:
             raise ValueError("call_sid must be explicitly specified; anonymous or shared singletons are prohibited.")
@@ -213,6 +214,7 @@ class CoreDecisionManager:
         self.lead_type = lead_type
         self.engine = engine or PitchProXCoreIntelligenceEngine(lead_type=lead_type)
         self.modifier_pipeline = modifier_pipeline or StrategyModifierPipeline()
+        self.max_carried_turns = max_carried_turns
         self.decision_history: List[StrategicDecision] = []
         self.decisions_by_turn: Dict[int, StrategicDecision] = {}
         self.decisions_by_version: Dict[int, StrategicDecision] = {}
@@ -260,20 +262,23 @@ class CoreDecisionManager:
         cleaned_turn = (turn_text or "").strip().lower().rstrip("!.,")
         is_filler = cleaned_turn in filler_acknowledgments
 
-        # Question pending check: if the previous action was an explicit question or closing ask,
+        # Question pending check: if the previous action was an explicit question, closing ask,
+        # coordination inquiry, or if the prompt ended with '?',
         # 'okay' / 'yeah' is an affirmative answer to the prompt, NOT an aimless filler backchannel!
         prev_dec = self.latest_decision
         has_pending_question = False
         if prev_dec is not None:
             has_pending_question = (
                 prev_dec.primary_action in (StrategicAction.QUESTION, StrategicAction.COMMITMENT_CLOSE)
-                or prev_dec.secondary_action == StrategicAction.QUESTION
-                or "QUESTION" in prev_dec.strategic_objective.upper()
+                or prev_dec.secondary_action in (StrategicAction.QUESTION, StrategicAction.COMMITMENT_CLOSE)
+                or prev_dec.strategic_posture == "coordinate"
+                or (bool(prev_dec.final_prompt_text) and prev_dec.final_prompt_text.strip().endswith("?"))
+                or (bool(prev_dec.gateway_fallback_stub) and prev_dec.gateway_fallback_stub.strip().endswith("?"))
+                or any(k in prev_dec.strategic_objective.lower() for k in ("ask", "inquire", "propose", "schedule", "question", "verify"))
             )
 
-        # Staleness limit: Max 2 consecutive carried-forward turns before requiring fresh strategic evaluation
-        MAX_CONSECUTIVE_CARRIED_TURNS = 2
-        staleness_limit_reached = self.consecutive_carried_count >= MAX_CONSECUTIVE_CARRIED_TURNS
+        # Staleness limit: Max consecutive carried-forward turns before requiring fresh strategic evaluation
+        staleness_limit_reached = self.consecutive_carried_count >= self.max_carried_turns
 
         if (
             is_filler
