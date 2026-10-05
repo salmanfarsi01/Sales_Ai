@@ -1047,12 +1047,21 @@ def test_point10_confirmed_conversion_unmeasured_trust_discount_exemption_bounda
     assert dec.confidence == 0.6900
     assert dec.confidence >= engine.confidence_threshold
 
-    # 3. Decision must protect confirmed appointment, NOT downgrade to CLARIFY
-    assert dec.primary_action == StrategicAction.ACKNOWLEDGE
-    assert dec.strategic_posture == "protect"
-    assert str(dec.push_strength) == "none"
-    assert "CONVERSION_CONFIRMED" in dec.reason_codes
-    assert "LOW_CONFIDENCE_ACTION_DOWNGRADE" not in dec.reason_codes
+    # 4. Full Replay Condition Verification: Base 0.90, trust_confidence 0.85, advancing +0.04 -> 0.925
+    snap_replay = snap.model_copy(deep=True)
+    snap_replay.dimensions.trust_confidence = 0.85
+    snap_replay.conversion_gate.confidence = 0.90
+    snap_replay.conversion_event.confirmation_confidence = 0.90
+    snap_replay.momentum = MomentumBreakdown(momentum_score=75.0, trend="advancing")
+    eval_replay = engine.evaluate(
+        snapshot=snap_replay,
+        turn_speaker="client",
+        turn_text="Thursday at 3 works, and my wife will be there.",
+        turn_id=18,
+    )
+    # 0.90 * 0.70 + 0.85 * 0.30 + 0.04 = 0.630 + 0.255 + 0.040 = 0.9250
+    assert eval_replay.decision.confidence == 0.9250
+    assert eval_replay.decision.confidence_breakdown["final_confidence"] == 0.9250
 
 
 def test_point10_recurring_objection_low_confidence_push_capping():

@@ -357,9 +357,12 @@ class CoreDecisionManager:
             and not calibration
             and final_decision.primary_action == prev_dec.primary_action
             and final_decision.strategic_posture == prev_dec.strategic_posture
-            and final_decision.push_strength == prev_dec.push_strength
+            and (
+                final_decision.push_strength == prev_dec.push_strength
+                or "LOW_CONFIDENCE_ACTION_DOWNGRADE" in prev_dec.reason_codes
+            )
             and final_decision.secondary_action == prev_dec.secondary_action
-            and set(final_decision.reason_codes) == set(r for r in prev_dec.reason_codes if r != "STRATEGY_CARRIED_FORWARD")
+            and set(r for r in final_decision.reason_codes if r != "LOW_CONFIDENCE_ACTION_DOWNGRADE") == set(r for r in prev_dec.reason_codes if r not in ("STRATEGY_CARRIED_FORWARD", "LOW_CONFIDENCE_ACTION_DOWNGRADE"))
         ):
             carried_dec = prev_dec.model_copy(deep=True)
             carried_dec.decision_id = f"dec_{uuid.uuid4().hex[:10]}"
