@@ -127,6 +127,9 @@ SOFT_CONTACT_PREFERENCE_PATTERNS: Dict[str, List[str]] = {
         r"\bno\s+need\s+to\s+(call|text|message|reach\s+out)\s+(?:me\s+|us\s+)?(every\s+day|so\s+often|daily)\b",
     ],
     "channel_restriction": [
+        r"\bemail\s+(me\s+)?(?:the\s+)?(?:contract|details|info|information)?\b",
+        r"\b(?:text|email)\s+is\s+fine\b",
+        r"\bcalls?\s+aren['’]?t\b",
         r"\bemail\s+(instead\s+of|rather\s+than)\s+(calling|call|texting|text)\b",
         r"\b(please\s+)?email\s+(?:me\s+|us\s+)?instead\b",
         r"\b(just|only)\s+email\s+(?:me\s+|us\b)",
@@ -140,8 +143,13 @@ SOFT_CONTACT_PREFERENCE_PATTERNS: Dict[str, List[str]] = {
         r"\breach\s+out\s+(by|via)\s+(email|text)\s+instead\b",
         r"\bcommunicate\s+(by|via)\s+(email|text)\s+only\b",
         r"\b(just\s+)?send\s+(?:me\s+|us\s+)?(an?\s+)?email\b",
+        r"\bno\s+(?:phone\s+)?calls?\b",
     ],
     "timing_restriction": [
+        r"\b(?:no|don['’]?t\s+make)\s+(?:phone\s+)?calls?\s+(?:after|before)\s+\d{1,2}(?::\d{2})?\s*(?:am|pm)?\b",
+        r"\bno\s+(?:phone\s+)?calls?\s+after\s+\d{1,2}(?::\d{2})?\s*(?:am|pm)?\b",
+        r"\b(?:no|don['’]?t)\s+(?:phone\s+)?calls?\s+before\s+(?:noon|\d{1,2}(?::\d{2})?\s*(?:am|pm)?)\b",
+        r"\bdon['’]?t\s+call\s+(?:me\s+)?before\s+(?:noon|\d{1,2}(?::\d{2})?\s*(?:am|pm)?)\b",
         r"\b(only\s+)?(reach\s+out|call|text|contact)\s+(during|in)\s+business\s+hours\b",
         r"\bonly\s+during\s+business\s+hours\b",
         r"\b(call|text|reach\s+out)\s+(?:me\s+|us\s+)?after\s+\d{1,2}(:\d{2})?\s*(am|pm)?\b",
@@ -254,69 +262,223 @@ STOPWORDS = {
 SOFT_PREFERENCE_PATTERNS = SOFT_CONTACT_PREFERENCE_PATTERNS
 
 
+def extract_structured_contact_preferences(
+    text: str,
+    source_turn_id: int = 0,
+    confidence: float = 0.90,
+) -> List[Any]:
+    """Extracts structured ContactPreference objects using clause-based parsing.
+
+    Splits compound utterances across conjunctions/delimiters, identifies channels using whole-word regexes,
+    and assigns restrictions or allowances per channel.
+    """
+    from .conversation_state_models import ContactPreference
+
+    cleaned = text.strip()
+    if not cleaned:
+        return []
+
+    hard_explicit_patterns = [
+        r"\b(do\s+not|don['’]?t)\s+call\s+(me\s+)?(any\s*more|again|ever)\b",
+        r"\bnever\s+call\b",
+        r"\bstop\s+calling\s+me\b",
+        r"\b(do\s+not|don['’]?t)\s+(ever\s+)?contact\b",
+        r"\bstop\s+contacting\b",
+        r"\bnot\s+call\s+(me\s+)?(any\s*more|again)\b",
+        r"\btake\s+me\s+off\b",
+        r"\b(take|remove)\s+(my\s+)?(name|number|info|information)\s+off\b",
+        r"\bremove\s+(my\s+)?(number|name)\b",
+        r"\blose\s+my\s+number\b",
+        r"\b(put\s+me\s+on\s+the|on\s+the|to\s+the)\s+do\s+not\s+call\b",
+        r"\bdnc\s+list\b",
+        r"\bcall\s+my\s+(attorney|lawyer)\b",
+        r"\balready\s+(have\s+an?\s+agent|listed|under\s+contract|represented|signed)\b",
+        r"\bunder\s+contract\b",
+        r"\bstop\s+harassing\b",
+        r"\bleave\s+me\s+alone\b",
+    ]
+    if any(re.search(p, cleaned, re.IGNORECASE) for p in hard_explicit_patterns):
+        return []
+
+    # Clause splitting on commas, semicolons, and coordinating conjunctions
+    clauses = [c.strip() for c in re.split(r"[,;]|\b(?:but|and)\b", cleaned, flags=re.IGNORECASE) if c.strip()]
+    if not clauses:
+        clauses = [cleaned]
+
+    results: List[ContactPreference] = []
+    seen_channels: Set[str] = set()
+
+    for clause in clauses:
+        cl_lower = clause.lower()
+
+        # Whole-word channel detection (fixes 'text' in 'context', 'call' in 'recall')
+        has_sms = bool(re.search(r"\b(text|texting|sms|message|messages|messaging)\b", cl_lower))
+        has_email = bool(re.search(r"\b(email|emails|emailing)\b", cl_lower))
+        has_call = bool(re.search(r"\b(call|calls|calling|phone|phones)\b", cl_lower))
+
+        detected_channels: List[Literal["sms", "call", "email"]] = []
+        if has_sms:
+            detected_channels.append("sms")
+        if has_email:
+            detected_channels.append("email")
+        if has_call:
+            detected_channels.append("call")
+
+        # Check timing restrictions within this clause
+        m_before = re.search(r"before\s+(\d{1,2}(?::\d{2})?\s*(?:am|pm)?|noon|midnight)", cl_lower)
+        m_after = re.search(r"after\s+(\d{1,2}(?::\d{2})?\s*(?:am|pm)?|noon|midnight)", cl_lower)
+        m_between = re.search(r"between\s+(\d{1,2}(?::\d{2})?\s*(?:am|pm)?)\s+and\s+(\d{1,2}(?::\d{2})?\s*(?:am|pm)?)", cl_lower)
+
+        has_timing = bool(m_before or m_after or m_between or any(re.search(p, cl_lower) for p in SOFT_CONTACT_PREFERENCE_PATTERNS["timing_restriction"]))
+
+        is_prohibition = bool(
+            re.search(r"\b(?:no|don['’]?t|do\s+not|never|stop|not)\s+(?:phone\s+)?(?:calls?|calling|texts?|texting|emails?|emailing)\b", cl_lower)
+            or re.search(r"\b(?:calls?|texts?)\s+(?:aren['’]?t|are\s+not)\b", cl_lower)
+            or re.search(r"\bno\s+(?:phone\s+)?calls\b", cl_lower)
+        )
+
+        is_reduced = any(re.search(p, cl_lower) for p in SOFT_CONTACT_PREFERENCE_PATTERNS["reduced_frequency"])
+
+        for ch in detected_channels:
+            action_verb = "texting" if ch == "sms" else ("emailing" if ch == "email" else "calling")
+            time_restriction: Optional[str] = None
+            prohibited_behavior: Optional[str] = None
+            cadence: Optional[Literal["reduced", "specific_times", "no_preference"]] = "no_preference"
+            allowed = True
+
+            if has_timing:
+                cadence = "specific_times"
+                if m_before and m_after:
+                    b_val = m_before.group(1).strip()
+                    a_val = m_after.group(1).strip()
+                    time_restriction = f"before {b_val} or after {a_val}"
+                    prohibited_behavior = f"{action_verb} before {b_val} or after {a_val}"
+                elif m_between:
+                    t1, t2 = m_between.group(1).strip(), m_between.group(2).strip()
+                    time_restriction = f"between {t1} and {t2}"
+                    prohibited_behavior = f"{action_verb} between {t1} and {t2}"
+                elif m_after:
+                    time_val = m_after.group(1).strip()
+                    time_restriction = f"after {time_val}"
+                    prohibited_behavior = f"{action_verb} after {time_val}"
+                elif m_before:
+                    time_val = m_before.group(1).strip()
+                    time_restriction = f"before {time_val}"
+                    prohibited_behavior = f"{action_verb} before {time_val}"
+                else:
+                    prohibited_behavior = f"{action_verb} outside specified hours"
+            elif is_reduced:
+                cadence = "reduced"
+                prohibited_behavior = f"daily {action_verb}"
+            elif is_prohibition:
+                allowed = False
+                prohibited_behavior = f"unsolicited {ch} contact"
+            else:
+                # Allowance / preference (e.g. 'email me details', 'text is fine', 'prefer email', 'send by email')
+                is_allowance_or_pref = bool(
+                    re.search(r"\b(?:by|via)\s+(?:email|text|message)\b", cl_lower)
+                    or re.search(r"\b(?:prefer|instead|fine|okay|better|only|reach\s+out|communicate|contact)\b", cl_lower)
+                    or re.search(r"\bsend\b.*?\b(?:email|text|message)\b", cl_lower)
+                    or re.search(r"\b(?:email|text|message)\s+(?:me|us)\b", cl_lower)
+                    or any(re.search(p, cl_lower) for p in SOFT_CONTACT_PREFERENCE_PATTERNS["channel_restriction"])
+                )
+                if not is_allowance_or_pref:
+                    continue
+                allowed = True
+                if "only" in cl_lower or "instead" in cl_lower:
+                    prohibited_behavior = f"other channels ({ch} only)"
+
+            if ch not in seen_channels:
+                seen_channels.add(ch)
+                results.append(
+                    ContactPreference(
+                        channel=ch,
+                        allowed=allowed,
+                        cadence=cadence,
+                        prohibited_behavior=prohibited_behavior,
+                        time_restriction=time_restriction,
+                        boundary_strength="preference",
+                        source_turn_id=source_turn_id,
+                        confidence=confidence,
+                    )
+                )
+
+    # Global check: if "email only" or "just email" or "prefer email", ensure phone calls are restricted
+    cleaned_lower = cleaned.lower()
+    if ("email only" in cleaned_lower or "just email" in cleaned_lower or "prefer email" in cleaned_lower) and "call" not in seen_channels:
+        seen_channels.add("call")
+        results.append(
+            ContactPreference(
+                channel="call",
+                allowed=False,
+                cadence="no_preference",
+                prohibited_behavior="phone calls (email only)",
+                boundary_strength="preference",
+                source_turn_id=source_turn_id,
+                confidence=confidence,
+            )
+        )
+
+    # If no channels were detected from clauses but general patterns match
+    if not results:
+        # Fallback to single channel detection
+        ch = "call"
+        if re.search(r"\b(text|texting|sms|message)\b", cleaned_lower):
+            ch = "sms"
+        elif re.search(r"\b(email|emails)\b", cleaned_lower):
+            ch = "email"
+
+        action_verb = "texting" if ch == "sms" else ("emailing" if ch == "email" else "calling")
+        if any(re.search(p, cleaned_lower) for p in SOFT_CONTACT_PREFERENCE_PATTERNS["timing_restriction"]):
+            if m_before and m_after:
+                time_restriction = f"before {m_before.group(1).strip()} or after {m_after.group(1).strip()}"
+            elif m_after:
+                time_restriction = f"after {m_after.group(1).strip()}"
+            elif m_before:
+                time_restriction = f"before {m_before.group(1).strip()}"
+            else:
+                time_restriction = None
+            prohibited_behavior = f"{action_verb} {time_restriction}" if time_restriction else f"{action_verb} outside specified hours"
+            results.append(
+                ContactPreference(
+                    channel=ch,
+                    allowed=True,
+                    cadence="specific_times",
+                    prohibited_behavior=prohibited_behavior,
+                    time_restriction=time_restriction,
+                    boundary_strength="preference",
+                    source_turn_id=source_turn_id,
+                    confidence=confidence,
+                )
+            )
+        elif any(re.search(p, cleaned_lower) for p in SOFT_CONTACT_PREFERENCE_PATTERNS["reduced_frequency"]):
+            results.append(
+                ContactPreference(
+                    channel=ch,
+                    allowed=True,
+                    cadence="reduced",
+                    prohibited_behavior=f"daily {action_verb}",
+                    boundary_strength="preference",
+                    source_turn_id=source_turn_id,
+                    confidence=confidence,
+                )
+            )
+
+    return results
+
+
 def extract_structured_contact_preference(
     text: str,
     source_turn_id: int = 0,
     confidence: float = 0.90,
 ) -> Optional[Any]:
-    """Client Feedback Issue #7: Extracts a structured ContactPreference object from prospect utterance."""
-    from .conversation_state_models import ContactPreference
-
-    cleaned = text.strip().lower()
-
-    # 1. Determine channel
-    channel: Literal["sms", "call", "email"] = "call"
-    if any(w in cleaned for w in ["text", "texting", "sms", "message", "messaging"]):
-        channel = "sms"
-    elif any(w in cleaned for w in ["email"]):
-        channel = "email"
-    elif any(w in cleaned for w in ["call", "calling", "phone"]):
-        channel = "call"
-
-    # 2. Determine cadence and prohibited behavior
-    cadence: Optional[Literal["reduced", "specific_times", "no_preference"]] = "reduced"
-    prohibited_behavior: Optional[str] = None
-    allowed = True
-    strength: Literal["preference", "hard_restriction"] = "preference"
-
-    # Check reduced frequency patterns
-    if any(re.search(p, cleaned) for p in SOFT_CONTACT_PREFERENCE_PATTERNS["reduced_frequency"]):
-        cadence = "reduced"
-        prohibited_behavior = "daily texting" if channel == "sms" else "daily calling"
-    elif any(re.search(p, cleaned) for p in SOFT_CONTACT_PREFERENCE_PATTERNS["channel_restriction"]):
-        cadence = "no_preference"
-        if "email" in cleaned and ("only" in cleaned or "instead" in cleaned or "rather" in cleaned or "prefer" in cleaned or "just" in cleaned):
-            channel = "email"
-            allowed = True
-            prohibited_behavior = "phone calls or texting (email only)"
-        elif "text" in cleaned and ("only" in cleaned or "instead" in cleaned or "rather" in cleaned or "prefer" in cleaned or "just" in cleaned):
-            channel = "sms"
-            allowed = True
-            prohibited_behavior = "phone calls (texting only)"
-        else:
-            prohibited_behavior = f"unsolicited {channel} contact"
-    elif any(re.search(p, cleaned) for p in SOFT_CONTACT_PREFERENCE_PATTERNS["timing_restriction"]):
-        cadence = "specific_times"
-        m_before = re.search(r"before\s+(\d{1,2}(?::\d{2})?\s*(?:am|pm)?)", cleaned)
-        m_after = re.search(r"after\s+(\d{1,2}(?::\d{2})?\s*(?:am|pm)?)", cleaned)
-        if m_before:
-            prohibited_behavior = f"calling before {m_before.group(1).strip()}"
-        elif m_after:
-            prohibited_behavior = f"calling after {m_after.group(1).strip()}"
-        else:
-            prohibited_behavior = "contact outside specified hours"
-    else:
+    """Backward-compatible single preference extractor returning the primary or restricted preference."""
+    prefs = extract_structured_contact_preferences(text, source_turn_id, confidence)
+    if not prefs:
         return None
-
-    return ContactPreference(
-        channel=channel,
-        allowed=allowed,
-        cadence=cadence,
-        prohibited_behavior=prohibited_behavior,
-        boundary_strength=strength,
-        source_turn_id=source_turn_id,
-        confidence=confidence,
-    )
+    # Prioritize any preference that carries a restriction or prohibition
+    restricted = next((p for p in prefs if p.time_restriction or not p.allowed or p.cadence != "no_preference"), None)
+    return restricted or prefs[0]
 
 
 class SemanticFeatureEngine:

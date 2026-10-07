@@ -78,7 +78,15 @@ class PitchProXCoreIntelligenceEngine:
         # 2. Confirmed Conversion Protection Gate (Item 9: confirm_and_protect)
         elif context.conversion_confirmed or context.push_strength_state == "confirm_and_protect":
             eval_res = self._build_confirm_protect_decision(snapshot, context, turn_timestamp_ms)
-        # 3. Active Objection Lifecycle and Spec 01 §6 6-Level Depth Ladder
+        # 3. Multi-Stakeholder and Absent Decision Maker Gate (Spec 09 §3)
+        elif not context.decision_maker_present and (
+            snapshot.conversation_stage == ConversationStage.DECISION_RESOLUTION
+            or any(w in (turn_text or "").lower() for w in ("wife", "husband", "spouse", "partner", "decision maker", "sign off", "alone", "both of us", "consult", "lawyer", "attorney", "divorce"))
+            or (unresolved_objections and any(o.canonical_category == "spouse_authority" for o in unresolved_objections) and not any(o.canonical_category != "spouse_authority" and o.lifecycle_state in (ObjectionLifecycleState.ACTIVE, "active") for o in unresolved_objections))
+            or (turn_id is None and not turn_text)
+        ):
+            eval_res = self._build_absent_stakeholder_decision(snapshot, context, turn_timestamp_ms, turn_text=turn_text)
+        # 4. Active Objection Lifecycle and Spec 01 §6 6-Level Depth Ladder
         elif unresolved_objections and (
             any(o.lifecycle_state in (ObjectionLifecycleState.ACTIVE, "active", "reactivated") for o in unresolved_objections)
             or snapshot.conversation_stage == ConversationStage.OBJECTION_HANDLING
@@ -88,13 +96,6 @@ class PitchProXCoreIntelligenceEngine:
             )
         ):
             eval_res = self._build_objection_decision(snapshot, context, unresolved_objections, turn_timestamp_ms)
-        # 4. Multi-Stakeholder and Absent Decision Maker Gate (Spec 09 §3)
-        elif not context.decision_maker_present and (
-            snapshot.conversation_stage == ConversationStage.DECISION_RESOLUTION
-            or any(w in (turn_text or "").lower() for w in ("wife", "husband", "spouse", "partner", "decision maker", "sign off", "alone", "both of us", "consult", "lawyer", "attorney", "divorce"))
-            or (turn_id is None and not turn_text)
-        ):
-            eval_res = self._build_absent_stakeholder_decision(snapshot, context, turn_timestamp_ms, turn_text=turn_text)
         # 5. Conversion Gate and Push Strength Alignment (Spec 09 §6, §7)
         elif context.meeting_gate_open:
             eval_res = self._build_meeting_gate_decision(snapshot, context, turn_timestamp_ms)
@@ -294,9 +295,12 @@ class PitchProXCoreIntelligenceEngine:
                 downgraded = True
 
             # Cap high or moderate push strength when confidence is low
-            if str(decision.push_strength) in ("high", "moderate") or decision.push_strength in ("direct_ask", "two_window_choice", "resolve_then_ask"):
-                decision.push_strength = PushStrengthValue("low")
-                downgraded = True
+            # Only count as downgrade if push strength actually changed from a higher pressure level
+            old_push_str = str(decision.push_strength)
+            if old_push_str in ("high", "moderate") or decision.push_strength in ("direct_ask", "two_window_choice"):
+                if old_push_str not in ("low", "none"):
+                    decision.push_strength = PushStrengthValue("low")
+                    downgraded = True
 
             if downgraded:
                 if "LOW_CONFIDENCE_ACTION_DOWNGRADE" not in decision.reason_codes:
@@ -395,7 +399,11 @@ class PitchProXCoreIntelligenceEngine:
     ) -> bool:
         effective_turn_id = turn_id if turn_id is not None else getattr(snapshot, "last_updated_turn_id", 0)
         comp = snapshot.contact_compliance
-        if comp and any(getattr(p, "source_turn_id", None) == effective_turn_id for p in comp.contact_preferences):
+        if comp and any(
+            getattr(p, "source_turn_id", None) == effective_turn_id
+            and (not p.allowed or p.cadence != "no_preference" or p.time_restriction or p.prohibited_behavior)
+            for p in comp.contact_preferences
+        ):
             return True
         text_lower = (turn_text or "").lower()
         if any(w in text_lower for w in ("text", "texting", "call", "calling", "email", "contact")) and any(neg in text_lower for neg in ("don't", "dont", "do not", "please don't", "stop", "never")):
@@ -757,7 +765,7 @@ class PitchProXCoreIntelligenceEngine:
             strategic_posture = "mediate"
             push_strength = PushStrengthValue("none")
             objective = f"Validate differing perspectives neutrally and explore shared priorities with absent {role_label}."
-            reason_codes = ["DECISION_MAKER_ABSENT", "RELATIONSHIP_CONFLICT", "EXPLORE_SHARED_GOALS"]
+            reason_codes = ["STAKEHOLDER_CONCERN", "RELATIONSHIP_CONFLICT", "EXPLORE_SHARED_GOALS"]
         elif any(k in text_lower for k in trust_keywords):
             # Category 2: Trust Concern
             primary_action = StrategicAction.VALIDATE
@@ -766,7 +774,7 @@ class PitchProXCoreIntelligenceEngine:
             strategic_posture = "reassure"
             push_strength = PushStrengthValue("low", legacy_alias="resolve_then_ask")
             objective = f"Validate stakeholder skepticism and offer transparent third-party proof to address {role_label}'s trust concern."
-            reason_codes = ["DECISION_MAKER_ABSENT", "STAKEHOLDER_TRUST_CONCERN", "BUILD_THIRD_PARTY_TRUST"]
+            reason_codes = ["STAKEHOLDER_CONCERN", "STAKEHOLDER_TRUST_CONCERN", "BUILD_THIRD_PARTY_TRUST"]
         elif any(k in text_lower for k in risk_keywords):
             # Category 3: Genuine Deal Risk
             primary_action = StrategicAction.DE_RISK
@@ -775,7 +783,7 @@ class PitchProXCoreIntelligenceEngine:
             strategic_posture = "defend"
             push_strength = PushStrengthValue("none")
             objective = f"De-risk deal and address specific legal or structural blocker regarding {role_label} collaboratively."
-            reason_codes = ["DECISION_MAKER_ABSENT", "GENUINE_DEAL_RISK", "PROTECT_AGREEMENT_VIABILITY"]
+            reason_codes = ["STAKEHOLDER_CONCERN", "GENUINE_DEAL_RISK", "PROTECT_AGREEMENT_VIABILITY"]
         else:
             # Category 4: Pure Logistics / Coordination (e.g., Turn 10 scenario)
             primary_action = StrategicAction.CLARIFY

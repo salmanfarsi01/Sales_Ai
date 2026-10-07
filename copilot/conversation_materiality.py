@@ -26,6 +26,10 @@ ABSENT_DECISION_MAKER_PATTERNS: List[str] = [
     r"\b(?:my\s+)?(?:husband|wife|spouse|partner)\b.*?\b(?:needs?|would\s+(?:really\s+)?need|has\s+to|must)\b.*?\b(?:conversation|decision|call|talk|meeting|input|present|here|further)\b",
     r"\b(?:my\s+)?(?:husband|wife|spouse|partner)\b.*?\bbefore\s+(?:we|i)\s+(?:go\s+any\s+further|make\s+a\s+decision|proceed|move\s+forward)\b",
     r"\b(?:our|my)\s+(?:attorney|lawyer)\s+(?:must|needs?\s+to)\s+review\b",
+    r"\b(?:my\s+)?(?:wife|husband|spouse|partner)\s+(?:is|was|feels|seems)?\s*(?:really\s+|just\s+)?(?:thinks|believes|feels|says|told|warned|worried|concerned|skeptical|doubtful|wants|needs)\b",
+    r"\b(?:my\s+)?(?:wife|husband|spouse|partner)\s+(?:told\s+me|warned\s+me)\b",
+    r"\b(?:my\s+)?(?:wife|husband|spouse|partner)\s+wants\s+to\s+look\s+at\s+it\s+first\b",
+    r"\b(?:my\s+)?(?:wife|husband|spouse|partner)\s+(?:is\s+)?(?:really\s+)?(?:skeptical|hesitant|worried)\b",
 ]
 
 PRESENCE_CONFIRMATION_PATTERNS: List[str] = [
@@ -67,7 +71,40 @@ SOFT_CONTACT_PREF_PATTERNS: List[str] = [
     r"\bclinic\s+hours\b",
     r"\bprefer\s+(?:text|email|call)\b",
     r"\b(?:text|email|call)\s+(?:is\s+better|preferred|instead)\b",
+    r"\b(?:no|don['’]?t\s+make|no\s+more)\s+(?:phone\s+)?calls?\b",
+    r"\b(?:no\s+(?:phone\s+)?calls?|don['’]?t\s+call)\s+(?:after|before)\s+\d{1,2}(?::\d{2})?\s*(?:am|pm)?\b",
+    r"\bemail\s+(?:me\s+)?(?:the\s+)?(?:contract|details|info|information)?\b",
+    r"\b(?:email|text)\s+only\b",
+    r"\b(?:text|email)\s+is\s+fine\b",
+    r"\bdon['’]?t\s+call\s+me\s+before\s+(?:noon|\d{1,2})\b",
+    r"\bno\s+phone\s+calls\b",
 ]
+
+POSITIVE_FILLER_PATTERNS: List[str] = [
+    # Short one or two-word conversational acknowledgments
+    r"^(?:yeah|yes|okay|ok|sure|right|uh-huh|yep|gotcha|mm-hm|mhm|yup|nope|no|alright|all\s+right|sounds\s+good)[\.\,\!\?]*$",
+    # Basic pleasantries / greetings with no domain facts
+    r"^(?:hi|hello|hey|good\s+(?:morning|afternoon|evening)|how\s+are\s+you(?:\s+doing)?|doing\s+well|fine\s+thanks)[\.\,\!\?]*$",
+    # Polite closings / thanks with no domain constraints
+    r"^(?:thanks|thank\s+you|have\s+a\s+good\s+(?:day|one)|take\s+care|bye|goodbye)[\.\,\!\?]*$",
+    # Pure weather / superficial chatter without deal tokens
+    r".*\b(?:looks\s+like\s+(?:it\s+might\s+)?rain|weather|cold\s+outside|hot\s+today|enjoy\s+the\s+weather)\b.*",
+    # Casual idioms / jokes / banter with no structural decision meaning
+    r".*\b(?:jokes?\s+he(?:\s+practically)?|just\s+joking|kidding\s+around|figure\s+of\s+speech)\b.*",
+]
+
+
+def is_positive_filler(text: str) -> bool:
+    """True if utterance matches known non-material conversational filler/pleasantry whitelist."""
+    t = text.strip().lower()
+    deal_tokens = [
+        "scam", "fraud", "fee", "fees", "contract", "closing", "deposit", "money",
+        "disappeared", "vanished", "price", "property", "house", "mortgage",
+        "email me", "text me", "don't call", "no calls", "call me", "text only"
+    ]
+    if any(k in t for k in deal_tokens):
+        return False
+    return any(re.search(p, t) for p in POSITIVE_FILLER_PATTERNS)
 
 
 def is_soft_contact_preference(text: str, bundle: BehavioralSignalInputBundle) -> bool:
@@ -671,7 +708,28 @@ class MaterialityFilter:
         # ---------------------------------------------------------------------
         # 7. Non-Material Filter (True Negatives: Casual Pleasantries / Weather)
         # ---------------------------------------------------------------------
-        # If targets is empty, this turn has no material impact on state!
+        # Client Principle: Filler is an explicit whitelist (short acknowledgments / pleasantries).
+        # Any substantive statement by the client that does not match the filler whitelist
+        # must default to material, rather than dropping domain disclosures as filler.
+        if len(targets) == 0:
+            if bundle.speaker_id == "client" and not is_positive_filler(text):
+                disclaimers = [
+                    r"\bnot\s+why\s+i['’]?m\s+(?:calling|reaching\s+out)\b",
+                    r"\bnot\s+(?:an?\s+issue|a\s+problem|worried)\b",
+                    r"\bdisappeared\s+into\s+(?:the|a)\b",
+                ]
+                has_disclaimer = any(re.search(d, text_lower) for d in disclaimers)
+                trust_or_risk_keywords = [
+                    "scam", "fraud", "upfront fee", "deposit", "burned", "ripoff",
+                    "rip-off", "distrust", "skeptical", "caution"
+                ]
+                has_compound_loss = ("fee" in text_lower or "money" in text_lower) and ("disappeared" in text_lower or "vanished" in text_lower)
+                if not has_disclaimer and (any(k in text_lower for k in trust_or_risk_keywords) or has_compound_loss):
+                    targets.add("objections")
+                    reasons.append("Substantive prospect disclosure containing trust, scam, fee, or risk context.")
+                else:
+                    reasons.append("Substantive prospect disclosure (non-filler).")
+
         is_material = len(targets) > 0
         if not is_material:
             reason_summary = "Non-material conversational chatter or filler: no state targets affected."

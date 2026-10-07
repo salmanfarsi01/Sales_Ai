@@ -777,7 +777,22 @@ class MeetingConversionGateEngine:
         else:
             cond7_status = "met"
             cond7_ev = list(prospect_turns)
-            reason7 = "No active compliance boundary"
+            has_soft_restrictions = any(
+                not p.allowed or p.cadence in ("reduced", "specific_times") or p.prohibited_behavior or p.time_restriction
+                for p in comp.contact_preferences
+            ) or bool(comp.contact_not_before)
+            if has_soft_restrictions:
+                active_rest_desc = []
+                for p in comp.contact_preferences:
+                    if p.prohibited_behavior:
+                        active_rest_desc.append(f"{p.channel}: {p.prohibited_behavior}")
+                    elif p.time_restriction:
+                        active_rest_desc.append(f"{p.channel}: no contact {p.time_restriction}")
+                if comp.contact_not_before:
+                    active_rest_desc.append(f"hold until {comp.contact_not_before}")
+                reason7 = f"No hard compliance boundary; active contact restrictions in effect: {', '.join(active_rest_desc)}"
+            else:
+                reason7 = "No active compliance boundary"
 
         conditions.append(
             GateConditionResult(

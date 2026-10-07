@@ -495,6 +495,7 @@ class ConversationReplayEngine:
         load_prospect_memory: bool = False,
         prospect_id: Optional[str] = None,
         user_id: Optional[str] = None,
+        run_semantic_analysis: bool = False,
     ) -> ConversationStateReplayReport:
         """Helper to convert raw turn dicts into bundles and run replay.
 
@@ -502,13 +503,15 @@ class ConversationReplayEngine:
         """
         from .conversation_state_contract import extract_behavioral_bundle
         from .behavioral_inference import DownstreamInferenceState, DimensionScore, EmotionState
-        from .behavioral_semantic import SemanticFeatureEngine, SemanticFeatureSnapshot
+        from .behavioral_semantic import SemanticFeatureEngine, SemanticFeatureSnapshot, NormalizedUtterance
 
         # Guarantee synthetic prefix if not present
         if not call_sid.lower().startswith("sim_") and "sim" not in call_sid.lower():
             call_sid = f"sim_{call_sid}"
 
         bundles: List[BehavioralSignalInputBundle] = []
+        sem_engine = SemanticFeatureEngine() if run_semantic_analysis else None
+        history_utterances: List[NormalizedUtterance] = []
 
         for t in raw_turns:
             tid = int(t.get("turn_id", len(bundles) + 1))
@@ -516,15 +519,39 @@ class ConversationReplayEngine:
             txt = t.get("text", "")
             ts_ms = int(t.get("timestamp_ms", tid * 3000))
 
-            sem_snap = SemanticFeatureSnapshot(
-                utterance_id=f"utt_sim_{tid:03d}",
-                call_sid=call_sid,
-                speaker_id=spk,
-                boundary_score=float(t.get("boundary", 0.0)),
-                recurrence_id=t.get("recurrence_id"),
-                specificity_score=float(t.get("specificity", 0.60)),
-                agreement_score=float(t.get("agreement", 0.50)),
-            )
+            should_analyze_sem = run_semantic_analysis or bool(t.get("run_semantic", False))
+            if should_analyze_sem:
+                cur_utt = NormalizedUtterance(
+                    utterance_id=f"utt_sim_{tid:03d}",
+                    turn_id=tid,
+                    speaker_id=spk,
+                    text=txt,
+                    start_ms=ts_ms,
+                    end_ms=ts_ms + 1000,
+                    asr_confidence=0.90,
+                )
+                engine = sem_engine or SemanticFeatureEngine()
+                sem_snap = engine.analyze_deterministic_heuristic(cur_utt, history_utterances)
+                sem_snap.call_sid = call_sid
+                if "boundary" in t:
+                    sem_snap.boundary_score = float(t["boundary"])
+                if "specificity" in t:
+                    sem_snap.specificity_score = float(t["specificity"])
+                if "agreement" in t:
+                    sem_snap.agreement_score = float(t["agreement"])
+                if "recurrence_id" in t:
+                    sem_snap.recurrence_id = t["recurrence_id"]
+                history_utterances.append(cur_utt)
+            else:
+                sem_snap = SemanticFeatureSnapshot(
+                    utterance_id=f"utt_sim_{tid:03d}",
+                    call_sid=call_sid,
+                    speaker_id=spk,
+                    boundary_score=float(t.get("boundary", 0.0)),
+                    recurrence_id=t.get("recurrence_id"),
+                    specificity_score=float(t.get("specificity", 0.60)),
+                    agreement_score=float(t.get("agreement", 0.50)),
+                )
 
             # Client Feedback Item 8: Inherit dimensions from prior bundle rather than injecting hardcoded jumps
             if bundles:
@@ -604,6 +631,7 @@ class ReplayDialogueRequest(BaseModel):
     turns: List[Dict[str, Any]] = Field(default_factory=list)
     load_prospect_memory: bool = False
     prospect_id: Optional[str] = None
+    run_semantic_analysis: bool = True
 
 
 def get_conversation_replay_router(
@@ -668,6 +696,7 @@ def get_conversation_replay_router(
             conversion_target=req.conversion_target or "appointment",
             load_prospect_memory=req.load_prospect_memory,
             prospect_id=req.prospect_id,
+            run_semantic_analysis=req.run_semantic_analysis,
         )
         return report.model_dump()
 

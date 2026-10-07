@@ -74,7 +74,12 @@ from .conversation_state_models import (
     ObjectionRecord,
     DormancyEvidence,
 )
-from .behavioral_semantic import extract_structured_contact_preference, HARD_BOUNDARY_PATTERNS, SOFT_CONTACT_PREFERENCE_PATTERNS
+from .behavioral_semantic import (
+    extract_structured_contact_preference,
+    extract_structured_contact_preferences,
+    HARD_BOUNDARY_PATTERNS,
+    SOFT_CONTACT_PREFERENCE_PATTERNS,
+)
 from .conversation_facts import PersistentFactsManager
 from .conversation_objections import ObjectionLifecycleEngine, DECISION_TO_STAY_PATTERNS
 from .conversation_supersession import TruthSupersessionDetector
@@ -695,12 +700,12 @@ class ConversationStateManager:
 
             # Update contact preferences list (distinct from hard boundary!)
             prefs = list(self.current_state.contact_compliance.contact_preferences)
-            new_pref = extract_structured_contact_preference(
+            new_prefs = extract_structured_contact_preferences(
                 text=bundle.utterance_text,
                 source_turn_id=bundle.turn_id,
                 confidence=bundle.contact_preference_confidence or 0.90,
             )
-            if new_pref:
+            for new_pref in new_prefs:
                 new_pref.source_call_sid = self.call_sid
                 new_pref.is_historical = False
                 existing_idx = next((i for i, p in enumerate(prefs) if p.channel == new_pref.channel), None)

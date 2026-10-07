@@ -80,6 +80,20 @@ CLOSED_DRIVER_TAXONOMY: Dict[str, Dict[str, Dict[str, str]]] = {
             "strategic_target": "present_transparent_bracketed_absorption_and_buyer_demand_analytics",
         },
     },
+    "trust_credibility": {
+        "prior_agent_fraud_or_loss": {
+            "description": "Neighbor or prospect paid upfront fee/deposit and agent disappeared or scammed them.",
+            "strategic_target": "reassure_zero_upfront_fees_and_provide_transparent_escrow_closing",
+        },
+        "scam_distrust": {
+            "description": "Prospect or family views cold outreach companies as scams or predatory.",
+            "strategic_target": "provide_verifiable_brokerage_credentials_and_reassure_legitimacy",
+        },
+        "general_distrust": {
+            "description": "Past negative experiences or skepticism regarding real estate intentions.",
+            "strategic_target": "build_credibility_through_transparency_and_unconditional_references",
+        },
+    },
     "general_hesitation": {
         "process_overwhelm": {
             "description": "Feeling daunted by the logistical burden of prep, decluttering, showings, or moving.",
@@ -401,6 +415,40 @@ class ObjectionDriverClassifier:
                 supporting_evidence=[utterance_text.strip()],
                 confidence=0.50,
                 strategic_target=available_drivers["skepticism_of_cma"]["strategic_target"],
+                classification_source="heuristic_default",
+            )
+
+        # ---------------------------------------------------------------------
+        # 4b. Trust Credibility Driver Discrimination
+        # ---------------------------------------------------------------------
+        if category == "trust_credibility":
+            if any(re.search(p, text_lower) for p in [r"\b(?:upfront\s+fee|deposit|disappeared|vanished|took\s+money|ran\s+off|neighbor|burned)\b"]):
+                return ObjectionDriverLayer(
+                    surface_objection="trust_credibility",
+                    underlying_driver="prior_agent_fraud_or_loss",
+                    origin_context="neighbor or past experience with upfront fee scam / disappeared agent",
+                    supporting_evidence=[utterance_text.strip()],
+                    confidence=0.85,
+                    strategic_target=available_drivers["prior_agent_fraud_or_loss"]["strategic_target"],
+                    classification_source="heuristic_pattern",
+                )
+            if any(re.search(p, text_lower) for p in [r"\b(?:scam|scams|fraud|fake|rip\s*off)\b"]):
+                return ObjectionDriverLayer(
+                    surface_objection="trust_credibility",
+                    underlying_driver="scam_distrust",
+                    origin_context="perception that cold call companies are scams",
+                    supporting_evidence=[utterance_text.strip()],
+                    confidence=0.80,
+                    strategic_target=available_drivers["scam_distrust"]["strategic_target"],
+                    classification_source="heuristic_pattern",
+                )
+            return ObjectionDriverLayer(
+                surface_objection="trust_credibility",
+                underlying_driver="general_distrust",
+                origin_context="general skepticism toward agent representation",
+                supporting_evidence=[utterance_text.strip()],
+                confidence=0.60,
+                strategic_target=available_drivers["general_distrust"]["strategic_target"],
                 classification_source="heuristic_default",
             )
 

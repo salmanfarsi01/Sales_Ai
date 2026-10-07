@@ -277,7 +277,7 @@ class LLMResponseGateway:
         if "GATE_UNKNOWN_VALUE_REASON" in reasons:
             return "What would be the most important priority for you when evaluating your options?"
 
-        if "DECISION_MAKER_ABSENT" in reasons:
+        if "DECISION_MAKER_ABSENT" in reasons or "STAKEHOLDER_CONCERN" in reasons:
             if "GENUINE_DEAL_RISK" in reasons:
                 return "I completely understand their caution—there's no obligation whatsoever, and we can address any concerns directly together."
             return "It makes total sense to coordinate with your partner—would it be helpful if we found a time when you are both available?"

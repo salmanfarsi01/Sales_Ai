@@ -63,6 +63,23 @@ CANONICAL_OBJECTION_PATTERNS: Dict[str, List[str]] = {
         r"\b(?:my\s+)?(?:wife|husband|spouse|partner)\b.*?\b(?:needs?|would\s+(?:really\s+)?need|has\s+to|must)\b.*?\b(?:conversation|decision|call|talk|meeting|input|further)\b",
         r"\b(?:need\s+to|have\s+to|must|want\s+to|should|would\s+need\s+to)\s+(?:talk|speak|discuss|check|consult)\s+(?:to|with)\s+my\s+(?:wife|husband|spouse|partner)\b",
         r"\b(?:wife|husband|spouse|partner)\b.*?\bbefore\s+(?:we|i)\s+(?:go|make|decide|move)\b",
+        r"\b(?:my\s+)?(?:wife|husband|spouse|partner)\s+(?:thinks|believes|feels|says|warned|worried|concerned)\b",
+        r"\b(?:my\s+)?(?:wife|husband|spouse|partner)\s+wants\s+to\s+look\s+at\s+it\s+first\b",
+    ],
+    "trust_credibility": [
+        r"\b(?:companies|people|folks|places|outfits)\s+like\s+yours\s+(?:are\s+)?(?:just\s+)?scams?\b",
+        r"\b(?:companies|people|folks|places|outfits)\s+like\s+yours\b.*?\bscams?\b",
+        r"\b(?:looks?|sounds?)\s+like\s+a\s+(?:total\s+)?scam\b",
+        r"\b(?:is|are)\s+(?:just\s+)?(?:a\s+)?(?:total\s+)?scams?\b",
+        r"\b(?:think|thinks|thought|believes?)\s+(?:it['’]?s|this\s+is|they['’]?re|companies\s+like\s+yours\s+are|outfits\s+like\s+yours\s+are)\s+(?:just\s+)?(?:a\s+)?scams?\b",
+        r"\b(?:a\s+)?neighbor\s+paid\s+(?:a\s+)?(?:big\s+)?(?:upfront\s+)?fee\b",
+        r"\b(?:upfront\s+fee|deposit)\b.*?\b(?:disappeared|vanished|ran\s+off|took\s+off|left)\b",
+        r"\b(?:agent|broker|company)\s+(?:disappeared|vanished|ran\s+off|took\s+off)\s+(?:with\s+(?:the|our|their|my|an?)\s+(?:money|deposit|fee|cash)|after\s+(?:getting|taking)\s+paid|and\s+stole)\b",
+        r"\b(?:took|paid)\s+(?:a\s+)?(?:big\s+)?(?:deposit|fee)\s+and\s+(?:vanished|disappeared)\b",
+        r"\b(?:been|got)\s+burned\s+(?:before|by\s+an?\s+agent|in\s+the\s+past)\b",
+        r"\b(?:don['’]?t|doesn['’]?t)\s+trust\s+(?:agents?|realtors?|brokers?|companies\s+like\s+yours)\b",
+        r"\b(?:taken|got)\s+advantage\s+of\b",
+        r"\bupfront\s+fee\b",
     ],
     "general_hesitation": [
         r"\bnot\s+ready\s+(?:yet|to\s+sell|to\s+commit|at\s+this\s+time|now|right\s+now)?\b",
@@ -92,11 +109,13 @@ DECISION_TO_STAY_PATTERNS: List[str] = [
 
 
 def is_decision_authority_statement(utterance_text: str) -> bool:
-    """Detects whether an utterance is a decision-authority constraint (e.g. spouse, co-owner, legal authority),
+    """Detects whether an utterance is a purely procedural decision-authority constraint (e.g. spouse, co-owner, legal authority),
     which must be routed to DecisionStructure rather than spawning an ObjectionRecord.
     """
-    from .conversation_materiality import ABSENT_DECISION_MAKER_PATTERNS
     clean_text = utterance_text.lower().strip()
+    if any(k in clean_text for k in ("scam", "fraud", "ripoff", "rip-off", "disappeared", "vanished", "upfront fee")):
+        return False
+    from .conversation_materiality import ABSENT_DECISION_MAKER_PATTERNS
     if any(re.search(pat, clean_text) for pat in ABSENT_DECISION_MAKER_PATTERNS):
         return True
     authority_patterns = [

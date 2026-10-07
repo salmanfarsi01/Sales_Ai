@@ -801,13 +801,21 @@
         <button type="button" class="btn-ghost" style="font-size: 11px; padding: 4px 10px;" onclick="loadSampleScript('boundary')">Preset: Hard Boundary (Exit)</button>
         <button type="button" class="btn-ghost" style="font-size: 11px; padding: 4px 10px;" onclick="loadSampleScript('default')">Preset: Standard (3 Turns)</button>
       </div>
-      <div style="display: flex; gap: 10px; align-items: center; margin: 4px 0;">
-        <label for="simConversionTarget" style="font-size: 12px; font-weight: 600; color: #1E293B;">Conversion Target:</label>
-        <select id="simConversionTarget" style="font-size: 11.5px; padding: 3px 8px; border: 1px solid var(--border); border-radius: 4px; background: #FFFFFF; font-family: inherit;">
-          <option value="appointment" selected>appointment (Default)</option>
-          <option value="signed_listing_agreement">signed_listing_agreement</option>
-          <option value="permission_to_follow_up">permission_to_follow_up</option>
-        </select>
+      <div style="display: flex; gap: 16px; align-items: center; margin: 4px 0; background: #F8FAFC; border: 1px solid #E2E8F0; border-radius: 6px; padding: 6px 10px; flex-wrap: wrap;">
+        <div style="display: flex; gap: 8px; align-items: center;">
+          <label for="simConversionTarget" style="font-size: 12px; font-weight: 600; color: #1E293B;">Conversion Target:</label>
+          <select id="simConversionTarget" style="font-size: 11.5px; padding: 3px 8px; border: 1px solid var(--border); border-radius: 4px; background: #FFFFFF; font-family: inherit;">
+            <option value="appointment" selected>appointment (Default)</option>
+            <option value="signed_listing_agreement">signed_listing_agreement</option>
+            <option value="permission_to_follow_up">permission_to_follow_up</option>
+          </select>
+        </div>
+        <div style="display: flex; gap: 6px; align-items: center;">
+          <input type="checkbox" id="simRunSemantic" checked style="cursor: pointer;">
+          <label for="simRunSemantic" style="font-size: 11.5px; font-weight: 600; color: #1E293B; cursor: pointer;">
+            Run Deterministic Semantic Layer <span style="font-size: 10px; color: #64748B; font-weight: normal;">(extracts contact preferences, objections, and stakeholders dynamically)</span>
+          </label>
+        </div>
       </div>
       <textarea id="simScriptText" style="height: 200px;" placeholder='[
   {"turn_id": 1, "speaker_id": "client", "text": "Hi, who is this?"},
@@ -2103,11 +2111,17 @@
 
         const simSid = 'sim_' + Date.now().toString(36);
         const targetSelect = document.getElementById('simConversionTarget');
-        const targetVal = targetSelect ? targetSelect.value : 'appointment';
+        const runSemInput = document.getElementById('simRunSemantic');
+        const runSemVal = runSemInput ? runSemInput.checked : true;
         const res = await apiFetch('/api/conversation-state/replay-dialogue', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ call_sid: simSid, turns: turns, conversion_target: targetVal })
+          body: JSON.stringify({
+            call_sid: simSid,
+            turns: turns,
+            conversion_target: targetVal,
+            run_semantic_analysis: runSemVal
+          })
         });
 
         if (!res.ok) {
