@@ -974,6 +974,18 @@ class PitchProXCoreIntelligenceEngine:
             do_not_do = ["premature_close"]
             max_words = 20
 
+        # Client Feedback Point 5: Unclassified material turn routing
+        # When prospect statement was material but no structured extractor fired,
+        # route safely to CLARIFY / VALIDATE rather than an uninformed discovery question.
+        if getattr(snapshot, "unclassified_material", False) and primary_action == StrategicAction.QUESTION:
+            primary_action = StrategicAction.CLARIFY
+            secondary_action = StrategicAction.VALIDATE
+            secondary_reason = "Validate and clarify unclassified material disclosure to avoid deaf discovery."
+            objective = "Clarify prospect viewpoint and explore details following unclassified material statement."
+            reason_codes = ["UNCLASSIFIED_MATERIAL_CONTENT", "SAFE_CLARIFY_ROUTING"]
+            do_not_do = ["blind_discovery_question", "premature_close"]
+            max_words = 22
+
         if trust_score < 40.0 and primary_action != StrategicAction.VALIDATE:
             secondary_action = primary_action
             secondary_reason = f"Reinforce {secondary_action.value} after validating prospect."
@@ -1014,6 +1026,7 @@ class PitchProXCoreIntelligenceEngine:
             max_prompt_words=max_words,
             confidence=snapshot.overall_confidence,
             created_at_ms=turn_timestamp_ms,
+            unclassified_material=getattr(snapshot, "unclassified_material", False),
         )
         return DecisionEvaluationResult(decision=decision, context=context)
 
@@ -1038,6 +1051,7 @@ class PitchProXCoreIntelligenceEngine:
         decision.utterance_turn_id = effective_turn_id
         decision.metrics_source_turn_id = effective_turn_id
         decision.source_event_id = f"ev_turn_{effective_turn_id}_v{snapshot.state_version}"
+        decision.unclassified_material = bool(getattr(snapshot, "unclassified_material", False))
         if getattr(decision, "commitment_slot", None) is None:
             if snapshot.conversion_gate and snapshot.conversion_gate.commitment_slot:
                 decision.commitment_slot = snapshot.conversion_gate.commitment_slot

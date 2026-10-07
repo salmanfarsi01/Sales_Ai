@@ -44,7 +44,17 @@ from copilot.behavioral_inference import (
     DimensionScore,
     EmotionState,
 )
-from copilot.behavioral_semantic import SemanticFeatureSnapshot
+from copilot.behavioral_semantic import (
+    SemanticFeatureEngine,
+    SemanticFeatureSnapshot,
+)
+
+
+@pytest.fixture(autouse=True)
+def mock_groq_offline(monkeypatch):
+    """Enforces deterministic offline execution across all tests in this module,
+    preventing live network latency, external Groq API calls, or non-deterministic rate limits."""
+    monkeypatch.setenv("GROQ_API_KEY", "mock_key_offline")
 
 
 # =============================================================================
@@ -189,6 +199,64 @@ def test_simulated_6_turn_script_regression():
     assert str(dec6.push_strength) == "none"
     assert "CONTACT_PREFERENCE_DECLARED" in dec6.reason_codes
     assert "LOW_CONFIDENCE_ACTION_DOWNGRADE" not in dec6.reason_codes
+
+
+def test_turn_2_routing_and_stakeholder_isolation():
+    """Restores standalone check: Turn 2 routes to DE_RISK/defend/none, records wife stakeholder,
+    sets co_decision_required, and isolates stakeholder concerns without false downgrade."""
+    bundle = _make_bundle(turn_id=2, text="Yeah, I'm the owner. But my wife thinks companies like yours are just scams.")
+    manager = ConversationStateManager(call_sid="sim_test_stand_alone_t2")
+    state = manager.process_turn_bundle(bundle)
+    from copilot.core_decision_manager import CoreDecisionManager
+    dm = CoreDecisionManager(call_sid="sim_test_stand_alone_t2")
+    res = dm.evaluate_state(snapshot=state, turn_speaker="client", turn_text=bundle.utterance_text, turn_timestamp_ms=6000, turn_id=2)
+    dec = res.decision
+    assert dec.primary_action == StrategicAction.DE_RISK
+    assert dec.strategic_posture == "defend"
+    assert str(dec.push_strength) == "none"
+    assert "STAKEHOLDER_CONCERN" in dec.reason_codes
+    assert "LOW_CONFIDENCE_ACTION_DOWNGRADE" not in dec.reason_codes
+    roles = [s.role for s in state.decision_structure.stakeholders]
+    assert "wife" in roles
+    assert state.decision_structure.co_decision_required is True
+
+
+def test_turn_4_trust_objection_and_cause_recorded():
+    """Restores standalone check: Turn 4 is material, records trust_credibility objection,
+    captures underlying driver (prior_agent_fraud_or_loss), and routes to VALIDATE/advance/low."""
+    bundle = _make_bundle(turn_id=4, text="A neighbor paid a big upfront fee and the agent disappeared.")
+    mat = MaterialityFilter().classify_turn(bundle)
+    assert mat.is_material is True
+    manager = ConversationStateManager(call_sid="sim_test_stand_alone_t4")
+    state = manager.process_turn_bundle(bundle)
+    trust_objs = [o for o in state.objections if o.canonical_category == "trust_credibility"]
+    assert len(trust_objs) >= 1
+    assert trust_objs[0].driver_layer.underlying_driver == "prior_agent_fraud_or_loss"
+    from copilot.core_decision_manager import CoreDecisionManager
+    dm = CoreDecisionManager(call_sid="sim_test_stand_alone_t4")
+    res = dm.evaluate_state(snapshot=state, turn_speaker="client", turn_text=bundle.utterance_text, turn_timestamp_ms=12000, turn_id=4)
+    dec = res.decision
+    assert dec.primary_action == StrategicAction.VALIDATE
+    assert dec.strategic_posture == "advance"
+    assert str(dec.push_strength) in ("low", "moderate")
+    assert "CATEGORY_TRUST_CREDIBILITY" in dec.reason_codes
+
+
+def test_spoken_prompts_suppressed_on_rep_turns():
+    """Restores standalone check: Spoken guidance prompts are strictly suppressed on salesperson turns."""
+    from copilot.core_decision_manager import CoreDecisionManager
+    from copilot.conversation_state_models import ConversationStateSnapshot
+    dm = CoreDecisionManager(call_sid="test_rep_suppression")
+    snap = ConversationStateSnapshot(call_sid="test_rep_suppression")
+    for rep_text in [
+        "I completely understand the caution. Can I ask what made her feel that way?",
+        "That's a legitimate worry. We charge nothing upfront, only at closing.",
+        "That's fair — a lot of people feel that way before they see the actual numbers.",
+    ]:
+        res = dm.evaluate_state(snapshot=snap, turn_speaker="salesperson", turn_text=rep_text, turn_timestamp_ms=1000, turn_id=3)
+        assert res.decision.should_prompt is False
+        assert getattr(res.decision, "spoken_guidance_prompt", None) is None
+        assert res.decision.final_prompt_text is None
 
 
 # =============================================================================
@@ -360,6 +428,25 @@ def test_negative_cases_do_not_trigger_false_positives():
     mat4 = MaterialityFilter().classify_turn(bundle4)
     assert "objections" not in mat4.affected_targets
 
+    # 5. Variation: "I read a scam story, but that's unrelated to my situation." -> must NOT trigger objection
+    t5 = "I read a scam story, but that's unrelated to my situation."
+    assert classify_objection_label(t5) is None
+    bundle5 = _make_bundle(turn_id=2, text=t5, speaker_id="client")
+    mat5 = MaterialityFilter().classify_turn(bundle5)
+    assert "objections" not in mat5.affected_targets
+
+    # 6. Variation: "The agent vanished into a meeting." -> must NOT trigger trust objection
+    t6 = "The agent vanished into a meeting."
+    assert classify_objection_label(t6) is None
+    bundle6 = _make_bundle(turn_id=2, text=t6, speaker_id="client")
+    mat6 = MaterialityFilter().classify_turn(bundle6)
+    assert "objections" not in mat6.affected_targets
+
+    # 7. Contrast case: "My wife loves the neighborhood but thinks we should wait." -> MUST trigger!
+    t7 = "My wife loves the neighborhood but thinks we should wait."
+    assert is_decision_authority_statement(t7) is True
+    assert classify_objection_label(t7) == "spouse_authority"
+
 
 # =============================================================================
 # 7. Contact Edge Cases Tests (Client Item 7)
@@ -380,12 +467,63 @@ def test_contact_preference_edge_cases():
     assert p2_by_ch["sms"].allowed is True
     assert p2_by_ch["call"].allowed is False
 
-    # 3. "no calls before 9 or after 6" (dual time bounds)
+    # 3. "no calls before 9 or after 6" (dual time bounds stored separately and normalized to 24h)
     p3 = extract_structured_contact_preferences("no calls before 9 or after 6")
     assert len(p3) >= 1
     call_p = next(p for p in p3 if p.channel == "call")
+    assert call_p.allowed is True  # Allowed during window, restricted outside
+    assert call_p.time_not_before == "09:00"
+    assert call_p.time_not_after == "18:00"
     assert call_p.time_restriction == "before 9 or after 6"
     assert "calling before 9 or after 6" in call_p.prohibited_behavior
+
+    # 4. WhatsApp channel detection: "Ping me on WhatsApp, do not ring my cell during work hours."
+    p4 = extract_structured_contact_preferences("Ping me on WhatsApp, do not ring my cell during work hours.")
+    p4_by_ch = {p.channel: p for p in p4}
+    assert "whatsapp" in p4_by_ch and "call" in p4_by_ch
+    assert p4_by_ch["whatsapp"].allowed is True
+    assert p4_by_ch["call"].allowed is True  # Allowed outside work hours
+    assert p4_by_ch["call"].cadence == "specific_times"
+
+
+def test_contact_timing_enforcement_flags_after_hours():
+    """Verifies that is_time_permitted correctly identifies after-hours violations (e.g. proposed 7pm call)."""
+    prefs = extract_structured_contact_preferences("no calls before 9 or after 6")
+    call_p = next(p for p in prefs if p.channel == "call")
+    # Proposed call at 7pm (19:00) must be flagged as prohibited
+    permitted_1900, reason_1900 = call_p.is_time_permitted("19:00")
+    assert permitted_1900 is False
+    assert "Proposed time 19:00 violates restriction: no call after 18:00" in reason_1900
+
+    # Proposed call at 8am (08:00) must be flagged as prohibited
+    permitted_0800, reason_0800 = call_p.is_time_permitted("08:00")
+    assert permitted_0800 is False
+    assert "Proposed time 08:00 violates restriction: no call before 09:00" in reason_0800
+
+    # Proposed call at 2pm (14:00) is permitted
+    permitted_1400, reason_1400 = call_p.is_time_permitted("14:00")
+    assert permitted_1400 is True
+
+
+def test_unclassified_material_turn_routing():
+    """Verifies that an unclassified material statement defaults safely to CLARIFY / VALIDATE
+    with low push rather than defaulting to a blind discovery question."""
+    from copilot.core_decision_manager import CoreDecisionManager
+    from copilot.conversation_state_models import ConversationStateSnapshot
+    snap = ConversationStateSnapshot(call_sid="test_unclass_mat")
+    snap.unclassified_material = True
+    dm = CoreDecisionManager(call_sid="test_unclass_mat")
+    res = dm.evaluate_state(
+        snapshot=snap,
+        turn_speaker="client",
+        turn_text="Something vague but serious was mentioned.",
+        turn_timestamp_ms=1000,
+        turn_id=2,
+    )
+    assert res.decision.unclassified_material is True
+    assert res.decision.primary_action in (StrategicAction.CLARIFY, StrategicAction.VALIDATE)
+    assert str(res.decision.push_strength) == "low"
+    assert "UNCLASSIFIED_MATERIAL_CONTENT" in res.decision.reason_codes
 
 
 # =============================================================================
@@ -393,11 +531,15 @@ def test_contact_preference_edge_cases():
 # =============================================================================
 def test_rate_limit_429_fallback_autonomous_pass(monkeypatch):
     """Simulates LLM returning HTTP 429 (Rate Limit Exceeded) and proves turns 2, 4, 6 pass autonomously."""
+    call_count = 0
+
     class Mock429Client:
         class chat:
             class completions:
                 @staticmethod
                 def create(*args, **kwargs):
+                    nonlocal call_count
+                    call_count += 1
                     raise RuntimeError("Error code: 429 - Rate limit reached: TPM or RPM quota exceeded.")
 
     mock_client = Mock429Client()
@@ -415,9 +557,12 @@ def test_rate_limit_429_fallback_autonomous_pass(monkeypatch):
     # Initialize engines with mock 429 client so any attempted LLM call fails with 429
     filter_with_429 = MaterialityFilter(groq_client=mock_client)
     driver_with_429 = ObjectionDriverClassifier(groq_client=mock_client)
+    sem_with_429 = SemanticFeatureEngine(groq_client=mock_client)
+
     state_mgr = ConversationStateManager(call_sid="sim_test_429_call")
     state_mgr.materiality_filter = filter_with_429
     state_mgr.objections_engine.driver_classifier = driver_with_429
+    state_mgr.semantic_engine = sem_with_429
 
     replay_engine = ConversationReplayEngine(state_manager=state_mgr)
     report = replay_engine.replay_dialogue_turns(
@@ -426,6 +571,9 @@ def test_rate_limit_429_fallback_autonomous_pass(monkeypatch):
         save_report=False,
         run_semantic_analysis=True,
     )
+
+    # Prove that the LLM was actually called and raised the 429 error
+    assert call_count > 0, "LLM was never called; test did not prove fallback under 429!"
 
     timeline_by_id = {t.turn_id: t for t in report.timeline}
 
@@ -454,3 +602,101 @@ def test_rate_limit_429_fallback_autonomous_pass(monkeypatch):
     assert "call" in channels6 and channels6["call"].time_restriction == "after 6pm"
     assert t6.strategic_decision.primary_action == StrategicAction.ACKNOWLEDGE
     assert t6.strategic_decision.strategic_posture == "protect"
+
+
+# =============================================================================
+# 9. Gate-Closed Invariant Test Across Both Modes (Client Item 2)
+# =============================================================================
+SCRIPTS_FOR_INVARIANT = {
+    "canonical": [
+        {"turn_id": 1, "speaker_id": "salesperson", "text": "Hi, thanks for making time today — tell me a bit about what's going on with the house."},
+        {"turn_id": 2, "speaker_id": "client", "text": "I'm the one making this decision, no one else needs to sign off."},
+        {"turn_id": 3, "speaker_id": "salesperson", "text": "Got it. What's driving the timing for you?"},
+        {"turn_id": 4, "speaker_id": "client", "text": "We might look at moving sometime next year, nothing urgent yet."},
+        {"turn_id": 5, "speaker_id": "client", "text": "Honestly, we're not sure this is the right time anymore."},
+        {"turn_id": 6, "speaker_id": "salesperson", "text": "That's fair — a lot of people feel that way before they see the actual numbers. Would it help to walk through what the market looks like right now?"},
+        {"turn_id": 7, "speaker_id": "client", "text": "Okay, that makes sense, I guess timing isn't the biggest issue."},
+        {"turn_id": 8, "speaker_id": "salesperson", "text": "Great — would sometime next week work for a walkthrough?"},
+        {"turn_id": 9, "speaker_id": "client", "text": "Maybe next week could work, let me think about it."},
+        {"turn_id": 10, "speaker_id": "client", "text": "Actually, my wife would really need to be part of this conversation before we go any further."},
+        {"turn_id": 11, "speaker_id": "salesperson", "text": "Of course, happy to loop her in whenever works."},
+        {"turn_id": 12, "speaker_id": "client", "text": "I guess I'm just worried this isn't really the right move for us financially with everything going on."},
+        {"turn_id": 13, "speaker_id": "salesperson", "text": "Totally understand — let's look at your net proceeds after all costs, so you can see the real picture."},
+        {"turn_id": 14, "speaker_id": "client", "text": "That's actually really helpful, tell me more — how does the marketing process work, what about staging, how long does listing usually take?"},
+        {"turn_id": 15, "speaker_id": "client", "text": "Please don't start texting me every day before we meet, by the way."},
+        {"turn_id": 16, "speaker_id": "client", "text": "Mornings don't really work for us either, just so you know."},
+        {"turn_id": 17, "speaker_id": "salesperson", "text": "Noted on all of that. What day works best?"},
+        {"turn_id": 18, "speaker_id": "client", "text": "Thursday at 3 works, and my wife will be there."}
+    ],
+    "script_a": [
+        {"turn_id": 1, "speaker_id": "salesperson", "text": "Hi, thanks for making time today — tell me a bit about what's going on with the house."},
+        {"turn_id": 2, "speaker_id": "client", "text": "I own the property and make the listing decisions."},
+        {"turn_id": 3, "speaker_id": "salesperson", "text": "Got it. Would sometime next week work for a walkthrough?"},
+        {"turn_id": 4, "speaker_id": "client", "text": "Thursday at 3 works to see the numbers."}
+    ],
+    "script_b": [
+        {"turn_id": 1, "speaker_id": "salesperson", "text": "Our standard commission fee is 5% which includes staging and premium marketing."},
+        {"turn_id": 2, "speaker_id": "client", "text": "Why should I pay 5% commission when the last agent did nothing? What do you actually do differently?"},
+        {"turn_id": 3, "speaker_id": "salesperson", "text": "That's completely fair to ask. We provide guaranteed marketing and active staging."},
+        {"turn_id": 4, "speaker_id": "client", "text": "I see. I still think 5% is steep, let me consider."}
+    ],
+    "script_d": [
+        {"turn_id": 1, "speaker_id": "salesperson", "text": "Hi, thanks for taking the call about your property."},
+        {"turn_id": 2, "speaker_id": "client", "text": "I need to discuss this with my spouse first before making any decisions."},
+        {"turn_id": 3, "speaker_id": "salesperson", "text": "Understood, we always recommend having all owners involved."},
+        {"turn_id": 4, "speaker_id": "client", "text": "She handles the financial side so she has to be part of it."}
+    ],
+    "script_g": [
+        {"turn_id": 1, "speaker_id": "salesperson", "text": "We can help you get the maximum value for your home with no upfront costs."},
+        {"turn_id": 2, "speaker_id": "client", "text": "A contractor took half the money upfront and never came back, so I don't trust promises."},
+        {"turn_id": 3, "speaker_id": "salesperson", "text": "That sounds terrible. We never take any upfront deposits; everything is paid at closing."},
+        {"turn_id": 4, "speaker_id": "client", "text": "Okay, that's reassuring to know."}
+    ],
+    "script_h": [
+        {"turn_id": 1, "speaker_id": "salesperson", "text": "Thanks for speaking with me today regarding your home on Elm."},
+        {"turn_id": 2, "speaker_id": "client", "text": "Don't call me early morning, and don't text me every day."},
+        {"turn_id": 3, "speaker_id": "salesperson", "text": "Understood, I've noted no early morning calls and no daily texting."},
+        {"turn_id": 4, "speaker_id": "client", "text": "Send me an email instead."}
+    ],
+    "script_i": [
+        {"turn_id": 1, "speaker_id": "salesperson", "text": "Hi Mr. Reyes, thanks for picking up. I'm calling about your property on Maple Drive."},
+        {"turn_id": 2, "speaker_id": "client", "text": "Yeah, I'm the owner. But my wife thinks companies like yours are just scams."},
+        {"turn_id": 3, "speaker_id": "salesperson", "text": "I completely understand the caution. Can I ask what made her feel that way?"},
+        {"turn_id": 4, "speaker_id": "client", "text": "A neighbor paid a big upfront fee and the agent disappeared."},
+        {"turn_id": 5, "speaker_id": "salesperson", "text": "That's a legitimate worry. We charge nothing upfront, only at closing."},
+        {"turn_id": 6, "speaker_id": "client", "text": "Fine. Email me the contract details, but no phone calls after 6pm."}
+    ],
+}
+
+
+@pytest.mark.parametrize("script_name", list(SCRIPTS_FOR_INVARIANT.keys()))
+@pytest.mark.parametrize("run_semantic", [False, True])
+def test_gate_closed_no_commitment_close_or_confirm_protect_invariant(script_name, run_semantic):
+    """Proves that across all scripts (Canonical, A, B, D, G, H, I) in either mode (semantic False or True),
+    no turn ever selects commitment_close, high/direct push, or confirm_and_protect while the meeting gate is closed.
+    """
+    dialogue = SCRIPTS_FOR_INVARIANT[script_name]
+    engine = ConversationReplayEngine()
+    report = engine.replay_dialogue_turns(
+        call_sid=f"invariant_check_{script_name}_sem_{run_semantic}",
+        raw_turns=dialogue,
+        save_report=False,
+        run_semantic_analysis=run_semantic,
+    )
+
+    for step in report.timeline:
+        tid = step.turn_id
+        dec = step.strategic_decision
+        gate = step.state_after.conversion_gate
+        gate_open = gate.is_open if gate else False
+
+        if not gate_open:
+            assert dec.primary_action != StrategicAction.COMMITMENT_CLOSE, (
+                f"[{script_name}] Turn {tid} (semantic={run_semantic}) violated invariant: Gate is closed, but action is COMMITMENT_CLOSE!"
+            )
+            assert str(dec.push_strength) not in ("direct_ask", "two_window_choice", "high"), (
+                f"[{script_name}] Turn {tid} (semantic={run_semantic}) violated invariant: Gate is closed, but push is {dec.push_strength}!"
+            )
+            assert "CONFIRM_AND_PROTECT_ACTIVE" not in dec.reason_codes, (
+                f"[{script_name}] Turn {tid} (semantic={run_semantic}) violated invariant: Gate is closed, but CONFIRM_AND_PROTECT is active!"
+            )

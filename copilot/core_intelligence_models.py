@@ -142,6 +142,7 @@ class StrategicDecision(BaseModel):
     confidence: float = Field(0.85, ge=0.0, le=1.0)
     confidence_breakdown: Dict[str, float] = Field(default_factory=dict)
     created_at_ms: int = 0
+    unclassified_material: bool = Field(default=False, description="True if decision routed from an unclassified material prospect disclosure")
     # Full Trace Attributes (Spec: Evidence -> Interpretation -> Decision -> Gateway Prompt Stub)
     evidence_considered: List[str] = Field(default_factory=list)
     strategic_interpretation: Dict[str, Any] = Field(default_factory=dict)

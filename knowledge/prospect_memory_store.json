@@ -567,6 +567,66 @@
         "content": "Selling a 2-bedroom condo",
         "confidence": 1.0,
         "metadata": {}
+      },
+      {
+        "memory_id": "mem_7d4ff34cb6",
+        "user_id": "rep_david",
+        "prospect_id": "prospect_timeline_only",
+        "source_call_sid": "call_david_prior",
+        "timestamp": 1791363395138,
+        "memory_type": "timeline",
+        "source_turn_id": 2,
+        "source_event_id": null,
+        "key": "timeline_horizon",
+        "value": "six_months",
+        "content": "Moving in six months",
+        "confidence": 1.0,
+        "metadata": {}
+      },
+      {
+        "memory_id": "mem_542fd5c985",
+        "user_id": "rep_david",
+        "prospect_id": "prospect_timeline_only",
+        "source_call_sid": "call_david_prior",
+        "timestamp": 1791363395140,
+        "memory_type": "fact",
+        "source_turn_id": 3,
+        "source_event_id": null,
+        "key": "property_type",
+        "value": "condo",
+        "content": "Selling a 2-bedroom condo",
+        "confidence": 1.0,
+        "metadata": {}
+      },
+      {
+        "memory_id": "mem_a6463559e6",
+        "user_id": "rep_david",
+        "prospect_id": "prospect_timeline_only",
+        "source_call_sid": "call_david_prior",
+        "timestamp": 1791366262691,
+        "memory_type": "timeline",
+        "source_turn_id": 2,
+        "source_event_id": null,
+        "key": "timeline_horizon",
+        "value": "six_months",
+        "content": "Moving in six months",
+        "confidence": 1.0,
+        "metadata": {}
+      },
+      {
+        "memory_id": "mem_b267816213",
+        "user_id": "rep_david",
+        "prospect_id": "prospect_timeline_only",
+        "source_call_sid": "call_david_prior",
+        "timestamp": 1791366262693,
+        "memory_type": "fact",
+        "source_turn_id": 3,
+        "source_event_id": null,
+        "key": "property_type",
+        "value": "condo",
+        "content": "Selling a 2-bedroom condo",
+        "confidence": 1.0,
+        "metadata": {}
       }
     ]
   }

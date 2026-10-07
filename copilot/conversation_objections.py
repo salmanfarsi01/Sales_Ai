@@ -65,6 +65,7 @@ CANONICAL_OBJECTION_PATTERNS: Dict[str, List[str]] = {
         r"\b(?:wife|husband|spouse|partner)\b.*?\bbefore\s+(?:we|i)\s+(?:go|make|decide|move)\b",
         r"\b(?:my\s+)?(?:wife|husband|spouse|partner)\s+(?:thinks|believes|feels|says|warned|worried|concerned)\b",
         r"\b(?:my\s+)?(?:wife|husband|spouse|partner)\s+wants\s+to\s+look\s+at\s+it\s+first\b",
+        r"\b(?:my\s+)?(?:wife|husband|spouse|partner)\b.*?\b(?:thinks?|feels?|wants?)\s+(?:we\s+should\s+)?(?:wait|hold\s+off|delay)\b",
     ],
     "trust_credibility": [
         r"\b(?:companies|people|folks|places|outfits)\s+like\s+yours\s+(?:are\s+)?(?:just\s+)?scams?\b",
@@ -120,6 +121,7 @@ def is_decision_authority_statement(utterance_text: str) -> bool:
         return True
     authority_patterns = [
         r"\b(?:my\s+)?(?:wife|husband|spouse|partner|brother-in-law|sister-in-law|co-owner|attorney)\b.*?\b(?:decide|decision|sign|board|involved|say|call|consult|talk|conversation)\b",
+        r"\b(?:my\s+)?(?:wife|husband|spouse|partner)\b.*?\b(?:thinks?\s+(?:we\s+should\s+)?wait|wait|hold\s+off)\b",
         r"\bnot\s+my\s+decision\s+alone\b",
         r"\bwe\s+decide\s+together\b",
         r"\bneeds?\s+to\s+be\s+(?:part|involved|present|here)\b",
@@ -153,6 +155,15 @@ def classify_objection_label(utterance_text: str) -> Optional[str]:
     is anchored directly to the Behavioral Signal Engine's recurrence_id.
     """
     clean_text = utterance_text.lower().strip()
+
+    # Disclaimers suppressing false positive objection classification
+    disclaimer_suppressors = [
+        r"\b(?:not\s+why\s+i['’]?m\s+calling|that['’]?s\s+not\s+why|unrelated\s+to\s+(?:my|our)\s+situation|not\s+relevant\s+to\s+(?:us|me)|different\s+story|nothing\s+to\s+do\s+with\s+(?:us|me|this))\b",
+        r"\b(?:vanished|disappeared)\s+into\s+(?:a\s+meeting|the\s+garage|the\s+other\s+room|the\s+office|his\s+car|the\s+kitchen)\b",
+    ]
+    if any(re.search(d, clean_text) for d in disclaimer_suppressors):
+        return None
+
     for category, patterns in CANONICAL_OBJECTION_PATTERNS.items():
         for pattern in patterns:
             if re.search(pattern, clean_text, re.IGNORECASE):

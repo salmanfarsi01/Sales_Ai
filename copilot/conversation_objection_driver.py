@@ -136,9 +136,10 @@ class ObjectionDriverClassifier:
             category = "general_hesitation"
 
         api_key = os.getenv("GROQ_API_KEY")
-        if api_key and not api_key.startswith("mock_"):
+        is_testing = bool(os.getenv("PYTEST_CURRENT_TEST"))
+        if (self.groq_client is not None) or (api_key and not api_key.startswith("mock_") and not is_testing):
             try:
-                return self._classify_via_llm(category, utterance_text, context_history, api_key)
+                return self._classify_via_llm(category, utterance_text, context_history, api_key or "")
             except Exception as exc:
                 LOGGER.warning("LLM objection driver classification failed (%s), falling back to heuristic", exc)
 

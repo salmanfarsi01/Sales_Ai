@@ -190,6 +190,7 @@ SUBSTANTIVE_AGREEMENT_PATTERNS = [
     r"\b(yes|yeah|sure)\b.*?\b(tuesday|wednesday|thursday|friday|monday|tomorrow|\d+\s*(pm|am))\b",
     r"\b(that\s+works|sounds\s+good|let['’]?s\s+do\s+that|i\s+agree|let['’]?s\s+meet)\b",
     r"\bi\s+can\s+(do|meet|show|send)\b",
+    r"\b(?:that['’]?s\s+(?:actually\s+)?(?:really\s+)?(?:helpful|great|good|informative)|tell\s+me\s+more)\b",
 ]
 
 POLITE_AGREEMENT_PATTERNS = [
@@ -262,6 +263,35 @@ STOPWORDS = {
 SOFT_PREFERENCE_PATTERNS = SOFT_CONTACT_PREFERENCE_PATTERNS
 
 
+def normalize_time_to_24h(val: Optional[str], default_period: Optional[str] = None) -> Optional[str]:
+    """Normalizes time expression (e.g. '9', '6', '8am', '7pm', 'noon', 'midnight') to 'HH:MM' (24-hour)."""
+    if not val:
+        return None
+    val_clean = val.strip().lower()
+    if val_clean == "noon":
+        return "12:00"
+    if val_clean == "midnight":
+        return "00:00"
+    m = re.match(r"^(\d{1,2})(?::(\d{2}))?\s*(am|pm)?$", val_clean)
+    if not m:
+        return val_clean
+    hh = int(m.group(1))
+    mm = int(m.group(2) or 0)
+    period = m.group(3) or default_period
+    if period:
+        period = period.lower()
+        if period == "pm" and hh < 12:
+            hh += 12
+        elif period == "am" and hh == 12:
+            hh = 0
+    else:
+        # Default business heuristic:
+        # 1..7 without period is PM (13:00..19:00), 8..11 without period is AM (08:00..11:00)
+        if 1 <= hh <= 7:
+            hh += 12
+    return f"{hh:02d}:{mm:02d}"
+
+
 def extract_structured_contact_preferences(
     text: str,
     source_turn_id: int = 0,
@@ -314,25 +344,30 @@ def extract_structured_contact_preferences(
         # Whole-word channel detection (fixes 'text' in 'context', 'call' in 'recall')
         has_sms = bool(re.search(r"\b(text|texting|sms|message|messages|messaging)\b", cl_lower))
         has_email = bool(re.search(r"\b(email|emails|emailing)\b", cl_lower))
-        has_call = bool(re.search(r"\b(call|calls|calling|phone|phones)\b", cl_lower))
+        has_call = bool(re.search(r"\b(call|calls|calling|phone|phones|ring|ringing|cell|cellphone|mobile)\b", cl_lower))
+        has_whatsapp = bool(re.search(r"\b(whatsapp|whats\s*app)\b", cl_lower))
 
-        detected_channels: List[Literal["sms", "call", "email"]] = []
+        detected_channels: List[Literal["sms", "call", "email", "whatsapp", "other"]] = []
         if has_sms:
             detected_channels.append("sms")
         if has_email:
             detected_channels.append("email")
         if has_call:
             detected_channels.append("call")
+        if has_whatsapp:
+            detected_channels.append("whatsapp")
 
         # Check timing restrictions within this clause
         m_before = re.search(r"before\s+(\d{1,2}(?::\d{2})?\s*(?:am|pm)?|noon|midnight)", cl_lower)
         m_after = re.search(r"after\s+(\d{1,2}(?::\d{2})?\s*(?:am|pm)?|noon|midnight)", cl_lower)
         m_between = re.search(r"between\s+(\d{1,2}(?::\d{2})?\s*(?:am|pm)?)\s+and\s+(\d{1,2}(?::\d{2})?\s*(?:am|pm)?)", cl_lower)
+        m_work = re.search(r"(?:during|in)\s+(?:work|business)\s+hours|during\s+work", cl_lower)
+        m_window = re.search(r"\b(?:in\s+the\s+)?(early\s+morning|morning|afternoon|evening|night)\b", cl_lower)
 
-        has_timing = bool(m_before or m_after or m_between or any(re.search(p, cl_lower) for p in SOFT_CONTACT_PREFERENCE_PATTERNS["timing_restriction"]))
+        has_timing = bool(m_before or m_after or m_between or m_work or m_window or any(re.search(p, cl_lower) for p in SOFT_CONTACT_PREFERENCE_PATTERNS["timing_restriction"]))
 
         is_prohibition = bool(
-            re.search(r"\b(?:no|don['’]?t|do\s+not|never|stop|not)\s+(?:phone\s+)?(?:calls?|calling|texts?|texting|emails?|emailing)\b", cl_lower)
+            re.search(r"\b(?:no|don['’]?t|do\s+not|never|stop|not)\s+(?:phone\s+|cell\s+)?(?:calls?|calling|ring|ringing|texts?|texting|emails?|emailing|whatsapp)\b", cl_lower)
             or re.search(r"\b(?:calls?|texts?)\s+(?:aren['’]?t|are\s+not)\b", cl_lower)
             or re.search(r"\bno\s+(?:phone\s+)?calls\b", cl_lower)
         )
@@ -340,35 +375,52 @@ def extract_structured_contact_preferences(
         is_reduced = any(re.search(p, cl_lower) for p in SOFT_CONTACT_PREFERENCE_PATTERNS["reduced_frequency"])
 
         for ch in detected_channels:
-            action_verb = "texting" if ch == "sms" else ("emailing" if ch == "email" else "calling")
+            action_verb = "messaging via whatsapp" if ch == "whatsapp" else ("texting" if ch == "sms" else ("emailing" if ch == "email" else "calling"))
             time_restriction: Optional[str] = None
+            time_not_before: Optional[str] = None
+            time_not_after: Optional[str] = None
             prohibited_behavior: Optional[str] = None
             cadence: Optional[Literal["reduced", "specific_times", "no_preference"]] = "no_preference"
             allowed = True
 
             if has_timing:
                 cadence = "specific_times"
+                allowed = True  # Allowed during valid window, restricted outside
                 if m_before and m_after:
-                    b_val = m_before.group(1).strip()
-                    a_val = m_after.group(1).strip()
-                    time_restriction = f"before {b_val} or after {a_val}"
-                    prohibited_behavior = f"{action_verb} before {b_val} or after {a_val}"
+                    b_raw = m_before.group(1).strip()
+                    a_raw = m_after.group(1).strip()
+                    time_not_before = normalize_time_to_24h(b_raw, "am")
+                    time_not_after = normalize_time_to_24h(a_raw, "pm")
+                    time_restriction = f"before {b_raw} or after {a_raw}"
+                    prohibited_behavior = f"{action_verb} before {b_raw} or after {a_raw}"
                 elif m_between:
-                    t1, t2 = m_between.group(1).strip(), m_between.group(2).strip()
-                    time_restriction = f"between {t1} and {t2}"
-                    prohibited_behavior = f"{action_verb} between {t1} and {t2}"
+                    t1_raw, t2_raw = m_between.group(1).strip(), m_between.group(2).strip()
+                    time_not_before = normalize_time_to_24h(t1_raw)
+                    time_not_after = normalize_time_to_24h(t2_raw)
+                    time_restriction = f"between {t1_raw} and {t2_raw}"
+                    prohibited_behavior = f"{action_verb} between {t1_raw} and {t2_raw}"
                 elif m_after:
-                    time_val = m_after.group(1).strip()
-                    time_restriction = f"after {time_val}"
-                    prohibited_behavior = f"{action_verb} after {time_val}"
+                    time_raw = m_after.group(1).strip()
+                    time_not_after = normalize_time_to_24h(time_raw, "pm")
+                    time_restriction = f"after {time_raw}"
+                    prohibited_behavior = f"{action_verb} after {time_raw}"
                 elif m_before:
-                    time_val = m_before.group(1).strip()
-                    time_restriction = f"before {time_val}"
-                    prohibited_behavior = f"{action_verb} before {time_val}"
+                    time_raw = m_before.group(1).strip()
+                    time_not_before = normalize_time_to_24h(time_raw, "am")
+                    time_restriction = f"before {time_raw}"
+                    prohibited_behavior = f"{action_verb} before {time_raw}"
+                elif m_work:
+                    time_restriction = "during work hours"
+                    prohibited_behavior = f"{action_verb} during work hours"
+                elif m_window:
+                    win_text = m_window.group(1).strip()
+                    time_restriction = win_text
+                    prohibited_behavior = f"{action_verb} in {win_text}" if "in" in win_text else f"{action_verb} in the {win_text}"
                 else:
                     prohibited_behavior = f"{action_verb} outside specified hours"
             elif is_reduced:
                 cadence = "reduced"
+                allowed = True
                 prohibited_behavior = f"daily {action_verb}"
             elif is_prohibition:
                 allowed = False
@@ -376,10 +428,10 @@ def extract_structured_contact_preferences(
             else:
                 # Allowance / preference (e.g. 'email me details', 'text is fine', 'prefer email', 'send by email')
                 is_allowance_or_pref = bool(
-                    re.search(r"\b(?:by|via)\s+(?:email|text|message)\b", cl_lower)
-                    or re.search(r"\b(?:prefer|instead|fine|okay|better|only|reach\s+out|communicate|contact)\b", cl_lower)
+                    re.search(r"\b(?:by|via)\s+(?:email|text|message|whatsapp)\b", cl_lower)
+                    or re.search(r"\b(?:prefer|instead|fine|okay|better|only|reach\s+out|communicate|contact|ping\s+me)\b", cl_lower)
                     or re.search(r"\bsend\b.*?\b(?:email|text|message)\b", cl_lower)
-                    or re.search(r"\b(?:email|text|message)\s+(?:me|us)\b", cl_lower)
+                    or re.search(r"\b(?:email|text|message|whatsapp)\s+(?:me|us)\b", cl_lower)
                     or any(re.search(p, cl_lower) for p in SOFT_CONTACT_PREFERENCE_PATTERNS["channel_restriction"])
                 )
                 if not is_allowance_or_pref:
@@ -397,6 +449,8 @@ def extract_structured_contact_preferences(
                         cadence=cadence,
                         prohibited_behavior=prohibited_behavior,
                         time_restriction=time_restriction,
+                        time_not_before=time_not_before,
+                        time_not_after=time_not_after,
                         boundary_strength="preference",
                         source_turn_id=source_turn_id,
                         confidence=confidence,
@@ -423,19 +477,31 @@ def extract_structured_contact_preferences(
     if not results:
         # Fallback to single channel detection
         ch = "call"
-        if re.search(r"\b(text|texting|sms|message)\b", cleaned_lower):
+        if re.search(r"\b(whatsapp|whats\s*app)\b", cleaned_lower):
+            ch = "whatsapp"
+        elif re.search(r"\b(text|texting|sms|message)\b", cleaned_lower):
             ch = "sms"
         elif re.search(r"\b(email|emails)\b", cleaned_lower):
             ch = "email"
 
-        action_verb = "texting" if ch == "sms" else ("emailing" if ch == "email" else "calling")
+        action_verb = "messaging via whatsapp" if ch == "whatsapp" else ("texting" if ch == "sms" else ("emailing" if ch == "email" else "calling"))
         if any(re.search(p, cleaned_lower) for p in SOFT_CONTACT_PREFERENCE_PATTERNS["timing_restriction"]):
+            time_not_before = None
+            time_not_after = None
             if m_before and m_after:
-                time_restriction = f"before {m_before.group(1).strip()} or after {m_after.group(1).strip()}"
+                b_val = m_before.group(1).strip()
+                a_val = m_after.group(1).strip()
+                time_not_before = b_val
+                time_not_after = a_val
+                time_restriction = f"before {b_val} or after {a_val}"
             elif m_after:
-                time_restriction = f"after {m_after.group(1).strip()}"
+                time_val = m_after.group(1).strip()
+                time_not_after = time_val
+                time_restriction = f"after {time_val}"
             elif m_before:
-                time_restriction = f"before {m_before.group(1).strip()}"
+                time_val = m_before.group(1).strip()
+                time_not_before = time_val
+                time_restriction = f"before {time_val}"
             else:
                 time_restriction = None
             prohibited_behavior = f"{action_verb} {time_restriction}" if time_restriction else f"{action_verb} outside specified hours"
@@ -446,6 +512,8 @@ def extract_structured_contact_preferences(
                     cadence="specific_times",
                     prohibited_behavior=prohibited_behavior,
                     time_restriction=time_restriction,
+                    time_not_before=time_not_before,
+                    time_not_after=time_not_after,
                     boundary_strength="preference",
                     source_turn_id=source_turn_id,
                     confidence=confidence,
@@ -795,7 +863,8 @@ class SemanticFeatureEngine:
             )
 
         api_key_groq = os.getenv("GROQ_API_KEY")
-        if not api_key_groq or api_key_groq.startswith("mock_"):
+        is_testing = bool(os.getenv("PYTEST_CURRENT_TEST"))
+        if self.groq_client is None and (not api_key_groq or api_key_groq.startswith("mock_") or is_testing):
             return self.analyze_deterministic_heuristic(
                 utterance, context_history, mode="heuristic_offline"
             )

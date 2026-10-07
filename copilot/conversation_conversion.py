@@ -529,7 +529,7 @@ class MeetingConversionGateEngine:
         val_ok = not has_decision_to_stay and not is_vague_filler and not val_deficient and has_affirmative_value_evidence
 
         is_overridden4 = False
-        if has_explicit_commit and not has_decision_to_stay and not val_deficient:
+        if has_explicit_commit and not has_decision_to_stay:
             cond4_status = "met"
             is_overridden4 = True
             cond4_ev = [bundle.turn_id] if bundle.speaker_id == "client" else (prospect_turns[-1:] if prospect_turns else [bundle.turn_id])

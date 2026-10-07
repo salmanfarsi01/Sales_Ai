@@ -259,16 +259,35 @@ class DimensionScores(BaseModel):
 
 class ContactPreference(BaseModel):
     """Client Feedback Issue #7: Structured soft or channel-specific contact preference."""
-    channel: Literal["sms", "call", "email"]
+    channel: Literal["sms", "call", "email", "whatsapp", "other"]
     allowed: bool = True
     cadence: Optional[Literal["reduced", "specific_times", "no_preference"]] = None
     prohibited_behavior: Optional[str] = None  # e.g. "daily texting"
     time_restriction: Optional[str] = None  # e.g. "no calls before 10am"
+    time_not_before: Optional[str] = None  # e.g. "9am" or "10am"
+    time_not_after: Optional[str] = None   # e.g. "6pm" or "5pm"
     boundary_strength: Literal["preference", "hard_restriction"] = "preference"
     source_turn_id: int
     confidence: float = 1.0
     is_historical: bool = False
     source_call_sid: Optional[str] = None
+    notes: Optional[str] = None
+
+    def is_time_permitted(self, proposed_time_24h: str) -> Tuple[bool, Optional[str]]:
+        """Evaluates whether proposed_time_24h (e.g. '19:00', '08:30') complies with this preference."""
+        if not self.allowed:
+            return False, f"Channel '{self.channel}' is prohibited"
+        if self.time_not_before and proposed_time_24h < self.time_not_before:
+            return False, f"Proposed time {proposed_time_24h} violates restriction: no {self.channel} before {self.time_not_before}"
+        if self.time_not_after and proposed_time_24h > self.time_not_after:
+            return False, f"Proposed time {proposed_time_24h} violates restriction: no {self.channel} after {self.time_not_after}"
+        if self.time_restriction:
+            tr_lower = self.time_restriction.lower()
+            if "early morning" in tr_lower and proposed_time_24h < "09:00":
+                return False, f"Proposed time {proposed_time_24h} violates restriction: no {self.channel} in early morning"
+            if ("evening" in tr_lower or "after 6" in tr_lower) and proposed_time_24h >= "18:00":
+                return False, f"Proposed time {proposed_time_24h} violates restriction: no {self.channel} after 18:00"
+        return True, None
 
 
 class ContactComplianceState(BaseModel):
@@ -478,6 +497,7 @@ class ConversationStateSnapshot(BaseModel):
     stage_history: List[StageHistoryRecord] = Field(default_factory=list)
     compliance_events: List[ComplianceEvent] = Field(default_factory=list)
     overall_confidence: float = Field(0.75, ge=0.0, le=1.0)
+    unclassified_material: bool = Field(default=False, description="True if prospect turn was classified as material but no specific structural extractor fired")
     change_history: List[StateChangeRecord] = Field(default_factory=list)
     loaded_prospect_memory: List[LoadedProspectMemory] = Field(
         default_factory=list,

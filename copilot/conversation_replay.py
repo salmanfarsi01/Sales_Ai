@@ -41,6 +41,7 @@ class TurnReplayStep(BaseModel):
     state_after: ConversationStateSnapshot
     source_event_id: Optional[str] = None
     strategic_decision: Optional[StrategicDecision] = None
+    unclassified_material: bool = False
 
 
 class ConversationStateReplayReport(BaseModel):
@@ -134,8 +135,8 @@ class ConversationReplayEngine:
         is_synthetic_run = (source == "synthetic_simulation") or ("sim_" in call_sid.lower())
 
         for bundle in bundles:
-            # Throttle between synthetic batch turns to stay well within Groq RPM limits
-            if is_synthetic_run and len(bundles) > 1 and bundle.turn_id > 1:
+            # Throttle between synthetic batch turns to stay well within Groq RPM limits (skipped during pytest)
+            if not os.getenv("PYTEST_CURRENT_TEST") and is_synthetic_run and len(bundles) > 1 and bundle.turn_id > 1:
                 import time
                 time.sleep(0.25)
 
@@ -194,6 +195,7 @@ class ConversationReplayEngine:
                 state_changes=turn_changes,
                 state_after=state_after,
                 strategic_decision=eval_result.decision.model_copy(deep=True),
+                unclassified_material=bool(getattr(eval_result.decision, "unclassified_material", False) or getattr(state_after, "unclassified_material", False)),
             )
             timeline.append(step)
             prior_bundle = bundle

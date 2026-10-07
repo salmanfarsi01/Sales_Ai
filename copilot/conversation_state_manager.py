@@ -1180,6 +1180,18 @@ class ConversationStateManager:
             readiness_res.confidence,
             gate_res.confidence if gate_res else 0.50,
         )
+        # Client Feedback Point 5: Detect material client turns where no structured extractor fired
+        has_substantive_state = any(
+            c.field_path.startswith(("objections", "contact_compliance", "decision_structure", "conversion_gate", "facts"))
+            for c in changes
+        )
+        is_unclassified = (
+            bundle.speaker_id == "client"
+            and getattr(materiality, "is_material", False) is True
+            and not has_substantive_state
+        )
+        self.current_state.unclassified_material = is_unclassified
+
         self.current_state.change_history.extend(changes)
         self.prior_bundle = bundle
 
