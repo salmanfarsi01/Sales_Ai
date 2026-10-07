@@ -558,6 +558,31 @@ class ConversationStateManager:
                 and (has_contact_permission_statement or has_substantive_engagement)
             )
 
+            # Compliance-First Boundary Catch: Negative imperative plus a contact word
+            # ("no contact", "never call", "don't text", "stop calling", "take me off", etc.)
+            # Always sets boundary_suspected = True whether or not extraction succeeded.
+            compliance_negative_imperative_patterns = [
+                r"\bno\s+contact\b",
+                r"\bnever\s+call\b",
+                r"\bnever\s+contact\b",
+                r"\bdon['’]?t\s+text\b",
+                r"\bdo\s+not\s+text\b",
+                r"\bstop\s+calling\b",
+                r"\bstop\s+texting\b",
+                r"\bstop\s+contacting\b",
+                r"\btake\s+me\s+off\b",
+                r"\bno\s+calls\b",
+                r"\bnever\s+reach\s+out\b",
+                r"\bdon['’]?t\s+reach\s+out\b",
+                r"\bdo\s+not\s+reach\s+out\b",
+            ]
+            has_compliance_negative_imperative = (
+                bundle.speaker_id == "client"
+                and any(re.search(p, text_lower) for p in compliance_negative_imperative_patterns)
+                and not is_time_bounded_hold
+                and not is_daily_timing_pref
+            )
+
             # Check if prior boundary_suspected has expired (N >= 2 turns elapsed)
             prior_suspected_turn = self.current_state.contact_compliance.boundary_suspected_turn_id
             has_expired = (bundle.turn_id - prior_suspected_turn) >= 2 if prior_suspected_turn is not None else False
@@ -566,11 +591,16 @@ class ConversationStateManager:
                 bundle.speaker_id == "client"
                 and not is_hard_turn
                 and not is_retraction
-                and not is_pure_soft_preference
                 and not is_scheduling_alternative
-                and not is_time_bounded_hold
-                and not is_daily_timing_pref
-                and has_contact_friction
+                and (
+                    has_compliance_negative_imperative
+                    or (
+                        not is_pure_soft_preference
+                        and not is_time_bounded_hold
+                        and not is_daily_timing_pref
+                        and has_contact_friction
+                    )
+                )
             )
 
             suspected_turn_id = self.current_state.contact_compliance.boundary_suspected_turn_id
@@ -622,7 +652,10 @@ class ConversationStateManager:
                 hard_retracted = self.current_state.contact_compliance.hard_boundary_retracted
                 retract_turn = self.current_state.contact_compliance.retraction_turn_id
                 suspected_active = True
-                suspected_reason = f"Contact-specific friction detected ('{bundle.utterance_text.strip()}')"
+                if has_compliance_negative_imperative:
+                    suspected_reason = f"Compliance negative imperative detected ('{bundle.utterance_text.strip()}')"
+                else:
+                    suspected_reason = f"Contact-specific friction detected ('{bundle.utterance_text.strip()}')"
                 suspected_turn_id = bundle.turn_id
             elif cleared_by_prospect:
                 # 3. Explicit Clearing by Prospect takes priority (Evaluated before expiry)

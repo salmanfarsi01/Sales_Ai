@@ -358,8 +358,8 @@ class ProspectMemoryStore:
     def clear(self, test_only_confirmation: bool = False) -> None:
         """Clears all records in memory and on disk (strictly for test fixture setup)."""
         import os
-        is_test_env = "PYTEST_CURRENT_TEST" in os.environ or test_only_confirmation
-        if not is_test_env:
+        is_authorized = test_only_confirmation or os.getenv("ALLOW_MEMORY_STORE_CLEAR", "false").lower() in ("true", "1", "yes")
+        if not is_authorized:
             raise RuntimeError(
                 "ProspectMemoryStore.clear() is restricted to test environments. "
                 "Production callers must not invoke unpartitioned clear operations."

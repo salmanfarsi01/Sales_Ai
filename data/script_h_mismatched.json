@@ -1,0 +1,8 @@
+[
+  {"turn_id": 1, "speaker_id": "salesperson", "text": "Hello, thanks for taking my call today."},
+  {"turn_id": 2, "speaker_id": "client", "text": ""},
+  {"turn_id": 3, "speaker_id": "salesperson", "text": "Are you still on the line?"},
+  {"turn_id": 4, "speaker_id": "client", "text": "   "},
+  {"turn_id": 5, "speaker_id": "salesperson", "text": "Can you hear me okay?"},
+  {"turn_id": 6, "speaker_id": "client", "text": "Mismatched turn without valid decision"}
+]

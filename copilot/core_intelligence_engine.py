@@ -277,7 +277,7 @@ class PitchProXCoreIntelligenceEngine:
                 decision.secondary_action_reason = "Inquire regarding comfort level before advancing."
                 decision.strategic_objective = "Clarify prospect alignment and verify comfort before attempting commitment due to lower confidence."
                 downgraded = True
-            elif "CONFIRM_AND_PROTECT_ACTIVE" in decision.reason_codes or (decision.strategic_posture == "protect" and "CONVERSION_CONFIRMED" in decision.reason_codes):
+            elif "CONFIRM_AND_PROTECT_ACTIVE" in decision.reason_codes:
                 # Point 10: In an otherwise 'confirm' scenario with low confidence, downgrade to CLARIFY to verify understanding
                 decision.primary_action = StrategicAction.CLARIFY
                 decision.strategic_posture = "explore"
@@ -506,26 +506,50 @@ class PitchProXCoreIntelligenceEngine:
         context: StrategicInterpretationContext,
         turn_timestamp_ms: int,
     ) -> DecisionEvaluationResult:
-        """Handles ambiguous boundary signals: stops persuading and issues a short clarify (Spec 01 §10)."""
-        decision = StrategicDecision(
-            call_id=snapshot.call_sid,
-            source_state_version=snapshot.state_version,
-            should_prompt=True,
-            strategic_objective="Stop persuading and issue a short clarify to confirm prospect comfort and boundaries.",
-            primary_action=StrategicAction.CLARIFY,
-            strategic_posture="defend",
-            secondary_action=None,
-            push_strength=PushStrengthValue("low", legacy_alias="respect_record_exit"),
-            reason_codes=["BOUNDARY_SUSPECTED", "STOP_PERSUADING_CLARIFY"],
-            do_not_do=["persuade", "pitch", "schedule_meeting", "overcome_boundary", "apply_pressure"],
-            what_to_protect=["prospect_comfort", "conversation_safety", "legal_compliance"],
-            question_allowed=True,
-            retrieval_needed=False,
-            urgency="immediate",
-            max_prompt_words=16,
-            confidence=0.85,
-            created_at_ms=turn_timestamp_ms,
-        )
+        """Handles suspected boundary signals. Compliance negative imperatives route to ACKNOWLEDGE / protect / none."""
+        suspected_reason = getattr(snapshot.contact_compliance, "boundary_suspected_reason", "") or ""
+        is_ambiguous_hesitation = "Ambiguous hesitation detected" in suspected_reason
+
+        if is_ambiguous_hesitation:
+            decision = StrategicDecision(
+                call_id=snapshot.call_sid,
+                source_state_version=snapshot.state_version,
+                should_prompt=True,
+                strategic_objective="Stop persuading and issue a short clarify to confirm prospect comfort and boundaries.",
+                primary_action=StrategicAction.CLARIFY,
+                strategic_posture="defend",
+                secondary_action=None,
+                push_strength=PushStrengthValue("low", legacy_alias="respect_record_exit"),
+                reason_codes=["BOUNDARY_SUSPECTED", "STOP_PERSUADING_CLARIFY"],
+                do_not_do=["persuade", "pitch", "schedule_meeting", "overcome_boundary", "apply_pressure"],
+                what_to_protect=["prospect_comfort", "conversation_safety", "legal_compliance"],
+                question_allowed=True,
+                retrieval_needed=False,
+                urgency="immediate",
+                max_prompt_words=16,
+                confidence=0.85,
+                created_at_ms=turn_timestamp_ms,
+            )
+        else:
+            decision = StrategicDecision(
+                call_id=snapshot.call_sid,
+                source_state_version=snapshot.state_version,
+                should_prompt=True,
+                strategic_objective="Acknowledge boundary or contact friction respectfully and protect prospect communication limits.",
+                primary_action=StrategicAction.ACKNOWLEDGE,
+                strategic_posture="protect",
+                secondary_action=None,
+                push_strength=PushStrengthValue("none", legacy_alias="respect_record_exit"),
+                reason_codes=["BOUNDARY_SUSPECTED", "COMPLIANCE_PRIORITY", "PROTECT_PROSPECT_PREFERENCE"],
+                do_not_do=["persuade", "pitch", "schedule_meeting", "overcome_boundary", "apply_pressure", "violating_contact_preference"],
+                what_to_protect=["prospect_comfort", "conversation_safety", "legal_compliance", "contact_preference"],
+                question_allowed=False,
+                retrieval_needed=False,
+                urgency="immediate",
+                max_prompt_words=16,
+                confidence=0.85,
+                created_at_ms=turn_timestamp_ms,
+            )
         return DecisionEvaluationResult(decision=decision, context=context)
 
     def _build_confirm_protect_decision(

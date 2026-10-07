@@ -1,0 +1,8 @@
+[
+  {"turn_id": 1, "speaker_id": "salesperson", "text": "Hi, thanks for taking the call today."},
+  {"turn_id": 2, "speaker_id": "client", "text": "Sure, sounds good."},
+  {"turn_id": 3, "speaker_id": "salesperson", "text": "I hope you are having a pleasant day so far."},
+  {"turn_id": 4, "speaker_id": "client", "text": "Yeah, cold outside today."},
+  {"turn_id": 5, "speaker_id": "salesperson", "text": "It certainly is chilly out there."},
+  {"turn_id": 6, "speaker_id": "client", "text": "Uh-huh, right."}
+]

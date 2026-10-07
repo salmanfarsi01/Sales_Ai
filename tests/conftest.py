@@ -10,6 +10,8 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 # Provide fallback environment variables for test execution
 os.environ["RAG_ENABLED"] = "false"
+os.environ["LLM_ENABLED"] = "false"
+os.environ["ALLOW_MEMORY_STORE_CLEAR"] = "true"
 os.environ.setdefault("GROQ_API_KEY", "mock_groq_api_key_test_12345")
 os.environ.setdefault("DEEPGRAM_API_KEY", "mock_deepgram_api_key_test_12345")
 os.environ.setdefault("ELEVENLABS_API_KEY", "mock_elevenlabs_api_key_test_12345")

@@ -265,11 +265,16 @@ class LLMResponseGateway:
         if not decision.should_prompt or action in (StrategicAction.WAIT_SILENCE, StrategicAction.HOLD):
             return ""
 
-        if "HARD_BOUNDARY_ACTIVE" in reasons or action == StrategicAction.ACKNOWLEDGE and "COMPLIANCE_PRIORITY" in reasons:
+        if "HARD_BOUNDARY_ACTIVE" in reasons:
             return "Understood, I completely respect that. Thank you for your time today, and take care."
 
         if "BOUNDARY_SUSPECTED" in reasons:
+            if action == StrategicAction.ACKNOWLEDGE or "COMPLIANCE_PRIORITY" in reasons:
+                return "Understood, I completely respect that. We will honor your preferences."
             return "I want to make sure I'm respecting your preferences—would you prefer we not stay in touch?"
+
+        if "UNCLASSIFIED_MATERIAL_CONTENT" in reasons:
+            return "Could you share a little more about that so I can make sure I understand your situation?"
 
         if "GATE_UNKNOWN_LOGISTICS" in reasons:
             return "What days or times usually work best for your schedule when reviewing options?"

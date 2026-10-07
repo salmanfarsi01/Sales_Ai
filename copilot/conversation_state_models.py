@@ -1,8 +1,9 @@
 from __future__ import annotations
 
+import re
 import uuid
 from enum import Enum
-from typing import Any, Dict, List, Literal, Optional
+from typing import Any, Dict, List, Literal, Optional, Tuple
 from pydantic import BaseModel, Field
 
 from .prospect_memory import LoadedProspectMemory
@@ -274,9 +275,15 @@ class ContactPreference(BaseModel):
     notes: Optional[str] = None
 
     def is_time_permitted(self, proposed_time_24h: str) -> Tuple[bool, Optional[str]]:
-        """Evaluates whether proposed_time_24h (e.g. '19:00', '08:30') complies with this preference."""
+        """Evaluates whether proposed_time_24h (e.g. '19:00', '08:30') complies with this preference.
+
+        Bare numbers like '6' are read as 18:00 (or '8' as 08:00) via normalize_time_to_24h.
+        Text-only windows such as 'early morning' or 'afternoon' return (False, 'Unspecified window requires clarification').
+        """
         if not self.allowed:
             return False, f"Channel '{self.channel}' is prohibited"
+        if not proposed_time_24h or not re.match(r"^\d{2}:\d{2}$", proposed_time_24h):
+            return False, f"Unspecified or text window '{proposed_time_24h}' requires clarification"
         if self.time_not_before and proposed_time_24h < self.time_not_before:
             return False, f"Proposed time {proposed_time_24h} violates restriction: no {self.channel} before {self.time_not_before}"
         if self.time_not_after and proposed_time_24h > self.time_not_after:

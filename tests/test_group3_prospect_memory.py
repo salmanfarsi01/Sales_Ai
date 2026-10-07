@@ -634,10 +634,10 @@ def test_point18_no_team_or_shared_memory_retrieval_guard(memory_store):
 
     # 5. Verify clear() is test-gated and cannot be invoked without explicit test context
     import os
-    orig_env = os.environ.pop("PYTEST_CURRENT_TEST", None)
+    orig_env = os.environ.pop("ALLOW_MEMORY_STORE_CLEAR", None)
     try:
         with pytest.raises(RuntimeError, match="restricted to test environments"):
             memory_store.clear()
     finally:
         if orig_env is not None:
-            os.environ["PYTEST_CURRENT_TEST"] = orig_env
+            os.environ["ALLOW_MEMORY_STORE_CLEAR"] = orig_env

@@ -1,0 +1,6 @@
+[
+  {"turn_id": 1, "speaker_id": "salesperson", "text": "Hi Mr. Taylor, following up on our conversation regarding your Elm Street property."},
+  {"turn_id": 2, "speaker_id": "client", "text": "Thanks for following up. We are still on track for spring."},
+  {"turn_id": 3, "speaker_id": "salesperson", "text": "Wonderful. Would next Tuesday afternoon work for a brief valuation review?"},
+  {"turn_id": 4, "speaker_id": "client", "text": "Tuesday afternoon could work, let me check our schedule."}
+]

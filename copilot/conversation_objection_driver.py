@@ -136,8 +136,8 @@ class ObjectionDriverClassifier:
             category = "general_hesitation"
 
         api_key = os.getenv("GROQ_API_KEY")
-        is_testing = bool(os.getenv("PYTEST_CURRENT_TEST"))
-        if (self.groq_client is not None) or (api_key and not api_key.startswith("mock_") and not is_testing):
+        llm_enabled = os.getenv("LLM_ENABLED", "true").lower() in ("true", "1", "yes")
+        if (self.groq_client is not None) or (llm_enabled and api_key and not api_key.startswith("mock_")):
             try:
                 return self._classify_via_llm(category, utterance_text, context_history, api_key or "")
             except Exception as exc:

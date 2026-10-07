@@ -152,12 +152,12 @@ class TruthSupersessionDetector:
     ) -> SupersessionDecision:
         """Evaluates whether candidate_text supersedes a specific active fact."""
         api_key_groq = os.getenv("GROQ_API_KEY")
-        is_testing = bool(os.getenv("PYTEST_CURRENT_TEST"))
+        llm_enabled = os.getenv("LLM_ENABLED", "true").lower() in ("true", "1", "yes")
         should_use_llm = self.groq_client is not None or (
-            api_key_groq
+            llm_enabled
+            and api_key_groq
             and not api_key_groq.startswith("mock_")
             and not api_key_groq.startswith("gsk_test")
-            and not is_testing
         )
         if should_use_llm:
             try:

@@ -2111,6 +2111,7 @@
 
         const simSid = 'sim_' + Date.now().toString(36);
         const targetSelect = document.getElementById('simConversionTarget');
+        const targetVal = targetSelect ? targetSelect.value : 'appointment';
         const runSemInput = document.getElementById('simRunSemantic');
         const runSemVal = runSemInput ? runSemInput.checked : true;
         const res = await apiFetch('/api/conversation-state/replay-dialogue', {

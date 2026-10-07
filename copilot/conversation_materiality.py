@@ -97,12 +97,13 @@ POSITIVE_FILLER_PATTERNS: List[str] = [
 def is_positive_filler(text: str) -> bool:
     """True if utterance matches known non-material conversational filler/pleasantry whitelist."""
     t = text.strip().lower()
-    deal_tokens = [
-        "scam", "fraud", "fee", "fees", "contract", "closing", "deposit", "money",
-        "disappeared", "vanished", "price", "property", "house", "mortgage",
-        "email me", "text me", "don't call", "no calls", "call me", "text only"
+    deal_token_patterns = [
+        r"\bscam\b", r"\bfraud\b", r"\bfee\b", r"\bfees\b", r"\bcontract\b", r"\bclosing\b",
+        r"\bdeposit\b", r"\bmoney\b", r"\bdisappeared\b", r"\bvanished\b", r"\bprice\b",
+        r"\bproperty\b", r"\bhouse\b", r"\bmortgage\b", r"\bemail\s+me\b", r"\btext\s+me\b",
+        r"\bdon['’]?t\s+call\b", r"\bno\s+calls\b", r"\bcall\s+me\b", r"\btext\s+only\b"
     ]
-    if any(k in t for k in deal_tokens):
+    if any(re.search(p, t) for p in deal_token_patterns):
         return False
     return any(re.search(p, t) for p in POSITIVE_FILLER_PATTERNS)
 
@@ -192,12 +193,12 @@ class MaterialityFilter:
     ) -> MaterialityClassification:
         """Evaluates whether a turn is material and which state sub-engines it affects."""
         api_key_groq = os.getenv("GROQ_API_KEY")
-        is_testing = bool(os.getenv("PYTEST_CURRENT_TEST"))
+        llm_enabled = os.getenv("LLM_ENABLED", "true").lower() in ("true", "1", "yes")
         should_use_llm = self.groq_client is not None or (
-            api_key_groq
+            llm_enabled
+            and api_key_groq
             and not api_key_groq.startswith("mock_")
             and not api_key_groq.startswith("gsk_test")
-            and not is_testing
         )
         if should_use_llm:
             try:

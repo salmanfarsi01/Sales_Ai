@@ -342,10 +342,18 @@ def extract_structured_contact_preferences(
         cl_lower = clause.lower()
 
         # Whole-word channel detection (fixes 'text' in 'context', 'call' in 'recall')
-        has_sms = bool(re.search(r"\b(text|texting|sms|message|messages|messaging)\b", cl_lower))
+        has_whatsapp = bool(re.search(r"\b(whatsapp|whats\s*app)\b", cl_lower))
+        if has_whatsapp:
+            has_sms = bool(re.search(r"\b(sms)\b", cl_lower)) or (
+                bool(re.search(r"\b(text|texting)\b", cl_lower))
+                and not bool(re.search(r"\b(?:text|texting|message|messages|messaging)\s+(?:on|via|through)\s+(?:whats\s*app|whatsapp)\b", cl_lower))
+                and not bool(re.search(r"\b(?:whats\s*app|whatsapp)\s+(?:text|message)\b", cl_lower))
+            )
+        else:
+            has_sms = bool(re.search(r"\b(text|texting|sms|message|messages|messaging)\b", cl_lower))
         has_email = bool(re.search(r"\b(email|emails|emailing)\b", cl_lower))
         has_call = bool(re.search(r"\b(call|calls|calling|phone|phones|ring|ringing|cell|cellphone|mobile)\b", cl_lower))
-        has_whatsapp = bool(re.search(r"\b(whatsapp|whats\s*app)\b", cl_lower))
+        has_other = bool(re.search(r"\b(telegram|signal|postal\s+mail|snail\s+mail)\b", cl_lower))
 
         detected_channels: List[Literal["sms", "call", "email", "whatsapp", "other"]] = []
         if has_sms:
@@ -356,6 +364,8 @@ def extract_structured_contact_preferences(
             detected_channels.append("call")
         if has_whatsapp:
             detected_channels.append("whatsapp")
+        if has_other:
+            detected_channels.append("other")
 
         # Check timing restrictions within this clause
         m_before = re.search(r"before\s+(\d{1,2}(?::\d{2})?\s*(?:am|pm)?|noon|midnight)", cl_lower)
@@ -863,8 +873,8 @@ class SemanticFeatureEngine:
             )
 
         api_key_groq = os.getenv("GROQ_API_KEY")
-        is_testing = bool(os.getenv("PYTEST_CURRENT_TEST"))
-        if self.groq_client is None and (not api_key_groq or api_key_groq.startswith("mock_") or is_testing):
+        llm_enabled = os.getenv("LLM_ENABLED", "true").lower() in ("true", "1", "yes")
+        if self.groq_client is None and (not llm_enabled or not api_key_groq or api_key_groq.startswith("mock_")):
             return self.analyze_deterministic_heuristic(
                 utterance, context_history, mode="heuristic_offline"
             )

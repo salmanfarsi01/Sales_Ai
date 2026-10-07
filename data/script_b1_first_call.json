@@ -1,0 +1,6 @@
+[
+  {"turn_id": 1, "speaker_id": "salesperson", "text": "Hi Mr. Taylor, thanks for speaking with me today."},
+  {"turn_id": 2, "speaker_id": "client", "text": "Hi. We are thinking about selling our home on Elm Street next spring."},
+  {"turn_id": 3, "speaker_id": "salesperson", "text": "That sounds great. What's driving that timeframe for you?"},
+  {"turn_id": 4, "speaker_id": "client", "text": "Just retirement timing. Also, please don't call me on weekends under any circumstances."}
+]

@@ -15,6 +15,8 @@ Covers:
 """
 
 import pytest
+import json
+from pathlib import Path
 from typing import List, Dict, Any
 
 from copilot.conversation_replay import ConversationReplayEngine
@@ -605,75 +607,30 @@ def test_rate_limit_429_fallback_autonomous_pass(monkeypatch):
 
 
 # =============================================================================
-# 9. Gate-Closed Invariant Test Across Both Modes (Client Item 2)
+# 9. Gate-Closed Invariant Test Across Real Script JSON Files (Item 5)
 # =============================================================================
+DATA_DIR = Path(__file__).resolve().parent.parent / "data"
+
+REAL_SCRIPT_FILES = {
+    "canonical": DATA_DIR / "script_canonical.json",
+    "script_d_filler": DATA_DIR / "script_d_filler.json",
+    "script_h_mismatched": DATA_DIR / "script_h_mismatched.json",
+    "script_b1_first_call": DATA_DIR / "script_b1_first_call.json",
+    "script_b2_returning": DATA_DIR / "script_b2_returning.json",
+}
+
 SCRIPTS_FOR_INVARIANT = {
-    "canonical": [
-        {"turn_id": 1, "speaker_id": "salesperson", "text": "Hi, thanks for making time today — tell me a bit about what's going on with the house."},
-        {"turn_id": 2, "speaker_id": "client", "text": "I'm the one making this decision, no one else needs to sign off."},
-        {"turn_id": 3, "speaker_id": "salesperson", "text": "Got it. What's driving the timing for you?"},
-        {"turn_id": 4, "speaker_id": "client", "text": "We might look at moving sometime next year, nothing urgent yet."},
-        {"turn_id": 5, "speaker_id": "client", "text": "Honestly, we're not sure this is the right time anymore."},
-        {"turn_id": 6, "speaker_id": "salesperson", "text": "That's fair — a lot of people feel that way before they see the actual numbers. Would it help to walk through what the market looks like right now?"},
-        {"turn_id": 7, "speaker_id": "client", "text": "Okay, that makes sense, I guess timing isn't the biggest issue."},
-        {"turn_id": 8, "speaker_id": "salesperson", "text": "Great — would sometime next week work for a walkthrough?"},
-        {"turn_id": 9, "speaker_id": "client", "text": "Maybe next week could work, let me think about it."},
-        {"turn_id": 10, "speaker_id": "client", "text": "Actually, my wife would really need to be part of this conversation before we go any further."},
-        {"turn_id": 11, "speaker_id": "salesperson", "text": "Of course, happy to loop her in whenever works."},
-        {"turn_id": 12, "speaker_id": "client", "text": "I guess I'm just worried this isn't really the right move for us financially with everything going on."},
-        {"turn_id": 13, "speaker_id": "salesperson", "text": "Totally understand — let's look at your net proceeds after all costs, so you can see the real picture."},
-        {"turn_id": 14, "speaker_id": "client", "text": "That's actually really helpful, tell me more — how does the marketing process work, what about staging, how long does listing usually take?"},
-        {"turn_id": 15, "speaker_id": "client", "text": "Please don't start texting me every day before we meet, by the way."},
-        {"turn_id": 16, "speaker_id": "client", "text": "Mornings don't really work for us either, just so you know."},
-        {"turn_id": 17, "speaker_id": "salesperson", "text": "Noted on all of that. What day works best?"},
-        {"turn_id": 18, "speaker_id": "client", "text": "Thursday at 3 works, and my wife will be there."}
-    ],
-    "script_a": [
-        {"turn_id": 1, "speaker_id": "salesperson", "text": "Hi, thanks for making time today — tell me a bit about what's going on with the house."},
-        {"turn_id": 2, "speaker_id": "client", "text": "I own the property and make the listing decisions."},
-        {"turn_id": 3, "speaker_id": "salesperson", "text": "Got it. Would sometime next week work for a walkthrough?"},
-        {"turn_id": 4, "speaker_id": "client", "text": "Thursday at 3 works to see the numbers."}
-    ],
-    "script_b": [
-        {"turn_id": 1, "speaker_id": "salesperson", "text": "Our standard commission fee is 5% which includes staging and premium marketing."},
-        {"turn_id": 2, "speaker_id": "client", "text": "Why should I pay 5% commission when the last agent did nothing? What do you actually do differently?"},
-        {"turn_id": 3, "speaker_id": "salesperson", "text": "That's completely fair to ask. We provide guaranteed marketing and active staging."},
-        {"turn_id": 4, "speaker_id": "client", "text": "I see. I still think 5% is steep, let me consider."}
-    ],
-    "script_d": [
-        {"turn_id": 1, "speaker_id": "salesperson", "text": "Hi, thanks for taking the call about your property."},
-        {"turn_id": 2, "speaker_id": "client", "text": "I need to discuss this with my spouse first before making any decisions."},
-        {"turn_id": 3, "speaker_id": "salesperson", "text": "Understood, we always recommend having all owners involved."},
-        {"turn_id": 4, "speaker_id": "client", "text": "She handles the financial side so she has to be part of it."}
-    ],
-    "script_g": [
-        {"turn_id": 1, "speaker_id": "salesperson", "text": "We can help you get the maximum value for your home with no upfront costs."},
-        {"turn_id": 2, "speaker_id": "client", "text": "A contractor took half the money upfront and never came back, so I don't trust promises."},
-        {"turn_id": 3, "speaker_id": "salesperson", "text": "That sounds terrible. We never take any upfront deposits; everything is paid at closing."},
-        {"turn_id": 4, "speaker_id": "client", "text": "Okay, that's reassuring to know."}
-    ],
-    "script_h": [
-        {"turn_id": 1, "speaker_id": "salesperson", "text": "Thanks for speaking with me today regarding your home on Elm."},
-        {"turn_id": 2, "speaker_id": "client", "text": "Don't call me early morning, and don't text me every day."},
-        {"turn_id": 3, "speaker_id": "salesperson", "text": "Understood, I've noted no early morning calls and no daily texting."},
-        {"turn_id": 4, "speaker_id": "client", "text": "Send me an email instead."}
-    ],
-    "script_i": [
-        {"turn_id": 1, "speaker_id": "salesperson", "text": "Hi Mr. Reyes, thanks for picking up. I'm calling about your property on Maple Drive."},
-        {"turn_id": 2, "speaker_id": "client", "text": "Yeah, I'm the owner. But my wife thinks companies like yours are just scams."},
-        {"turn_id": 3, "speaker_id": "salesperson", "text": "I completely understand the caution. Can I ask what made her feel that way?"},
-        {"turn_id": 4, "speaker_id": "client", "text": "A neighbor paid a big upfront fee and the agent disappeared."},
-        {"turn_id": 5, "speaker_id": "salesperson", "text": "That's a legitimate worry. We charge nothing upfront, only at closing."},
-        {"turn_id": 6, "speaker_id": "client", "text": "Fine. Email me the contract details, but no phone calls after 6pm."}
-    ],
+    name: json.loads(path.read_text(encoding="utf-8"))
+    for name, path in REAL_SCRIPT_FILES.items()
 }
 
 
 @pytest.mark.parametrize("script_name", list(SCRIPTS_FOR_INVARIANT.keys()))
 @pytest.mark.parametrize("run_semantic", [False, True])
 def test_gate_closed_no_commitment_close_or_confirm_protect_invariant(script_name, run_semantic):
-    """Proves that across all scripts (Canonical, A, B, D, G, H, I) in either mode (semantic False or True),
-    no turn ever selects commitment_close, high/direct push, or confirm_and_protect while the meeting gate is closed.
+    """Proves that across all real script JSON files (Canonical, D filler, H mismatched, B1 first call, B2 returning)
+    in either mode (semantic False or True), no turn ever selects commitment_close, high/direct push,
+    or confirm_and_protect while the meeting gate is closed.
     """
     dialogue = SCRIPTS_FOR_INVARIANT[script_name]
     engine = ConversationReplayEngine()
@@ -700,3 +657,168 @@ def test_gate_closed_no_commitment_close_or_confirm_protect_invariant(script_nam
             assert "CONFIRM_AND_PROTECT_ACTIVE" not in dec.reason_codes, (
                 f"[{script_name}] Turn {tid} (semantic={run_semantic}) violated invariant: Gate is closed, but CONFIRM_AND_PROTECT is active!"
             )
+
+
+# =============================================================================
+# 10. Point 19: Robust Mismatched Input / Empty Utterance Handling (Script H)
+# =============================================================================
+def test_point19_mismatched_decision_and_empty_utterance_handling():
+    """Point 19: Validates robust handling of empty utterance, whitespace, and mismatched turn sequence.
+    Proves:
+    1. Zero crashes or unhandled exceptions across empty/whitespace/mismatched turns.
+    2. Conversion gate remains closed throughout.
+    3. Action is never COMMITMENT_CLOSE.
+    4. Push strength is never high, direct_ask, or two_window_choice.
+    5. Zero fabricated commitment close or confirm_and_protect activations.
+    """
+    raw_turns = json.loads((DATA_DIR / "script_h_mismatched.json").read_text(encoding="utf-8"))
+    engine = ConversationReplayEngine()
+    report = engine.replay_dialogue_turns(
+        call_sid="sim_test_point19_mismatched",
+        raw_turns=raw_turns,
+        save_report=False,
+        run_semantic_analysis=True,
+    )
+    assert len(report.timeline) == 6
+    for step in report.timeline:
+        gate_open = step.state_after.conversion_gate.is_open if step.state_after.conversion_gate else False
+        assert gate_open is False, f"Turn {step.turn_id}: Gate must remain closed on mismatched/empty turns"
+        assert step.strategic_decision.primary_action != StrategicAction.COMMITMENT_CLOSE
+        assert str(step.strategic_decision.push_strength) not in ("high", "direct_ask", "two_window_choice")
+        assert "CONFIRM_AND_PROTECT_ACTIVE" not in step.strategic_decision.reason_codes
+
+
+# =============================================================================
+# 11. Turn 15 Downgrade Edge: Contact Preference at Confidence < 0.65 Stays ACKNOWLEDGE / protect / none
+# =============================================================================
+def test_turn15_contact_preference_low_confidence_no_downgrade():
+    """Verifies that contact preference turns with posture 'protect' at confidence < 0.65
+    (e.g. 0.60) stay ACKNOWLEDGE / protect / none and are never downgraded to CLARIFY.
+    """
+    from copilot.core_decision_manager import CoreDecisionManager
+    from copilot.conversation_state_models import (
+        ConversationStateSnapshot,
+        ContactComplianceState,
+        ContactPreference,
+        ConversationStage,
+    )
+
+    snap = ConversationStateSnapshot(
+        call_sid="test_contact_downgrade_protect",
+        overall_confidence=0.60,
+        conversation_stage=ConversationStage.VALUE_WALKTHROUGH,
+    )
+    snap.contact_compliance = ContactComplianceState(
+        contact_preferences=[
+            ContactPreference(
+                channel="sms",
+                allowed=True,
+                cadence="reduced",
+                prohibited_behavior="texting every day",
+                source_turn_id=15,
+                confidence=0.60,
+            )
+        ]
+    )
+    dm = CoreDecisionManager(call_sid="test_contact_downgrade_protect")
+    res = dm.evaluate_state(
+        snapshot=snap,
+        turn_speaker="client",
+        turn_text="Please don't start texting me every day before we meet, by the way.",
+        turn_timestamp_ms=15000,
+    )
+    dec = res.decision
+    assert dec.primary_action == StrategicAction.ACKNOWLEDGE
+    assert dec.strategic_posture == "protect"
+    assert str(dec.push_strength) == "none"
+    assert "LOW_CONFIDENCE_ACTION_DOWNGRADE" not in dec.reason_codes
+    assert dec.primary_action != StrategicAction.CLARIFY
+
+
+# =============================================================================
+# 12. Dedicated Tests for WhatsApp, Other Channels, and normalize_time_to_24h
+# =============================================================================
+def test_whatsapp_and_channel_normalization():
+    """Dedicated tests for WhatsApp, other channels, and normalize_time_to_24h."""
+    from copilot.behavioral_semantic import normalize_time_to_24h
+
+    # 1. normalize_time_to_24h test cases
+    assert normalize_time_to_24h("noon") == "12:00"
+    assert normalize_time_to_24h("midnight") == "00:00"
+    assert normalize_time_to_24h("8am") == "08:00"
+    assert normalize_time_to_24h("7pm") == "19:00"
+    assert normalize_time_to_24h("6") == "18:00"  # bare 1..7 defaults to PM
+    assert normalize_time_to_24h("9") == "09:00"  # bare 8..11 defaults to AM
+    assert normalize_time_to_24h("early morning") == "early morning"
+
+    # 2. WhatsApp extraction
+    prefs_wa = extract_structured_contact_preferences("Send me a message on WhatsApp only")
+    assert len(prefs_wa) == 1
+    assert prefs_wa[0].channel == "whatsapp"
+    assert prefs_wa[0].allowed is True
+
+    # 3. is_time_permitted behavior on bare numbers vs text windows
+    pref_call = extract_structured_contact_preferences("no calls after 6pm")[0]
+    # Evaluated with normalized HH:MM
+    ok_1400, _ = pref_call.is_time_permitted("14:00")
+    assert ok_1400 is True
+    violation_1900, reason = pref_call.is_time_permitted("19:00")
+    assert violation_1900 is False
+    assert "after 18:00" in reason
+
+    # Text window or non-HH:MM returns clarification requirement
+    invalid_win, reason_win = pref_call.is_time_permitted("early morning")
+    assert invalid_win is False
+    assert "requires clarification" in reason_win
+
+
+# =============================================================================
+# 13. Golden-File Regression Test for the 18-Row Baseline (Semantic Layer Off)
+# =============================================================================
+def test_canonical_18_row_baseline_regression():
+    """Golden-file regression test for the 18-row baseline (Semantic Layer Off).
+    Guarantees exact matching of all approved actions, postures, push strengths,
+    and prompt statuses across all 18 turns.
+    """
+    raw_turns = json.loads((DATA_DIR / "script_canonical.json").read_text(encoding="utf-8"))
+    engine = ConversationReplayEngine()
+    report = engine.replay_dialogue_turns(
+        call_sid="sim_test_canon_baseline_golden",
+        raw_turns=raw_turns,
+        save_report=False,
+        run_semantic_analysis=False,
+    )
+
+    expected_rows = [
+        (1, "salesperson", StrategicAction.QUESTION, "explore", "low", False, False),
+        (2, "client", StrategicAction.QUESTION, "explore", "low", False, True),
+        (3, "salesperson", StrategicAction.QUESTION, "explore", "low", True, False),
+        (4, "client", StrategicAction.QUESTION, "explore", "low", False, True),
+        (5, "client", StrategicAction.VALIDATE, "advance", "moderate", False, True),
+        (6, "salesperson", StrategicAction.VALIDATE, "advance", "moderate", True, False),
+        (7, "client", StrategicAction.QUESTION, "explore", "low", False, True),
+        (8, "salesperson", StrategicAction.QUESTION, "explore", "low", False, False),
+        (9, "client", StrategicAction.QUESTION, "explore", "low", False, True),
+        (10, "client", StrategicAction.CLARIFY, "coordinate", "low", False, True),
+        (11, "salesperson", StrategicAction.CLARIFY, "coordinate", "low", True, False),
+        (12, "client", StrategicAction.MIRROR, "advance", "low", False, True),
+        (13, "salesperson", StrategicAction.MIRROR, "advance", "low", True, False),
+        (14, "client", StrategicAction.EDUCATE, "explore", "low", False, True),
+        (15, "client", StrategicAction.ACKNOWLEDGE, "protect", "none", False, True),
+        (16, "client", StrategicAction.QUESTION, "explore", "low", False, True),
+        (17, "salesperson", StrategicAction.QUESTION, "explore", "low", True, False),
+        (18, "client", StrategicAction.ACKNOWLEDGE, "protect", "none", False, True),
+    ]
+
+    assert len(report.timeline) == 18
+    for step, expected in zip(report.timeline, expected_rows):
+        tid, spk, exp_action, exp_posture, exp_push, exp_carried, exp_prompt = expected
+        dec = step.strategic_decision
+        assert step.turn_id == tid
+        assert step.evidence_bundle.speaker_id == spk
+        assert dec.primary_action == exp_action, f"Turn {tid} action mismatch: {dec.primary_action} != {exp_action}"
+        assert dec.strategic_posture == exp_posture, f"Turn {tid} posture mismatch: {dec.strategic_posture} != {exp_posture}"
+        assert str(dec.push_strength) == exp_push, f"Turn {tid} push mismatch: {dec.push_strength} != {exp_push}"
+        assert bool(dec.carried_forward_from_turn_id) == exp_carried, f"Turn {tid} carried mismatch"
+        assert dec.should_prompt == exp_prompt, f"Turn {tid} prompt mismatch: {dec.should_prompt} != {exp_prompt}"
+
