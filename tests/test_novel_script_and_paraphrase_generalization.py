@@ -617,6 +617,7 @@ REAL_SCRIPT_FILES = {
     "script_h_mismatched": DATA_DIR / "script_h_mismatched.json",
     "script_b1_first_call": DATA_DIR / "script_b1_first_call.json",
     "script_b2_returning": DATA_DIR / "script_b2_returning.json",
+    "sim_muy04bh0_fee_complaint": DATA_DIR / "script_sim_muy04bh0_fee_complaint.json",
 }
 
 SCRIPTS_FOR_INVARIANT = {
@@ -625,7 +626,23 @@ SCRIPTS_FOR_INVARIANT = {
 }
 
 
-@pytest.mark.parametrize("script_name", list(SCRIPTS_FOR_INVARIANT.keys()))
+@pytest.mark.parametrize(
+    "script_name",
+    [
+        "canonical",
+        "script_d_filler",
+        "script_h_mismatched",
+        "script_b1_first_call",
+        "script_b2_returning",
+        pytest.param(
+            "sim_muy04bh0_fee_complaint",
+            marks=pytest.mark.xfail(
+                strict=True,
+                reason="Known violation on sim_muy04bh0 turn 4, resolved by item 4",
+            ),
+        ),
+    ],
+)
 @pytest.mark.parametrize("run_semantic", [False, True])
 def test_gate_closed_no_commitment_close_or_confirm_protect_invariant(script_name, run_semantic):
     """Proves that across all real script JSON files (Canonical, D filler, H mismatched, B1 first call, B2 returning)

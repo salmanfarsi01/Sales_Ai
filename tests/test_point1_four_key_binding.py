@@ -1007,3 +1007,44 @@ def test_point1_second_fixture_canonical_live_replay(run_semantic: bool):
         assert bound.source_turn_id == step.turn_id
         assert bound.source_state_version == sa.state_version
 
+
+def test_point1_rep_turn_preserves_prospect_dimensions_and_readiness():
+    """Smaller items: Proves that a salesperson/rep utterance preserves prospect dimensions
+    and readiness scores identically without zeroing, corrupting, or deflating them.
+    """
+    script_path = Path(__file__).resolve().parent.parent / "data" / "script_sim_muy04bh0_fee_complaint.json"
+    raw_turns = json.loads(script_path.read_text(encoding="utf-8"))
+
+    engine = ConversationReplayEngine()
+    rep = engine.replay_dialogue_turns(
+        call_sid="sim_test_rep_preservation",
+        raw_turns=raw_turns,
+        save_report=False,
+        run_semantic_analysis=False,
+    )
+
+    # Turn 3 is prospect utterance, Turn 4 is rep utterance continuation
+    step3 = next(s for s in rep.timeline if s.turn_id == 3)
+    step4 = next(s for s in rep.timeline if s.turn_id == 4)
+
+    r3 = step3.state_after.readiness
+    r4 = step4.state_after.readiness
+    assert r3 is not None and r4 is not None
+
+    # Readiness score and all measured dimensions must be strictly preserved
+    assert r4.readiness_score == r3.readiness_score
+    assert r4.emotional_readiness == r3.emotional_readiness
+    assert r4.logical_readiness == r3.logical_readiness
+    assert r4.logistical_readiness == r3.logistical_readiness
+    assert r4.uncapped_score == r3.uncapped_score
+
+    # Behavioral dimensions must be preserved identically
+    d3 = step3.state_after.dimensions
+    d4 = step4.state_after.dimensions
+    assert d4.trust == d3.trust
+    assert d4.trust_confidence == d3.trust_confidence
+    assert d4.emotion_tension == d3.emotion_tension
+    assert d4.commitment == d3.commitment
+    assert d4.commitment_confidence == d3.commitment_confidence
+
+

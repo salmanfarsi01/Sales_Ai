@@ -1,0 +1,37 @@
+[
+  {
+    "turn_id": 2,
+    "speaker_id": "salesperson",
+    "text": "Our standard fee is 5% which includes full staging and premium marketing."
+  },
+  {
+    "turn_id": 3,
+    "speaker_id": "client",
+    "text": "Your commission is still too expensive, but I can meet Thursday at 4 to see the numbers."
+  },
+  {
+    "turn_id": 4,
+    "speaker_id": "salesperson",
+    "text": "The staging typically raises the final sale price, which offsets the fee."
+  },
+  {
+    "turn_id": 5,
+    "speaker_id": "client",
+    "text": "That helps a little."
+  },
+  {
+    "turn_id": 6,
+    "speaker_id": "client",
+    "text": "But honestly the commission still bothers me."
+  },
+  {
+    "turn_id": 7,
+    "speaker_id": "client",
+    "text": "Still the fees. I just don't get it."
+  },
+  {
+    "turn_id": 8,
+    "speaker_id": "client",
+    "text": "ok leave it we will talk about it in our meeting Thursday at 4 pm"
+  }
+]

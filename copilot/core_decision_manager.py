@@ -350,10 +350,14 @@ class CoreDecisionManager:
                 self.decisions_by_version[int(cached_decision.source_state_version)] = cached_decision
                 return eval_result
 
-        # Point 13: Preserve strategy across turns when nothing material changed
-        filler_acknowledgments = {"okay", "ok", "yeah", "sure", "uh huh", "uh-huh", "got it", "right", "i see"}
+        # Point 13 & Point 2: Preserve strategy across turns when nothing material changed
+        filler_acknowledgments = {
+            "okay", "ok", "yeah", "sure", "uh huh", "uh-huh", "got it", "right", "i see",
+            "that helps", "that helps a little", "that helps a bit", "makes sense", "fair enough", "i understand", "that works",
+        }
         cleaned_turn = (turn_text or "").strip().lower().rstrip("!.,")
-        is_filler = cleaned_turn in filler_acknowledgments
+        from .conversation_materiality import is_positive_filler
+        is_filler = cleaned_turn in filler_acknowledgments or is_positive_filler(turn_text or "")
 
         # Question pending check: if the previous action was an explicit question, closing ask,
         # coordination inquiry, or if the prompt ended with '?',
@@ -389,7 +393,7 @@ class CoreDecisionManager:
             )
             if (
                 is_carried_valid
-                and prev_dec.primary_action not in (StrategicAction.WAIT_SILENCE, StrategicAction.HOLD)
+                and prev_dec.primary_action not in (StrategicAction.WAIT_SILENCE,)
                 and "HARD_BOUNDARY_ACTIVE" not in prev_dec.reason_codes
             ):
                 self.consecutive_carried_count += 1
@@ -406,8 +410,14 @@ class CoreDecisionManager:
                 carried_dec.carried_forward_from_decision_id = prev_dec.carried_forward_from_decision_id or prev_dec.decision_id
                 carried_dec.carried_forward_from_turn_id = prev_dec.carried_forward_from_turn_id or prev_dec.source_turn_id
                 carried_dec.should_prompt = False  # Point 8: no new prompt needed for non-material filler
+                # Point 2: Allow HOLD / no new prompt when nothing warrants another sentence
+                carried_dec.primary_action = StrategicAction.HOLD
+                carried_dec.final_prompt_text = None
+                carried_dec.gateway_fallback_stub = None
                 if "STRATEGY_CARRIED_FORWARD" not in carried_dec.reason_codes:
                     carried_dec.reason_codes.append("STRATEGY_CARRIED_FORWARD")
+                if "HOLD_NON_MATERIAL_TURN" not in carried_dec.reason_codes:
+                    carried_dec.reason_codes.append("HOLD_NON_MATERIAL_TURN")
                 carried_dec.strategic_objective = f"Carried forward from Turn {carried_dec.carried_forward_from_turn_id}: {prev_dec.strategic_objective}"
 
                 # Recompute carried confidence dynamically from CURRENT snapshot (Gap 3)
