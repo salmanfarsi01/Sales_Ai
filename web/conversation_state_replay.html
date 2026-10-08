@@ -1470,25 +1470,45 @@
       function validateDecisionBinding(d, st, sa, repCallSid) {
         if (!d) return { valid: false, reason: "No strategic decision recorded for turn." };
 
-        // 1. Validate call_sid (mandatory on both context and decision)
-        const expectedCallSid = repCallSid || (sa && sa.call_sid) || "";
-        const actualCallSid = d.call_sid || d.call_id || "";
+        // 1. Validate call ownership across report, source state, and decision (Client Point 1)
+        const reportCallSid = (repCallSid || "").trim();
+        const actualCallSid = (d.call_sid || d.call_id || "").trim();
+        const stateCallSid = (sa && sa.call_sid ? sa.call_sid : "").trim();
+
         if (!actualCallSid) {
           return {
             valid: false,
             reason: "Missing call_sid on decision"
           };
         }
-        if (!expectedCallSid) {
+        if (!reportCallSid) {
           return {
             valid: false,
-            reason: "Missing call_sid in report/turn context"
+            reason: "Missing call_sid in report context"
           };
         }
-        if (expectedCallSid !== actualCallSid) {
+        if (actualCallSid !== reportCallSid) {
           return {
             valid: false,
-            reason: `call_sid mismatch: expected '${expectedCallSid}', got '${actualCallSid}'`
+            reason: `call_sid mismatch between report and decision: expected '${reportCallSid}', got '${actualCallSid}'`
+          };
+        }
+        if (!stateCallSid) {
+          return {
+            valid: false,
+            reason: "Missing call_sid on source state (state_after)"
+          };
+        }
+        if (stateCallSid !== reportCallSid) {
+          return {
+            valid: false,
+            reason: `Cross-call source state ownership mismatch: source state belongs to '${stateCallSid}', but report is '${reportCallSid}'`
+          };
+        }
+        if (stateCallSid !== actualCallSid) {
+          return {
+            valid: false,
+            reason: `Cross-call source state ownership mismatch: source state belongs to '${stateCallSid}', but decision belongs to '${actualCallSid}'`
           };
         }
 

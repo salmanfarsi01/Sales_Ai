@@ -66,11 +66,14 @@ class StrategicDecisionCache:
         turn_id: int,
         source_state_version: int,
         source_event_id: str,
+        state_call_sid: Optional[str] = None,
     ) -> Optional[StrategicDecision]:
         """Validates all four keys together: call_sid + turn_id + source_state_version + source_event_id.
-        Rejects lookup if any key mismatches or is missing (Point 1).
+        Rejects lookup if any key mismatches, is missing, or if state_call_sid belongs to another call (Point 1).
         """
         if not call_sid or turn_id is None or source_state_version is None or not source_event_id:
+            return None
+        if state_call_sid is not None and str(state_call_sid).strip() != str(call_sid).strip():
             return None
 
         key = (str(call_sid), int(turn_id), int(source_state_version), str(source_event_id))
@@ -101,9 +104,10 @@ class StrategicDecisionCache:
         turn_id: int,
         source_state_version: int,
         source_event_id: str,
+        state_call_sid: Optional[str] = None,
     ) -> Tuple[bool, str]:
         """Validates that a decision strictly matches all 4 keys.
-        Fails if any key is missing or null on either side.
+        Fails if any key is missing or null on either side, or if source state belongs to another call (Point 1).
         """
         if decision is None:
             return False, "decision is None"
@@ -120,7 +124,16 @@ class StrategicDecisionCache:
         if not actual_call:
             return False, "Missing call_sid on StrategicDecision"
         if actual_call != str(call_sid):
-            return False, f"call_sid mismatch: expected '{call_sid}', got '{actual_call}'"
+            return False, f"call_sid mismatch between report and decision: expected '{call_sid}', got '{actual_call}'"
+
+        if state_call_sid is not None:
+            state_call_str = str(state_call_sid).strip()
+            if not state_call_str:
+                return False, "Missing call_sid on source state"
+            if state_call_str != str(call_sid):
+                return False, f"Cross-call source state ownership mismatch: source state belongs to '{state_call_str}', expected '{call_sid}'"
+            if state_call_str != actual_call:
+                return False, f"Cross-call source state ownership mismatch: source state belongs to '{state_call_str}', but decision belongs to '{actual_call}'"
 
         actual_turn = decision.source_turn_id if decision.source_turn_id is not None else decision.utterance_turn_id
         if actual_turn is None:
@@ -304,6 +317,8 @@ class CoreDecisionManager:
                 self.consecutive_carried_count += 1
                 carried_dec = prev_dec.model_copy(deep=True)
                 carried_dec.decision_id = f"dec_{uuid.uuid4().hex[:10]}"
+                carried_dec.call_sid = self.call_sid
+                carried_dec.call_id = self.call_sid
                 carried_dec.source_turn_id = effective_turn_id
                 carried_dec.utterance_turn_id = effective_turn_id
                 carried_dec.metrics_source_turn_id = effective_turn_id
@@ -316,12 +331,18 @@ class CoreDecisionManager:
                 if "STRATEGY_CARRIED_FORWARD" not in carried_dec.reason_codes:
                     carried_dec.reason_codes.append("STRATEGY_CARRIED_FORWARD")
                 carried_dec.strategic_objective = f"Carried forward from Turn {carried_dec.carried_forward_from_turn_id}: {prev_dec.strategic_objective}"
-                carried_dec.evidence_considered = [
-                    f'Turn utterance ({turn_speaker}): "{turn_text.strip()}"',
-                    f"Strategy carried forward from decision {carried_dec.carried_forward_from_decision_id} (Turn {carried_dec.carried_forward_from_turn_id})",
-                ]
 
                 context = self.engine._build_context(snapshot)
+                # Re-attach full trace from CURRENT snapshot and context to maintain snapshot consistency (Point 1)
+                self.engine._attach_full_trace(
+                    decision=carried_dec,
+                    context=context,
+                    snapshot=snapshot,
+                    turn_speaker=turn_speaker,
+                    turn_text=turn_text,
+                    turn_id=effective_turn_id,
+                )
+
                 eval_result = DecisionEvaluationResult(decision=carried_dec, context=context)
                 self.latest_decision = carried_dec
                 self.latest_evaluation_result = eval_result
@@ -347,9 +368,11 @@ class CoreDecisionManager:
             calibration=calibration,
         )
 
-        # Rep turn continuation check (Point 13 & Point 8):
+        # Rep turn continuation check (Point 13 & Point 8 & Point 1):
         # If rep is speaking and the resulting strategy is an unchanged continuation of prev_dec,
         # mark as carried forward and suppress prompt generation to prevent stale/redundant guidance.
+        # Preserve historical strategy provenance separately while deriving current interpretation
+        # and evidence from the current immutable snapshot.
         if (
             turn_speaker in ("salesperson", "rep", "agent")
             and prev_dec is not None
@@ -366,6 +389,8 @@ class CoreDecisionManager:
         ):
             carried_dec = prev_dec.model_copy(deep=True)
             carried_dec.decision_id = f"dec_{uuid.uuid4().hex[:10]}"
+            carried_dec.call_sid = self.call_sid
+            carried_dec.call_id = self.call_sid
             carried_dec.source_turn_id = effective_turn_id
             carried_dec.utterance_turn_id = effective_turn_id
             carried_dec.metrics_source_turn_id = effective_turn_id
@@ -377,10 +402,15 @@ class CoreDecisionManager:
             if "STRATEGY_CARRIED_FORWARD" not in carried_dec.reason_codes:
                 carried_dec.reason_codes.append("STRATEGY_CARRIED_FORWARD")
             carried_dec.strategic_objective = f"Continuation from Turn {carried_dec.carried_forward_from_turn_id}: {prev_dec.strategic_objective}"
-            if carried_dec.evidence_considered:
-                carried_dec.evidence_considered = [f'Turn utterance ({turn_speaker}): "{turn_text.strip()}"'] + [e for e in carried_dec.evidence_considered if not e.startswith("Turn utterance")]
-            else:
-                carried_dec.evidence_considered = [f'Turn utterance ({turn_speaker}): "{turn_text.strip()}"']
+            # Re-attach full trace from current snapshot and context to maintain snapshot consistency (Point 1)
+            self.engine._attach_full_trace(
+                decision=carried_dec,
+                context=eval_result.context,
+                snapshot=snapshot,
+                turn_speaker=turn_speaker,
+                turn_text=turn_text,
+                turn_id=effective_turn_id,
+            )
             final_decision = carried_dec
 
         # Prompt dispatch happens only on prospect utterances (Point 8 invariant)
@@ -434,17 +464,21 @@ class CoreDecisionManager:
         turn_id: int,
         source_state_version: int,
         source_event_id: str,
+        state_call_sid: Optional[str] = None,
     ) -> Optional[StrategicDecision]:
         """Retrieves and validates a decision matching all four keys together:
         call_sid + turn_id + source_state_version + source_event_id (Point 1).
         """
         if str(call_sid) != self.call_sid:
             return None
+        if state_call_sid is not None and str(state_call_sid).strip() != self.call_sid:
+            return None
         return StrategicDecisionCache.get_strictly_bound(
             call_sid=str(call_sid),
             turn_id=int(turn_id),
             source_state_version=int(source_state_version),
             source_event_id=str(source_event_id),
+            state_call_sid=state_call_sid,
         )
 
 

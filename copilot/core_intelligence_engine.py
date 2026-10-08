@@ -1189,6 +1189,14 @@ class PitchProXCoreIntelligenceEngine:
             stage_str = str(getattr(snapshot.conversation_stage, "value", snapshot.conversation_stage))
             evidence.append(f"Stage: {stage_str.upper()}")
 
+        # 8. Historical Strategy Provenance: Preserve strategy origin separately (Point 1)
+        if getattr(decision, "carried_forward_from_turn_id", None) is not None:
+            from_tid = decision.carried_forward_from_turn_id
+            from_did = getattr(decision, "carried_forward_from_decision_id", None) or "prior"
+            prov_str = f"Strategy provenance: carried forward from Turn {from_tid} (decision {from_did})"
+            if prov_str not in evidence:
+                evidence.append(prov_str)
+
         decision.evidence_considered = evidence
         decision.meeting_gate_open = context.meeting_gate_open
         decision.conversion_confirmed = context.conversion_confirmed

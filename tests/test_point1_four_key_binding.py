@@ -442,4 +442,124 @@ def test_point1_html_rejects_null_event_id_and_renders_pending():
     assert "Missing call_sid on decision" in content
     assert "Missing turn_id on decision" in content
     assert "Missing source_state_version on decision" in content
+    assert "Cross-call source state ownership mismatch" in content
+
+
+def test_point1_cross_call_source_state_ownership_rejection_in_cache():
+    """Client Requirement Point 1:
+    Validate call ownership across report, source state, and decision.
+    Reject when source state belongs to another call even if report and decision match.
+    """
+    call_sid = "call_sim_point1_ownership_test"
+    other_call = "call_sim_point1_different_call"
+    StrategicDecisionCache.clear(call_sid)
+
+    dec = StrategicDecision(
+        call_id=call_sid,
+        call_sid=call_sid,
+        source_state_version=10,
+        source_turn_id=4,
+        source_event_id="ev_turn_4_v10",
+        utterance_turn_id=4,
+        metrics_source_turn_id=4,
+        should_prompt=False,
+        strategic_objective="Continuation from Turn 3",
+        primary_action=StrategicAction.ACKNOWLEDGE,
+        confidence=0.8,
+    )
+    StrategicDecisionCache.put(call_sid=call_sid, decision=dec, turn_id=4, source_event_id="ev_turn_4_v10")
+
+    # 1. Matching state_call_sid passes
+    valid_same, reason_same = StrategicDecisionCache.validate_binding(
+        dec,
+        call_sid=call_sid,
+        turn_id=4,
+        source_state_version=10,
+        source_event_id="ev_turn_4_v10",
+        state_call_sid=call_sid,
+    )
+    assert valid_same is True
+    assert "Valid 4-key binding" in reason_same
+
+    # 2. Cross-call source state fails
+    valid_diff, reason_diff = StrategicDecisionCache.validate_binding(
+        dec,
+        call_sid=call_sid,
+        turn_id=4,
+        source_state_version=10,
+        source_event_id="ev_turn_4_v10",
+        state_call_sid=other_call,
+    )
+    assert valid_diff is False
+    assert "Cross-call source state ownership mismatch" in reason_diff
+    assert other_call in reason_diff
+
+    # 3. get_strictly_bound with cross-call state_call_sid returns None
+    assert StrategicDecisionCache.get_strictly_bound(
+        call_sid=call_sid,
+        turn_id=4,
+        source_state_version=10,
+        source_event_id="ev_turn_4_v10",
+        state_call_sid=other_call,
+    ) is None
+
+
+def test_point1_snapshot_consistency_turn4_carry_forward():
+    """Client Requirement Point 1 (sim_muy04bh0 Turn 4 verification):
+    At Turn 4, the rep turn is a continuation of Turn 3's strategy.
+    The decision bound to Turn 4's snapshot V10 MUST:
+    - Report meeting_gate_open == False (because V10 conversion_gate is closed)
+    - Report strategic_interpretation matching V10 (gate closed, readiness 56.7%)
+    - In evidence_considered: report Gate: CLOSED and Readiness: 56.7% (NEVER Turn 3's Gate: OPEN or 82.9%)
+    - Preserve historical strategy provenance separately: carried_forward_from_turn_id == 3,
+      STRATEGY_CARRIED_FORWARD in reason_codes, and 'Strategy provenance: carried forward from Turn 3'.
+    """
+    rep_file = Path(__file__).resolve().parent.parent / "reports" / "synthetic" / "conversation_state_sim_muy04bh0.json"
+    assert rep_file.exists(), f"Missing synthetic replay file: {rep_file}"
+    rep_data = json.loads(rep_file.read_text(encoding="utf-8"))
+
+    step3 = [s for s in rep_data["timeline"] if s["turn_id"] == 3][0]
+    step4 = [s for s in rep_data["timeline"] if s["turn_id"] == 4][0]
+
+    snap3 = ConversationStateSnapshot.model_validate(step3["state_after"])
+    snap4 = ConversationStateSnapshot.model_validate(step4["state_after"])
+
+    cdm = CoreDecisionManager(call_sid="sim_muy04bh0")
+    res3 = cdm.evaluate_state(snapshot=snap3, turn_speaker="client", turn_text=step3["text"], turn_id=3)
+    dec3 = res3.decision
+    assert dec3.meeting_gate_open is True
+
+    # Evaluate Turn 4 (Rep turn continuation)
+    res4 = cdm.evaluate_state(snapshot=snap4, turn_speaker="salesperson", turn_text=step4["text"], turn_id=4)
+    dec4 = res4.decision
+
+    # 1. Snapshot consistency: Decision bound to V10 MUST reflect V10's closed gate and readiness
+    assert dec4.source_state_version == snap4.state_version  # V10
+    assert dec4.meeting_gate_open == snap4.conversion_gate.is_open, "Turn 4 decision must match V10 snapshot gate"
+    assert dec4.meeting_gate_open is False, "Turn 4 decision must report closed gate matching V10 snapshot"
+    assert dec4.conversion_confirmed is True
+    assert dec4.strategic_interpretation["meeting_gate_open"] is False
+    assert dec4.strategic_interpretation["readiness_score"] == round(snap4.readiness.readiness_score, 1)
+
+    # 2. Evidence Considered must reflect current immutable source snapshot V10
+    gate_ev = [e for e in dec4.evidence_considered if e.startswith("Gate:")]
+    assert len(gate_ev) == 1
+    assert "Gate: CLOSED" in gate_ev[0], f"Gate in evidence_considered must be CLOSED, got {gate_ev[0]}"
+    assert "Gate: OPEN" not in gate_ev[0]
+
+    readiness_ev = [e for e in dec4.evidence_considered if e.startswith("Readiness:")]
+    assert len(readiness_ev) == 1
+    exp_read_str = f"{snap4.readiness.readiness_score:.1f}%"
+    assert exp_read_str in readiness_ev[0], f"Readiness in evidence_considered must be {exp_read_str}, got {readiness_ev[0]}"
+    # Must NOT report Turn 3's readiness if different
+    if round(snap3.readiness.readiness_score, 1) != round(snap4.readiness.readiness_score, 1):
+        assert f"{snap3.readiness.readiness_score:.1f}%" not in readiness_ev[0]
+
+    # 3. Preserve historical strategy provenance separately
+    assert dec4.carried_forward_from_turn_id == 3
+    assert dec4.carried_forward_from_decision_id == dec3.decision_id
+    assert "STRATEGY_CARRIED_FORWARD" in dec4.reason_codes
+    assert any("Strategy provenance: carried forward from Turn 3" in e for e in dec4.evidence_considered)
+    assert dec4.should_prompt is False  # Suppressed on rep turn
+
 
