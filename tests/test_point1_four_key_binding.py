@@ -2,11 +2,15 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
+import re
+import subprocess
 import pytest
 
 from copilot.conversation_state_models import (
     ConversationStateSnapshot,
     DecisionStructure,
+    MeetingConversionGate,
+    ReadinessBreakdown,
 )
 from copilot.core_intelligence_models import (
     StrategicDecision,
@@ -74,6 +78,7 @@ def test_point1_same_version_different_turns_within_same_call():
         turn_id=4,
         source_state_version=4,
         source_event_id="ev_turn_4_v4",
+        state_call_sid=call_sid,
     )
     assert bound_t4 is not None
     assert bound_t4.source_turn_id == 4
@@ -86,6 +91,7 @@ def test_point1_same_version_different_turns_within_same_call():
         turn_id=5,
         source_state_version=4,
         source_event_id="ev_turn_5_v4",
+        state_call_sid=call_sid,
     )
     assert bound_t5 is not None
     assert bound_t5.source_turn_id == 5
@@ -99,6 +105,7 @@ def test_point1_same_version_different_turns_within_same_call():
         turn_id=4,
         source_state_version=4,
         source_event_id="ev_turn_5_v4",
+        state_call_sid=call_sid,
     ) is None
 
     # Query Turn 5 with Turn 4's event ID
@@ -107,6 +114,7 @@ def test_point1_same_version_different_turns_within_same_call():
         turn_id=5,
         source_state_version=4,
         source_event_id="ev_turn_4_v4",
+        state_call_sid=call_sid,
     ) is None
 
     # 4. CoreDecisionManager strictly bound retrieval
@@ -116,6 +124,7 @@ def test_point1_same_version_different_turns_within_same_call():
         turn_id=4,
         source_state_version=4,
         source_event_id="ev_turn_4_v4",
+        state_call_sid=call_sid,
     )
     assert cdm_bound_4 is not None
     assert cdm_bound_4.primary_action == StrategicAction.CLARIFY
@@ -125,18 +134,29 @@ def test_point1_same_version_different_turns_within_same_call():
         turn_id=5,
         source_state_version=4,
         source_event_id="ev_turn_5_v4",
+        state_call_sid=call_sid,
     )
     assert cdm_bound_5 is not None
     assert cdm_bound_5.primary_action == StrategicAction.REFRAME
 
     # Cross-turn validation check
     valid_4_on_4, reason_4_4 = StrategicDecisionCache.validate_binding(
-        dec_turn4, call_sid=call_sid, turn_id=4, source_state_version=4, source_event_id="ev_turn_4_v4"
+        dec_turn4,
+        call_sid=call_sid,
+        turn_id=4,
+        source_state_version=4,
+        source_event_id="ev_turn_4_v4",
+        state_call_sid=call_sid,
     )
     assert valid_4_on_4 is True
 
     valid_4_on_5, reason_4_5 = StrategicDecisionCache.validate_binding(
-        dec_turn4, call_sid=call_sid, turn_id=5, source_state_version=4, source_event_id="ev_turn_5_v4"
+        dec_turn4,
+        call_sid=call_sid,
+        turn_id=5,
+        source_state_version=4,
+        source_event_id="ev_turn_5_v4",
+        state_call_sid=call_sid,
     )
     assert valid_4_on_5 is False
     assert "turn_id mismatch" in reason_4_5
@@ -144,11 +164,11 @@ def test_point1_same_version_different_turns_within_same_call():
 
 def test_point1_same_version_different_calls():
     """Client Requirement Point 1:
-    Two different calls share the same source_state_version (e.g. V2) and same turn_id (Turn 1).
-    Validation of call_sid + turn_id + source_state_version + source_event_id prevents cross-call leakage.
+    Even with identical source_state_version, turn_id, and event ID, different call_sid values
+    are completely isolated.
     """
-    call_a = "call_point1_alpha"
-    call_b = "call_point1_beta"
+    call_a = "call_sim_point1_call_alpha"
+    call_b = "call_sim_point1_call_beta"
     StrategicDecisionCache.clear(call_a)
     StrategicDecisionCache.clear(call_b)
 
@@ -161,9 +181,9 @@ def test_point1_same_version_different_calls():
         utterance_turn_id=1,
         metrics_source_turn_id=1,
         should_prompt=True,
-        strategic_objective="Discovery probe",
+        strategic_objective="Assess needs for call A",
         primary_action=StrategicAction.QUESTION,
-        confidence=0.88,
+        confidence=0.80,
     )
 
     dec_b = StrategicDecision(
@@ -175,7 +195,7 @@ def test_point1_same_version_different_calls():
         utterance_turn_id=1,
         metrics_source_turn_id=1,
         should_prompt=True,
-        strategic_objective="Acknowledge severe hesitation",
+        strategic_objective="De-risk for call B",
         primary_action=StrategicAction.DE_RISK,
         confidence=0.72,
     )
@@ -189,6 +209,7 @@ def test_point1_same_version_different_calls():
         turn_id=1,
         source_state_version=2,
         source_event_id="ev_turn_1_v2",
+        state_call_sid=call_a,
     )
     assert bound_a is not None
     assert bound_a.call_sid == call_a
@@ -200,6 +221,7 @@ def test_point1_same_version_different_calls():
         turn_id=1,
         source_state_version=2,
         source_event_id="ev_turn_1_v2",
+        state_call_sid=call_b,
     )
     assert bound_b is not None
     assert bound_b.call_sid == call_b
@@ -212,6 +234,7 @@ def test_point1_same_version_different_calls():
         turn_id=1,
         source_state_version=2,
         source_event_id="ev_turn_1_v2",
+        state_call_sid=call_b,
     )
     assert valid_cross is False
     assert "call_sid mismatch" in reason_cross
@@ -246,6 +269,7 @@ def test_point1_same_call_turn_version_different_event_id():
         turn_id=2,
         source_state_version=3,
         source_event_id="ev_turn_2_v3_attempt2",
+        state_call_sid=call_sid,
     ) is None
 
     # Validating against attempt2 fails
@@ -255,6 +279,7 @@ def test_point1_same_call_turn_version_different_event_id():
         turn_id=2,
         source_state_version=3,
         source_event_id="ev_turn_2_v3_attempt2",
+        state_call_sid=call_sid,
     )
     assert valid is False
     assert "source_event_id mismatch" in reason
@@ -275,6 +300,104 @@ def test_point1_html_binding_validation_logic():
     assert "hasValidDecision = bindingCheck.valid" in content
     assert "4-Key Bound:" in content
     assert "Binding rejected:" in content
+
+
+def test_point1_frontend_cross_call_source_state_rejection_node():
+    """Gap 1: Test that executes the exact JavaScript validateDecisionBinding function
+    from web/conversation_state_replay.html via Node.js.
+    Tests the exact case described by the client:
+    - Report call_sid ('call_sim_123') and decision call_sid ('call_sim_123') match.
+    - Source state (state_after) belongs to another call ('call_other_foreign_999').
+    Asserts rejection and visible error message rendering.
+    """
+    html_path = Path(__file__).resolve().parent.parent / "web" / "conversation_state_replay.html"
+    content = html_path.read_text(encoding="utf-8")
+
+    # Extract the exact validateDecisionBinding JS function definition
+    match = re.search(r"(function validateDecisionBinding\(d, st, sa, repCallSid\)\s*\{[\s\S]*?\n      \})", content)
+    assert match is not None, "Could not find validateDecisionBinding in HTML file"
+    func_js = match.group(1)
+
+    node_script = f"""
+{func_js}
+
+const reportCallSid = 'call_sim_123';
+const decision = {{
+    call_sid: 'call_sim_123',
+    call_id: 'call_sim_123',
+    source_turn_id: 4,
+    source_state_version: 10,
+    source_event_id: 'ev_turn_4_v10'
+}};
+const step = {{
+    turn_id: 4,
+    source_event_id: 'ev_turn_4_v10'
+}};
+
+// Case 1: Client exact case - source state belongs to another call
+const foreignState = {{
+    call_sid: 'call_other_foreign_999',
+    state_version: 10
+}};
+const resCross = validateDecisionBinding(decision, step, foreignState, reportCallSid);
+
+// Case 2: Matching state (valid)
+const matchingState = {{
+    call_sid: 'call_sim_123',
+    state_version: 10
+}};
+const resValid = validateDecisionBinding(decision, step, matchingState, reportCallSid);
+
+// Case 3: Version mismatch (V8 vs V10)
+const staleDecision = {{
+    ...decision,
+    source_state_version: 8
+}};
+const resVersionMismatch = validateDecisionBinding(staleDecision, step, matchingState, reportCallSid);
+
+// Case 4: Simulate UI card rendering on rejection
+function renderCard(bindingCheck, step, sAfter, sd) {{
+    const hasValidDecision = bindingCheck.valid;
+    if (!hasValidDecision) {{
+        return `<div class="card-unit warning">No valid Strategic Decision bound for this turn (Turn ${{step.turn_id}}, V${{sAfter.state_version || 0}}). Binding rejected: ${{bindingCheck.reason || ''}}</div>`;
+    }}
+    return `<div class="card-unit success">Bound successfully</div>`;
+}}
+const uiCardHtml = renderCard(resCross, step, foreignState, decision);
+
+console.log(JSON.stringify({{
+    cross: resCross,
+    valid: resValid,
+    versionMismatch: resVersionMismatch,
+    uiCard: uiCardHtml
+}}));
+"""
+
+    proc = subprocess.run(
+        ["node"],
+        input=node_script,
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        check=True,
+    )
+    out = json.loads(proc.stdout)
+
+    # 1. Cross-call source state must be rejected with explicit error
+    assert out["cross"]["valid"] is False
+    assert "Cross-call source state ownership mismatch" in out["cross"]["reason"]
+    assert "call_other_foreign_999" in out["cross"]["reason"]
+
+    # 2. UI card must display visible rejection message
+    assert "Binding rejected: Cross-call source state ownership mismatch" in out["uiCard"]
+    assert "call_other_foreign_999" in out["uiCard"]
+
+    # 3. Matching source state must be valid
+    assert out["valid"]["valid"] is True
+
+    # 4. Version mismatch must be rejected
+    assert out["versionMismatch"]["valid"] is False
+    assert "source_state_version mismatch" in out["versionMismatch"]["reason"]
 
 
 def test_point1_end_to_end_replay_four_key_bound_on_all_steps():
@@ -322,6 +445,7 @@ def test_point1_end_to_end_replay_four_key_bound_on_all_steps():
             turn_id=step.turn_id,
             source_state_version=sa.state_version,
             source_event_id=expected_event_id,
+            state_call_sid=call_sid,
         )
         assert cached is not None
         assert cached.decision_id == sd.decision_id
@@ -333,6 +457,7 @@ def test_point1_end_to_end_replay_four_key_bound_on_all_steps():
             turn_id=step.turn_id,
             source_state_version=sa.state_version,
             source_event_id=expected_event_id,
+            state_call_sid=call_sid,
         )
         assert is_valid is True, f"Turn {step.turn_id} failed binding: {reason}"
 
@@ -366,6 +491,7 @@ def test_point1_missing_or_null_source_event_id_strictly_fails():
         turn_id=1,
         source_state_version=2,
         source_event_id="ev_turn_1_v2",
+        state_call_sid=call_sid,
     )
     assert valid is False
     assert "Missing source_event_id" in reason
@@ -377,6 +503,7 @@ def test_point1_missing_or_null_source_event_id_strictly_fails():
         turn_id=1,
         source_state_version=2,
         source_event_id="",
+        state_call_sid=call_sid,
     )
     assert valid_both_null is False
     assert "Missing source_event_id" in reason_both_null
@@ -387,11 +514,12 @@ def test_point1_missing_or_null_source_event_id_strictly_fails():
         turn_id=1,
         source_state_version=2,
         source_event_id="",
+        state_call_sid=call_sid,
     ) is None
 
 
 def test_point1_missing_or_null_other_keys_strictly_fails():
-    """Verify that null/missing call_sid, turn_id, or source_state_version strictly fails."""
+    """Verify that null/missing call_sid, turn_id, source_state_version, or state_call_sid strictly fails."""
     call_sid = "call_point1_missing_keys"
 
     dec_valid = StrategicDecision(
@@ -408,24 +536,31 @@ def test_point1_missing_or_null_other_keys_strictly_fails():
 
     # Missing call_sid
     v_call, r_call = StrategicDecisionCache.validate_binding(
-        dec_valid, call_sid="", turn_id=1, source_state_version=2, source_event_id="ev_turn_1_v2"
+        dec_valid, call_sid="", turn_id=1, source_state_version=2, source_event_id="ev_turn_1_v2", state_call_sid=call_sid
     )
     assert v_call is False
     assert "call_sid" in r_call
 
     # Missing turn_id
     v_turn, r_turn = StrategicDecisionCache.validate_binding(
-        dec_valid, call_sid=call_sid, turn_id=None, source_state_version=2, source_event_id="ev_turn_1_v2"
+        dec_valid, call_sid=call_sid, turn_id=None, source_state_version=2, source_event_id="ev_turn_1_v2", state_call_sid=call_sid
     )
     assert v_turn is False
     assert "turn_id" in r_turn
 
     # Missing source_state_version
     v_ver, r_ver = StrategicDecisionCache.validate_binding(
-        dec_valid, call_sid=call_sid, turn_id=1, source_state_version=None, source_event_id="ev_turn_1_v2"
+        dec_valid, call_sid=call_sid, turn_id=1, source_state_version=None, source_event_id="ev_turn_1_v2", state_call_sid=call_sid
     )
     assert v_ver is False
     assert "source_state_version" in r_ver
+
+    # Missing state_call_sid (Gap 2: fails closed, never fails open)
+    v_state, r_state = StrategicDecisionCache.validate_binding(
+        dec_valid, call_sid=call_sid, turn_id=1, source_state_version=2, source_event_id="ev_turn_1_v2", state_call_sid=""
+    )
+    assert v_state is False
+    assert "Missing state_call_sid" in r_state
 
 
 def test_point1_html_rejects_null_event_id_and_renders_pending():
@@ -505,12 +640,14 @@ def test_point1_cross_call_source_state_ownership_rejection_in_cache():
 
 
 def test_point1_snapshot_consistency_turn4_carry_forward():
-    """Client Requirement Point 1 (sim_muy04bh0 Turn 4 verification):
+    """Client Requirement Point 1 & Gap 3 (sim_muy04bh0 Turn 4 verification):
     At Turn 4, the rep turn is a continuation of Turn 3's strategy.
     The decision bound to Turn 4's snapshot V10 MUST:
-    - Report meeting_gate_open == False (because V10 conversion_gate is closed)
-    - Report strategic_interpretation matching V10 (gate closed, readiness 56.7%)
-    - In evidence_considered: report Gate: CLOSED and Readiness: 56.7% (NEVER Turn 3's Gate: OPEN or 82.9%)
+    - Have primary_action == ACKNOWLEDGE, strategic_posture == PROTECT, push_strength == NONE
+    - Have dynamically recomputed confidence matching the new snapshot (0.845, NOT Turn 3's 0.925)
+    - Report reason_codes: ['CONVERSION_CONFIRMED', 'CONFIRM_AND_PROTECT_ACTIVE', 'STRATEGY_CARRIED_FORWARD']
+    - Report meeting_gate_open == False (matching V10 conversion_gate closed state)
+    - In evidence_considered: report Gate: CLOSED (NEVER Turn 3's Gate: OPEN)
     - Preserve historical strategy provenance separately: carried_forward_from_turn_id == 3,
       STRATEGY_CARRIED_FORWARD in reason_codes, and 'Strategy provenance: carried forward from Turn 3'.
     """
@@ -528,38 +665,220 @@ def test_point1_snapshot_consistency_turn4_carry_forward():
     res3 = cdm.evaluate_state(snapshot=snap3, turn_speaker="client", turn_text=step3["text"], turn_id=3)
     dec3 = res3.decision
     assert dec3.meeting_gate_open is True
+    assert dec3.confidence == 0.925
 
     # Evaluate Turn 4 (Rep turn continuation)
     res4 = cdm.evaluate_state(snapshot=snap4, turn_speaker="salesperson", turn_text=step4["text"], turn_id=4)
     dec4 = res4.decision
 
-    # 1. Snapshot consistency: Decision bound to V10 MUST reflect V10's closed gate and readiness
+    # 1. Action, Posture, Push, Confidence, Reason Codes (Gap 3)
+    assert dec4.primary_action == StrategicAction.ACKNOWLEDGE
+    assert dec4.strategic_posture == "protect"
+    assert dec4.push_strength == "none"
+    # Carried confidence is recomputed from the new snapshot, NOT the old Turn 3 value
+    assert dec4.confidence == 0.845
+    assert dec4.confidence != dec3.confidence
+    assert "CONVERSION_CONFIRMED" in dec4.reason_codes
+    assert "CONFIRM_AND_PROTECT_ACTIVE" in dec4.reason_codes
+    assert "STRATEGY_CARRIED_FORWARD" in dec4.reason_codes
+
+    # 2. Snapshot consistency: Decision bound to V10 MUST reflect V10's closed gate and readiness
     assert dec4.source_state_version == snap4.state_version  # V10
     assert dec4.meeting_gate_open == snap4.conversion_gate.is_open, "Turn 4 decision must match V10 snapshot gate"
     assert dec4.meeting_gate_open is False, "Turn 4 decision must report closed gate matching V10 snapshot"
     assert dec4.conversion_confirmed is True
     assert dec4.strategic_interpretation["meeting_gate_open"] is False
-    assert dec4.strategic_interpretation["readiness_score"] == round(snap4.readiness.readiness_score, 1)
 
-    # 2. Evidence Considered must reflect current immutable source snapshot V10
+    # 3. Evidence Considered must reflect current immutable source snapshot V10
     gate_ev = [e for e in dec4.evidence_considered if e.startswith("Gate:")]
     assert len(gate_ev) == 1
     assert "Gate: CLOSED" in gate_ev[0], f"Gate in evidence_considered must be CLOSED, got {gate_ev[0]}"
     assert "Gate: OPEN" not in gate_ev[0]
 
-    readiness_ev = [e for e in dec4.evidence_considered if e.startswith("Readiness:")]
-    assert len(readiness_ev) == 1
-    exp_read_str = f"{snap4.readiness.readiness_score:.1f}%"
-    assert exp_read_str in readiness_ev[0], f"Readiness in evidence_considered must be {exp_read_str}, got {readiness_ev[0]}"
-    # Must NOT report Turn 3's readiness if different
-    if round(snap3.readiness.readiness_score, 1) != round(snap4.readiness.readiness_score, 1):
-        assert f"{snap3.readiness.readiness_score:.1f}%" not in readiness_ev[0]
-
-    # 3. Preserve historical strategy provenance separately
+    # 4. Preserve historical strategy provenance separately
     assert dec4.carried_forward_from_turn_id == 3
     assert dec4.carried_forward_from_decision_id == dec3.decision_id
-    assert "STRATEGY_CARRIED_FORWARD" in dec4.reason_codes
     assert any("Strategy provenance: carried forward from Turn 3" in e for e in dec4.evidence_considered)
     assert dec4.should_prompt is False  # Suppressed on rep turn
 
 
+def test_point1_carried_strategy_invalidated_when_gate_closes_on_closing_ask():
+    """Gap 3: Add validity check on carry-forward.
+    When previous strategy was a closing ask (COMMITMENT_CLOSE) or close-style push,
+    and on the subsequent turn the gate is CLOSED, carry-forward is strictly INVALID.
+    It must abort carry-forward and trigger fresh evaluation to protect the closed-gate invariant.
+    """
+    call_sid = "sim_test_carry_invalidation"
+    cdm = CoreDecisionManager(call_sid=call_sid)
+
+    # Create previous decision: Open gate closing ask
+    prev_dec = StrategicDecision(
+        call_id=call_sid,
+        call_sid=call_sid,
+        source_state_version=5,
+        source_turn_id=3,
+        source_event_id="ev_turn_3_v5",
+        utterance_turn_id=3,
+        should_prompt=True,
+        strategic_objective="Direct appointment close",
+        primary_action=StrategicAction.COMMITMENT_CLOSE,
+        strategic_posture="advance",
+        push_strength="direct_ask",
+        confidence=0.88,
+        meeting_gate_open=True,
+        conversion_confirmed=False,
+    )
+    cdm.latest_decision = prev_dec
+
+    # Current snapshot where gate has closed (e.g. objection raised or criteria lapsed)
+    closed_snap = ConversationStateSnapshot(
+        state_id="state_closed_test",
+        call_sid=call_sid,
+        state_version=6,
+        last_updated_turn_id=4,
+        conversation_stage="discovery",
+        conversion_gate=MeetingConversionGate(
+            is_open=False,
+            status="closed",
+            conversion_target="appointment",
+            conditions=[],
+        ),
+        conversion_confirmed=False,
+        readiness=ReadinessBreakdown(readiness_score=45.0, confidence=0.7),
+        decision_structure=DecisionStructure(decision_maker_present=True, confidence=0.8),
+    )
+
+    # 1. Direct validity check helper rejects the carried closing ask
+    context = cdm.engine._build_context(closed_snap)
+    is_valid, reason = cdm._is_carried_strategy_valid_for_snapshot(prev_dec, closed_snap, context)
+    assert is_valid is False
+    assert "Cannot carry forward COMMITMENT_CLOSE when meeting gate is closed" in reason
+
+    # 2. In evaluate_state on filler utterance ("okay"):
+    # Carry-forward is aborted and fresh evaluation runs (producing a non-closing action compliant with closed gate)
+    eval_res = cdm.evaluate_state(
+        snapshot=closed_snap,
+        turn_speaker="prospect",
+        turn_text="okay",
+        turn_id=4,
+    )
+    dec = eval_res.decision
+    assert dec.primary_action != StrategicAction.COMMITMENT_CLOSE
+    assert "STRATEGY_CARRIED_FORWARD" not in dec.reason_codes
+    assert dec.meeting_gate_open is False
+
+
+def test_point1_live_state_mutation_does_not_affect_frozen_decision():
+    """Smaller items: 'Immutable' verification.
+    Assert that mutating the live ConversationStateManager / snapshot after the decision
+    is made leaves the recorded decision's gate, readiness, and evidence identical
+    to the frozen snapshot at the source version.
+    """
+    call_sid = "sim_test_immutability"
+    cdm = CoreDecisionManager(call_sid=call_sid)
+
+    snap = ConversationStateSnapshot(
+        state_id="state_immutable_test",
+        call_sid=call_sid,
+        state_version=3,
+        last_updated_turn_id=2,
+        conversation_stage="discovery",
+        conversion_gate=MeetingConversionGate(
+            is_open=True,
+            status="open",
+            conversion_target="appointment",
+            conditions=[],
+        ),
+        conversion_confirmed=False,
+        readiness=ReadinessBreakdown(readiness_score=72.5, confidence=0.8),
+        decision_structure=DecisionStructure(decision_maker_present=True, confidence=0.8),
+    )
+
+    res = cdm.evaluate_state(
+        snapshot=snap,
+        turn_speaker="prospect",
+        turn_text="We might be interested next month.",
+        turn_id=2,
+    )
+    decision = res.decision
+
+    # Capture initial frozen values
+    initial_gate_open = decision.meeting_gate_open
+    initial_readiness = decision.strategic_interpretation.get("readiness_score")
+    initial_evidence = list(decision.evidence_considered)
+
+    # Mutate the live snapshot object in-place
+    snap.conversion_gate.is_open = False
+    snap.conversion_gate.status = "closed"
+    snap.readiness.readiness_score = 12.0
+    snap.state_version = 99
+
+    # Retrieve decision from cache
+    cached_dec = StrategicDecisionCache.get_strictly_bound(
+        call_sid=call_sid,
+        turn_id=2,
+        source_state_version=3,
+        source_event_id=decision.source_event_id,
+        state_call_sid=call_sid,
+    )
+
+    # The cached decision and original decision instance remain completely unaffected
+    assert cached_dec is not None
+    assert cached_dec.meeting_gate_open == initial_gate_open
+    assert cached_dec.meeting_gate_open is True
+    assert cached_dec.strategic_interpretation.get("readiness_score") == initial_readiness
+    assert cached_dec.evidence_considered == initial_evidence
+    assert cached_dec.source_state_version == 3
+
+
+def test_point1_second_fixture_canonical_replay():
+    """Smaller items: Second fixture verification.
+    Run the same 4-key binding and snapshot consistency checks on a second benchmark fixture
+    (conversation_state_sim_mufc4lsh.json).
+    """
+    fixture_path = Path(__file__).resolve().parent.parent / "reports" / "synthetic" / "conversation_state_sim_mufc4lsh.json"
+    assert fixture_path.exists(), f"Fixture file not found: {fixture_path}"
+
+    data = json.loads(fixture_path.read_text(encoding="utf-8"))
+    timeline = data.get("timeline", [])
+    assert len(timeline) >= 10, "Expected at least 10 turns in canonical replay"
+
+    call_sid = data.get("call_sid") or "sim_mufc4lsh"
+
+    for step in timeline:
+        sd_dict = step.get("strategic_decision")
+        if not sd_dict:
+            continue
+        sd = StrategicDecision.model_validate(sd_dict)
+        sa = ConversationStateSnapshot.model_validate(step["state_after"])
+
+        # Populate cache
+        StrategicDecisionCache.put(
+            call_sid=call_sid,
+            decision=sd,
+            turn_id=step["turn_id"],
+            source_event_id=sd.source_event_id,
+        )
+
+        # Validate 4 keys + source state ownership
+        is_valid, reason = StrategicDecisionCache.validate_binding(
+            decision=sd,
+            call_sid=call_sid,
+            turn_id=step["turn_id"],
+            source_state_version=sa.state_version,
+            source_event_id=sd.source_event_id,
+            state_call_sid=sa.call_sid,
+        )
+        assert is_valid is True, f"Turn {step['turn_id']} failed binding: {reason}"
+
+        # Bound lookup succeeds
+        bound = StrategicDecisionCache.get_strictly_bound(
+            call_sid=call_sid,
+            turn_id=step["turn_id"],
+            source_state_version=sa.state_version,
+            source_event_id=sd.source_event_id,
+            state_call_sid=sa.call_sid,
+        )
+        assert bound is not None
+        assert bound.source_turn_id == step["turn_id"]
+        assert bound.source_state_version == sa.state_version

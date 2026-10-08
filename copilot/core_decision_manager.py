@@ -5,7 +5,7 @@ import re
 import uuid
 from typing import Any, Dict, List, Optional, Tuple
 
-from .conversation_state_models import ConversationStateSnapshot
+from .conversation_state_models import ConversationStateSnapshot, ObjectionLifecycleState
 from .core_intelligence_models import (
     StrategicAction,
     StrategicDecision,
@@ -66,14 +66,15 @@ class StrategicDecisionCache:
         turn_id: int,
         source_state_version: int,
         source_event_id: str,
-        state_call_sid: Optional[str] = None,
+        state_call_sid: str,
     ) -> Optional[StrategicDecision]:
-        """Validates all four keys together: call_sid + turn_id + source_state_version + source_event_id.
-        Rejects lookup if any key mismatches, is missing, or if state_call_sid belongs to another call (Point 1).
+        """Validates all four keys together: call_sid + turn_id + source_state_version + source_event_id,
+        and enforces mandatory state_call_sid source state ownership (Point 1).
+        Rejects lookup if any key mismatches, is missing, or if state_call_sid does not match call_sid.
         """
         if not call_sid or turn_id is None or source_state_version is None or not source_event_id:
             return None
-        if state_call_sid is not None and str(state_call_sid).strip() != str(call_sid).strip():
+        if not state_call_sid or str(state_call_sid).strip() != str(call_sid).strip():
             return None
 
         key = (str(call_sid), int(turn_id), int(source_state_version), str(source_event_id))
@@ -104,10 +105,10 @@ class StrategicDecisionCache:
         turn_id: int,
         source_state_version: int,
         source_event_id: str,
-        state_call_sid: Optional[str] = None,
+        state_call_sid: str,
     ) -> Tuple[bool, str]:
         """Validates that a decision strictly matches all 4 keys.
-        Fails if any key is missing or null on either side, or if source state belongs to another call (Point 1).
+        Fails if any key is missing or null on either side, or if state_call_sid does not match (Point 1).
         """
         if decision is None:
             return False, "decision is None"
@@ -119,21 +120,20 @@ class StrategicDecisionCache:
             return False, "Missing source_state_version for binding validation"
         if not source_event_id:
             return False, "Missing source_event_id for binding validation"
+        if not state_call_sid or not str(state_call_sid).strip():
+            return False, "Missing state_call_sid: source state ownership validation is mandatory (Point 1)"
+
+        state_call_str = str(state_call_sid).strip()
+        if state_call_str != str(call_sid):
+            return False, f"Cross-call source state ownership mismatch: source state belongs to '{state_call_str}', expected '{call_sid}'"
 
         actual_call = decision.call_sid or decision.call_id
         if not actual_call:
             return False, "Missing call_sid on StrategicDecision"
         if actual_call != str(call_sid):
             return False, f"call_sid mismatch between report and decision: expected '{call_sid}', got '{actual_call}'"
-
-        if state_call_sid is not None:
-            state_call_str = str(state_call_sid).strip()
-            if not state_call_str:
-                return False, "Missing call_sid on source state"
-            if state_call_str != str(call_sid):
-                return False, f"Cross-call source state ownership mismatch: source state belongs to '{state_call_str}', expected '{call_sid}'"
-            if state_call_str != actual_call:
-                return False, f"Cross-call source state ownership mismatch: source state belongs to '{state_call_str}', but decision belongs to '{actual_call}'"
+        if state_call_str != actual_call:
+            return False, f"Cross-call source state ownership mismatch: source state belongs to '{state_call_str}', but decision belongs to '{actual_call}'"
 
         actual_turn = decision.source_turn_id if decision.source_turn_id is not None else decision.utterance_turn_id
         if actual_turn is None:
@@ -163,19 +163,24 @@ class StrategicDecisionCache:
         source_state_version: int,
         turn_id: Optional[int] = None,
         source_event_id: Optional[str] = None,
+        state_call_sid: Optional[str] = None,
     ) -> Optional[StrategicDecision]:
         """Retrieves a cached decision. When turn_id and source_event_id are provided,
-        strictly validates all 4 keys together (call_sid, turn_id, source_state_version, source_event_id).
+        strictly validates all 4 keys together (call_sid, turn_id, source_state_version, source_event_id)
+        and verifies mandatory state_call_sid.
         """
         if not call_sid:
             raise ValueError("call_sid is required to query cached StrategicDecision.")
 
         if turn_id is not None and source_event_id is not None:
+            if not state_call_sid:
+                return None
             return cls.get_strictly_bound(
                 call_sid=call_sid,
                 turn_id=turn_id,
                 source_state_version=source_state_version,
                 source_event_id=source_event_id,
+                state_call_sid=state_call_sid,
             )
 
         if turn_id is not None:
@@ -247,6 +252,56 @@ class CoreDecisionManager:
         self.latest_evaluation_result: Optional[DecisionEvaluationResult] = None
         self.consecutive_carried_count: int = 0
 
+    def _is_carried_strategy_valid_for_snapshot(
+        self,
+        strategy: StrategicDecision,
+        snapshot: ConversationStateSnapshot,
+        context: Any,
+    ) -> Tuple[bool, Optional[str]]:
+        """Validates that a previously chosen strategy remains structurally valid
+        and compliant with the current state snapshot before carrying it forward (Point 1 / Client Audit).
+        If invalid, carry-forward is aborted and fresh evaluation is triggered.
+        """
+        gate = snapshot.conversion_gate
+        is_gate_open = bool(gate.is_open) if gate else False
+        is_conv_confirmed = (
+            bool(getattr(snapshot, "conversion_confirmed", False))
+            or (bool(gate.is_confirmed) if gate and hasattr(gate, "is_confirmed") else False)
+            or bool(snapshot.get_active_conversion_event() if hasattr(snapshot, "get_active_conversion_event") else False)
+        )
+
+        # 1. Closed Gate Constraint
+        if not is_gate_open:
+            if strategy.primary_action == StrategicAction.COMMITMENT_CLOSE:
+                return False, "Cannot carry forward COMMITMENT_CLOSE when meeting gate is closed"
+            if strategy.push_strength in ("direct_ask", "two_window_choice", "high", "aggressive", "firm"):
+                return False, f"Cannot carry forward close-style push '{strategy.push_strength}' when gate is closed"
+            if (strategy.push_strength == "confirm_and_protect" or strategy.strategic_posture == "protect") and not is_conv_confirmed:
+                return False, "Cannot carry forward confirm_and_protect when gate is closed without confirmed conversion"
+
+        # 2. Hard Boundary Constraint
+        if getattr(context, "hard_boundary_active", False) or getattr(snapshot, "hard_boundary_active", False):
+            if strategy.primary_action not in (StrategicAction.HOLD, StrategicAction.WAIT_SILENCE):
+                return False, "Cannot carry forward active strategy when hard boundary is active"
+
+        # 3. Active Objection Escalation Constraint
+        unresolved_objs = snapshot.get_unresolved_objections() if hasattr(snapshot, "get_unresolved_objections") else []
+        if unresolved_objs:
+            has_escalating = any(getattr(o, "lifecycle_state", "") == "escalating" for o in unresolved_objs)
+            if has_escalating and strategy.primary_action in (StrategicAction.COMMITMENT_CLOSE, StrategicAction.ACKNOWLEDGE):
+                return False, "Cannot carry forward strategy when objection is actively escalating"
+
+        # 4. Invariant Validator Check
+        try:
+            test_dec = strategy.model_copy(deep=True)
+            test_dec.meeting_gate_open = is_gate_open
+            test_dec.conversion_confirmed = is_conv_confirmed
+            test_dec.validate_action_gate_push_invariants()
+        except ValueError as err:
+            return False, f"Carried strategy violates core invariants: {err}"
+
+        return True, None
+
     def evaluate_state(
         self,
         snapshot: ConversationStateSnapshot,
@@ -263,11 +318,13 @@ class CoreDecisionManager:
 
         # Point 1 & Point 3: Process-level cache check validating all four keys
         if use_cache and snapshot.state_version is not None and effective_turn_id is not None and effective_event_id and not playbook and not calibration:
+            snap_call_sid = getattr(snapshot, "call_sid", None) or self.call_sid
             cached_decision = StrategicDecisionCache.get_strictly_bound(
                 call_sid=self.call_sid,
                 turn_id=int(effective_turn_id),
                 source_state_version=int(snapshot.state_version),
                 source_event_id=effective_event_id,
+                state_call_sid=snap_call_sid,
             )
             if cached_decision is not None:
                 context = self.engine._build_context(snapshot)
@@ -313,7 +370,17 @@ class CoreDecisionManager:
             and not playbook
             and not calibration
         ):
-            if prev_dec.primary_action not in (StrategicAction.WAIT_SILENCE, StrategicAction.HOLD) and "HARD_BOUNDARY_ACTIVE" not in prev_dec.reason_codes:
+            context = self.engine._build_context(snapshot)
+            is_carried_valid, invalid_reason = self._is_carried_strategy_valid_for_snapshot(
+                strategy=prev_dec,
+                snapshot=snapshot,
+                context=context,
+            )
+            if (
+                is_carried_valid
+                and prev_dec.primary_action not in (StrategicAction.WAIT_SILENCE, StrategicAction.HOLD)
+                and "HARD_BOUNDARY_ACTIVE" not in prev_dec.reason_codes
+            ):
                 self.consecutive_carried_count += 1
                 carried_dec = prev_dec.model_copy(deep=True)
                 carried_dec.decision_id = f"dec_{uuid.uuid4().hex[:10]}"
@@ -332,7 +399,13 @@ class CoreDecisionManager:
                     carried_dec.reason_codes.append("STRATEGY_CARRIED_FORWARD")
                 carried_dec.strategic_objective = f"Carried forward from Turn {carried_dec.carried_forward_from_turn_id}: {prev_dec.strategic_objective}"
 
-                context = self.engine._build_context(snapshot)
+                # Recompute carried confidence dynamically from CURRENT snapshot (Gap 3)
+                self.engine._finalize_decision_confidence(
+                    snapshot=snapshot,
+                    decision=carried_dec,
+                    context=context,
+                )
+
                 # Re-attach full trace from CURRENT snapshot and context to maintain snapshot consistency (Point 1)
                 self.engine._attach_full_trace(
                     decision=carried_dec,
@@ -387,31 +460,39 @@ class CoreDecisionManager:
             and final_decision.secondary_action == prev_dec.secondary_action
             and set(r for r in final_decision.reason_codes if r != "LOW_CONFIDENCE_ACTION_DOWNGRADE") == set(r for r in prev_dec.reason_codes if r not in ("STRATEGY_CARRIED_FORWARD", "LOW_CONFIDENCE_ACTION_DOWNGRADE"))
         ):
-            carried_dec = prev_dec.model_copy(deep=True)
-            carried_dec.decision_id = f"dec_{uuid.uuid4().hex[:10]}"
-            carried_dec.call_sid = self.call_sid
-            carried_dec.call_id = self.call_sid
-            carried_dec.source_turn_id = effective_turn_id
-            carried_dec.utterance_turn_id = effective_turn_id
-            carried_dec.metrics_source_turn_id = effective_turn_id
-            carried_dec.source_state_version = snapshot.state_version
-            carried_dec.source_event_id = effective_event_id
-            carried_dec.carried_forward_from_decision_id = prev_dec.carried_forward_from_decision_id or prev_dec.decision_id
-            carried_dec.carried_forward_from_turn_id = prev_dec.carried_forward_from_turn_id or prev_dec.source_turn_id
-            carried_dec.should_prompt = False  # Point 8: Rep already spoke; suppress prompt generation
-            if "STRATEGY_CARRIED_FORWARD" not in carried_dec.reason_codes:
-                carried_dec.reason_codes.append("STRATEGY_CARRIED_FORWARD")
-            carried_dec.strategic_objective = f"Continuation from Turn {carried_dec.carried_forward_from_turn_id}: {prev_dec.strategic_objective}"
-            # Re-attach full trace from current snapshot and context to maintain snapshot consistency (Point 1)
-            self.engine._attach_full_trace(
-                decision=carried_dec,
-                context=eval_result.context,
+            is_carried_valid, invalid_reason = self._is_carried_strategy_valid_for_snapshot(
+                strategy=prev_dec,
                 snapshot=snapshot,
-                turn_speaker=turn_speaker,
-                turn_text=turn_text,
-                turn_id=effective_turn_id,
+                context=eval_result.context,
             )
-            final_decision = carried_dec
+            if is_carried_valid:
+                carried_dec = prev_dec.model_copy(deep=True)
+                carried_dec.decision_id = f"dec_{uuid.uuid4().hex[:10]}"
+                carried_dec.call_sid = self.call_sid
+                carried_dec.call_id = self.call_sid
+                carried_dec.source_turn_id = effective_turn_id
+                carried_dec.utterance_turn_id = effective_turn_id
+                carried_dec.metrics_source_turn_id = effective_turn_id
+                carried_dec.source_state_version = snapshot.state_version
+                carried_dec.source_event_id = effective_event_id
+                carried_dec.carried_forward_from_decision_id = prev_dec.carried_forward_from_decision_id or prev_dec.decision_id
+                carried_dec.carried_forward_from_turn_id = prev_dec.carried_forward_from_turn_id or prev_dec.source_turn_id
+                carried_dec.should_prompt = False  # Point 8: Rep already spoke; suppress prompt generation
+                if "STRATEGY_CARRIED_FORWARD" not in carried_dec.reason_codes:
+                    carried_dec.reason_codes.append("STRATEGY_CARRIED_FORWARD")
+                carried_dec.strategic_objective = f"Continuation from Turn {carried_dec.carried_forward_from_turn_id}: {prev_dec.strategic_objective}"
+                # Recomputed confidence from current snapshot (Gap 3)
+                carried_dec.confidence = final_decision.confidence
+                # Re-attach full trace from current snapshot and context to maintain snapshot consistency (Point 1)
+                self.engine._attach_full_trace(
+                    decision=carried_dec,
+                    context=eval_result.context,
+                    snapshot=snapshot,
+                    turn_speaker=turn_speaker,
+                    turn_text=turn_text,
+                    turn_id=effective_turn_id,
+                )
+                final_decision = carried_dec
 
         # Prompt dispatch happens only on prospect utterances (Point 8 invariant)
         # Suppress prompts on all rep turns whether continuation or fresh evaluation
@@ -464,21 +545,24 @@ class CoreDecisionManager:
         turn_id: int,
         source_state_version: int,
         source_event_id: str,
-        state_call_sid: Optional[str] = None,
+        state_call_sid: str,
     ) -> Optional[StrategicDecision]:
         """Retrieves and validates a decision matching all four keys together:
-        call_sid + turn_id + source_state_version + source_event_id (Point 1).
+        call_sid + turn_id + source_state_version + source_event_id,
+        with mandatory state_call_sid source state ownership verification (Point 1).
         """
-        if str(call_sid) != self.call_sid:
+        if not state_call_sid or not str(state_call_sid).strip():
             return None
-        if state_call_sid is not None and str(state_call_sid).strip() != self.call_sid:
+        if str(state_call_sid).strip() != self.call_sid:
+            return None
+        if str(call_sid).strip() != self.call_sid:
             return None
         return StrategicDecisionCache.get_strictly_bound(
             call_sid=str(call_sid),
             turn_id=int(turn_id),
             source_state_version=int(source_state_version),
             source_event_id=str(source_event_id),
-            state_call_sid=state_call_sid,
+            state_call_sid=str(state_call_sid),
         )
 
 
