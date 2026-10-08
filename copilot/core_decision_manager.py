@@ -284,12 +284,19 @@ class CoreDecisionManager:
             if strategy.primary_action not in (StrategicAction.HOLD, StrategicAction.WAIT_SILENCE):
                 return False, "Cannot carry forward active strategy when hard boundary is active"
 
-        # 3. Active Objection Escalation Constraint
+        # 3. Active Objection Escalation & Recurring Constraint (Client Item 3)
         unresolved_objs = snapshot.get_unresolved_objections() if hasattr(snapshot, "get_unresolved_objections") else []
         if unresolved_objs:
             has_escalating = any(getattr(o, "lifecycle_state", "") == "escalating" for o in unresolved_objs)
+            has_recurring = any(getattr(o, "recurrence_count", 0) > 1 for o in unresolved_objs)
             if has_escalating and strategy.primary_action in (StrategicAction.COMMITMENT_CLOSE, StrategicAction.ACKNOWLEDGE):
                 return False, "Cannot carry forward strategy when objection is actively escalating"
+            if has_recurring and (
+                strategy.primary_action == StrategicAction.COMMITMENT_CLOSE
+                or strategy.push_strength == "confirm_and_protect"
+                or (strategy.strategic_posture == "protect" and "CONVERSION_CONFIRMED" in strategy.reason_codes)
+            ):
+                return False, "Cannot carry forward confirmation or close strategy while active objection is recurring (Client Item 3)"
 
         # 4. Invariant Validator Check
         try:
@@ -318,14 +325,18 @@ class CoreDecisionManager:
 
         # Point 1 & Point 3: Process-level cache check validating all four keys
         if use_cache and snapshot.state_version is not None and effective_turn_id is not None and effective_event_id and not playbook and not calibration:
-            snap_call_sid = getattr(snapshot, "call_sid", None) or self.call_sid
-            cached_decision = StrategicDecisionCache.get_strictly_bound(
-                call_sid=self.call_sid,
-                turn_id=int(effective_turn_id),
-                source_state_version=int(snapshot.state_version),
-                source_event_id=effective_event_id,
-                state_call_sid=snap_call_sid,
-            )
+            snap_call_sid = (getattr(snapshot, "call_sid", None) or "").strip()
+            # If snapshot has no valid call_sid, refuse cache lookup (fail-closed, never fail-open)
+            if not snap_call_sid:
+                cached_decision = None
+            else:
+                cached_decision = StrategicDecisionCache.get_strictly_bound(
+                    call_sid=self.call_sid,
+                    turn_id=int(effective_turn_id),
+                    source_state_version=int(snapshot.state_version),
+                    source_event_id=effective_event_id,
+                    state_call_sid=snap_call_sid,
+                )
             if cached_decision is not None:
                 context = self.engine._build_context(snapshot)
                 eval_result = DecisionEvaluationResult(
@@ -481,8 +492,9 @@ class CoreDecisionManager:
                 if "STRATEGY_CARRIED_FORWARD" not in carried_dec.reason_codes:
                     carried_dec.reason_codes.append("STRATEGY_CARRIED_FORWARD")
                 carried_dec.strategic_objective = f"Continuation from Turn {carried_dec.carried_forward_from_turn_id}: {prev_dec.strategic_objective}"
-                # Recomputed confidence from current snapshot (Gap 3)
+                # Recomputed confidence and breakdown from current snapshot (Gap 3)
                 carried_dec.confidence = final_decision.confidence
+                carried_dec.confidence_breakdown = dict(final_decision.confidence_breakdown) if final_decision.confidence_breakdown else {}
                 # Re-attach full trace from current snapshot and context to maintain snapshot consistency (Point 1)
                 self.engine._attach_full_trace(
                     decision=carried_dec,

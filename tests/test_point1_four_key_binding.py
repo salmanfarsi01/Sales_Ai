@@ -11,6 +11,7 @@ from copilot.conversation_state_models import (
     DecisionStructure,
     MeetingConversionGate,
     ReadinessBreakdown,
+    ObjectionRecord,
 )
 from copilot.core_intelligence_models import (
     StrategicDecision,
@@ -359,17 +360,24 @@ const resVersionMismatch = validateDecisionBinding(staleDecision, step, matching
 function renderCard(bindingCheck, step, sAfter, sd) {{
     const hasValidDecision = bindingCheck.valid;
     if (!hasValidDecision) {{
-        return `<div class="card-unit warning">No valid Strategic Decision bound for this turn (Turn ${{step.turn_id}}, V${{sAfter.state_version || 0}}). Binding rejected: ${{bindingCheck.reason || ''}}</div>`;
+        return `<div class="card-unit warning">No valid Strategic Decision bound for this turn (Turn ${{step.turn_id}}, V${{sAfter ? (sAfter.state_version || 0) : 0}}). Binding rejected: ${{bindingCheck.reason || ''}}</div>`;
     }}
     return `<div class="card-unit success">Bound successfully</div>`;
 }}
 const uiCardHtml = renderCard(resCross, step, foreignState, decision);
 
+// Case 5: Missing or undefined source state (sa is null or sa.call_sid undefined)
+const resMissingState = validateDecisionBinding(decision, step, null, reportCallSid);
+const undefinedCallSidState = {{ state_version: 10 }};
+const resUndefinedCallSid = validateDecisionBinding(decision, step, undefinedCallSidState, reportCallSid);
+
 console.log(JSON.stringify({{
     cross: resCross,
     valid: resValid,
     versionMismatch: resVersionMismatch,
-    uiCard: uiCardHtml
+    uiCard: uiCardHtml,
+    missingState: resMissingState,
+    undefinedCallSid: resUndefinedCallSid
 }}));
 """
 
@@ -398,6 +406,12 @@ console.log(JSON.stringify({{
     # 4. Version mismatch must be rejected
     assert out["versionMismatch"]["valid"] is False
     assert "source_state_version mismatch" in out["versionMismatch"]["reason"]
+
+    # 5. Missing source state or undefined call_sid must be rejected (Case 5)
+    assert out["missingState"]["valid"] is False
+    assert "Missing call_sid on source state" in out["missingState"]["reason"]
+    assert out["undefinedCallSid"]["valid"] is False
+    assert "Missing call_sid on source state" in out["undefinedCallSid"]["reason"]
 
 
 def test_point1_end_to_end_replay_four_key_bound_on_all_steps():
@@ -831,54 +845,165 @@ def test_point1_live_state_mutation_does_not_affect_frozen_decision():
     assert cached_dec.source_state_version == 3
 
 
-def test_point1_second_fixture_canonical_replay():
-    """Smaller items: Second fixture verification.
-    Run the same 4-key binding and snapshot consistency checks on a second benchmark fixture
-    (conversation_state_sim_mufc4lsh.json).
+def test_point1_snapshot_missing_call_sid_fails_closed_in_cache_check():
+    """Smaller items: Fail-closed verification when snapshot has no call_sid.
+    Asserts that a snapshot with missing or None call_sid strictly refuses cache lookup
+    and NEVER falls back to self.call_sid to create a false cache hit.
     """
-    fixture_path = Path(__file__).resolve().parent.parent / "reports" / "synthetic" / "conversation_state_sim_mufc4lsh.json"
-    assert fixture_path.exists(), f"Fixture file not found: {fixture_path}"
+    call_sid = "sim_test_missing_snap_call_sid"
+    cdm = CoreDecisionManager(call_sid=call_sid)
 
-    data = json.loads(fixture_path.read_text(encoding="utf-8"))
-    timeline = data.get("timeline", [])
-    assert len(timeline) >= 10, "Expected at least 10 turns in canonical replay"
+    # 1. Direct cache check with empty state_call_sid returns None
+    assert StrategicDecisionCache.get_strictly_bound(
+        call_sid=call_sid,
+        turn_id=1,
+        source_state_version=1,
+        source_event_id="ev_turn_1_v1",
+        state_call_sid="",
+    ) is None
 
-    call_sid = data.get("call_sid") or "sim_mufc4lsh"
+    # 2. Populate cache with a valid decision for turn 1
+    valid_dec = StrategicDecision(
+        call_id=call_sid,
+        call_sid=call_sid,
+        source_state_version=1,
+        source_turn_id=1,
+        source_event_id="ev_turn_1_v1",
+        strategic_objective="Inquire regarding move timeline",
+        primary_action=StrategicAction.QUESTION,
+        confidence=0.8,
+    )
+    StrategicDecisionCache.put(call_sid=call_sid, decision=valid_dec, turn_id=1, source_event_id="ev_turn_1_v1")
 
-    for step in timeline:
-        sd_dict = step.get("strategic_decision")
-        if not sd_dict:
+    # 3. Snapshot with call_sid = "" must NOT fall back to self.call_sid
+    snap_no_sid = ConversationStateSnapshot(
+        state_id="state_no_call_sid",
+        call_sid="",
+        state_version=1,
+        last_updated_turn_id=1,
+        conversation_stage="discovery",
+    )
+    # Cache lookup should not return valid_dec because snap_call_sid is empty
+    eval_res = cdm.evaluate_state(
+        snapshot=snap_no_sid,
+        turn_speaker="client",
+        turn_text="hello",
+        turn_id=1,
+        use_cache=True,
+    )
+    # The result decision is freshly evaluated and NOT the cached decision instance
+    assert eval_res.decision.decision_id != valid_dec.decision_id
+
+
+def test_point1_carried_strategy_rejected_when_active_objection_recurs():
+    """Smaller items & Client Item 3:
+    When an objection is active and recurring (e.g. commission fee raised repeatedly at Turns 6 and 7),
+    carrying forward a confirmed conversion or protect strategy is strictly INVALID.
+    It must abort carry-forward so the objection is addressed directly.
+    """
+    call_sid = "sim_test_recurring_obj_rejection"
+    cdm = CoreDecisionManager(call_sid=call_sid)
+
+    # Previous decision was a confirmed conversion strategy
+    prev_dec = StrategicDecision(
+        call_id=call_sid,
+        call_sid=call_sid,
+        source_state_version=8,
+        source_turn_id=3,
+        source_event_id="ev_turn_3_v8",
+        strategic_objective="Protect confirmed commitment",
+        primary_action=StrategicAction.ACKNOWLEDGE,
+        strategic_posture="protect",
+        push_strength="none",
+        reason_codes=["CONVERSION_CONFIRMED", "CONFIRM_AND_PROTECT_ACTIVE"],
+        confidence=0.90,
+        meeting_gate_open=True,
+        conversion_confirmed=True,
+    )
+    cdm.latest_decision = prev_dec
+
+    # Current snapshot with recurring fee objection (recurrence_count = 2)
+    recurring_obj = ObjectionRecord(
+        objection_id="obj_fee_rec",
+        canonical_category="commission_fee",
+        initial_statement="Your commission is too expensive",
+        latest_statement="But honestly the commission still bothers me",
+        first_turn_id=3,
+        last_updated_turn_id=6,
+        recurrence_count=2,
+        lifecycle_state="active",
+        confidence=0.85,
+    )
+    snap = ConversationStateSnapshot(
+        state_id="state_rec_obj",
+        call_sid=call_sid,
+        state_version=14,
+        last_updated_turn_id=6,
+        conversation_stage="commitment_confirmed",
+        conversion_gate=MeetingConversionGate(
+            is_open=True,
+            status="open",
+            conversion_target="appointment",
+            conditions=[],
+        ),
+        objections=[recurring_obj],
+        conversion_confirmed=True,
+    )
+
+    context = cdm.engine._build_context(snap)
+    is_valid, reason = cdm._is_carried_strategy_valid_for_snapshot(prev_dec, snap, context)
+    assert is_valid is False
+    assert "Cannot carry forward confirmation or close strategy while active objection is recurring" in reason
+
+
+@pytest.mark.parametrize("run_semantic", [False, True])
+def test_point1_second_fixture_canonical_live_replay(run_semantic: bool):
+    """Smaller items: Second fixture live replay verification.
+    Replays the canonical 18-turn script LIVE with both semantic layer OFF and ON.
+    Proves that every single step passes strict 4-key binding, source state ownership,
+    and bound cache retrieval.
+    """
+    script_path = Path(__file__).resolve().parent.parent / "data" / "script_canonical.json"
+    assert script_path.exists(), f"Canonical script file not found: {script_path}"
+    raw_turns = json.loads(script_path.read_text(encoding="utf-8"))
+
+    call_sid = f"sim_canonical_live_sem_{run_semantic}"
+    engine = ConversationReplayEngine()
+    rep = engine.replay_dialogue_turns(
+        call_sid=call_sid,
+        raw_turns=raw_turns,
+        save_report=False,
+        run_semantic_analysis=run_semantic,
+    )
+
+    assert len(rep.timeline) >= 10, "Expected at least 10 turns in canonical replay"
+
+    for step in rep.timeline:
+        sd = step.strategic_decision
+        if not sd:
             continue
-        sd = StrategicDecision.model_validate(sd_dict)
-        sa = ConversationStateSnapshot.model_validate(step["state_after"])
-
-        # Populate cache
-        StrategicDecisionCache.put(
-            call_sid=call_sid,
-            decision=sd,
-            turn_id=step["turn_id"],
-            source_event_id=sd.source_event_id,
-        )
+        sa = step.state_after
 
         # Validate 4 keys + source state ownership
         is_valid, reason = StrategicDecisionCache.validate_binding(
             decision=sd,
             call_sid=call_sid,
-            turn_id=step["turn_id"],
+            turn_id=step.turn_id,
             source_state_version=sa.state_version,
             source_event_id=sd.source_event_id,
             state_call_sid=sa.call_sid,
         )
-        assert is_valid is True, f"Turn {step['turn_id']} failed binding: {reason}"
+        assert is_valid is True, f"Turn {step.turn_id} failed binding: {reason}"
 
         # Bound lookup succeeds
         bound = StrategicDecisionCache.get_strictly_bound(
             call_sid=call_sid,
-            turn_id=step["turn_id"],
+            turn_id=step.turn_id,
             source_state_version=sa.state_version,
             source_event_id=sd.source_event_id,
             state_call_sid=sa.call_sid,
         )
         assert bound is not None
-        assert bound.source_turn_id == step["turn_id"]
+        assert bound.source_turn_id == step.turn_id
         assert bound.source_state_version == sa.state_version
+
