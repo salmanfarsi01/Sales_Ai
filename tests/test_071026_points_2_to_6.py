@@ -66,8 +66,9 @@ def test_point2_non_material_turn_carry_forward_and_prompt_suppression(sim_muy04
     assert m5.is_material is False, "Turn 5 ('That helps a little.') must be classified as non-material"
     assert len(m5.affected_targets) == 0
 
-    # 2. Strategy selection: HOLD, protect posture, no push
-    assert d5.primary_action == StrategicAction.HOLD
+    # 2. Strategy selection: preserve underlying active strategy (ACKNOWLEDGE), display HOLD, protect posture, no push
+    assert d5.primary_action == StrategicAction.ACKNOWLEDGE, "Active strategy from Turn 3 must be preserved"
+    assert d5.display_action == "HOLD", "HOLD must be shown as presentation displayed state"
     assert d5.strategic_posture == "protect"
     assert str(d5.push_strength) == "none"
 
@@ -163,7 +164,7 @@ def test_point4_appointment_identity_preserved_across_turns(sim_muy04bh0_replay_
     ce3 = step3.state_after.conversion_event
     assert ce3 is not None
     assert ce3.status == ConversionEventStatus.CONFIRMED
-    assert ce3.start_at == "Thursday At 4"
+    assert ce3.start_at == "Thursday at 4"
     event_id = ce3.event_id
 
     # Turn 4: appointment does NOT disappear
@@ -188,7 +189,7 @@ def test_point4_appointment_identity_preserved_across_turns(sim_muy04bh0_replay_
     ce8 = step8.state_after.conversion_event
     assert ce8 is not None
     assert ce8.event_id == event_id, "Turn 8 must update existing appointment without recreating"
-    assert ce8.start_at == "Thursday At 4 Pm"
+    assert ce8.start_at == "Thursday at 4 pm"
     assert ce8.reversal_reason is None, "AM/PM clarification must not set reversal_reason='rescheduled'"
 
     # Only 1 unique event exists across the call
@@ -328,3 +329,131 @@ def test_prior_sole_decision_maker_cannot_override_later_spouse_involvement():
     s2 = manager.process_turn_bundle(b2)
     assert s2.decision_structure.co_decision_required is True, "Later spouse requirement must override earlier sole decision maker statement"
     assert s2.decision_structure.decision_maker_present is False, "Spouse is absent so decision maker is not fully present"
+
+
+# =============================================================================
+# Additional Review Verification Tests
+# =============================================================================
+
+def test_point3_filler_whitelist_negative_cases_and_partial_acceptance_tracking(sim_muy04bh0_replay_data):
+    """Point 3: Reject mixed/continuation sentences from filler whitelist,
+    and verify Turn 5 records partial acceptance on the Turn 4 reframe strategy.
+    """
+    from copilot.conversation_materiality import is_positive_filler
+
+    # Negative tests: Mixed/compound sentences MUST NOT be treated as filler
+    assert is_positive_filler("That makes sense, but we're still worried") is False
+    assert is_positive_filler("I see, however what about the fee?") is False
+    assert is_positive_filler("Fair enough, although that is expensive") is False
+    assert is_positive_filler("Okay, that makes sense, I guess timing isn't the biggest issue") is False
+    assert is_positive_filler("That helps, but the price is too high") is False
+
+    # Positive tests: Whole-utterance standalone filler
+    assert is_positive_filler("That helps a little") is True
+    assert is_positive_filler("makes sense") is True
+    assert is_positive_filler("fair enough") is True
+    assert is_positive_filler("i see") is True
+
+    # Objection strategy outcome tracking: Turn 5 must record partial acceptance
+    step5 = [s for s in sim_muy04bh0_replay_data.timeline if s.turn_id == 5][0]
+    fee_objs = [o for o in step5.state_after.objections if "fee" in o.canonical_category.lower()]
+    assert len(fee_objs) > 0
+    fee_obj = fee_objs[0]
+    assert len(fee_obj.strategy_outcomes) >= 1
+    latest_outcome = fee_obj.strategy_outcomes[-1]
+    assert latest_outcome.strategy_tag == "hyperlocal_marketing_differentiation"
+    assert latest_outcome.effectiveness == "partial"
+    assert latest_outcome.prospect_response_turn_id == 5
+
+
+def test_point4_reschedule_vs_ampm_clarification_edge_cases():
+    """Point 4 details: Only missing meridiem counts as AM/PM clarification.
+    Day changes and AM vs PM flips must be treated as reschedules.
+    """
+    # Meridiems flip: 4 pm to 4 am is a reschedule (False)
+    assert is_ampm_clarification("4 pm", "4 am") is False
+    assert is_ampm_clarification("10 am", "10 pm") is False
+
+    # Day changes: Thursday at 4 to Friday at 4 pm is a reschedule (False)
+    assert is_ampm_clarification("Thursday at 4", "Friday at 4 pm") is False
+    assert is_ampm_clarification("Monday 2", "Tuesday 2 pm") is False
+
+    # Missing meridiem provided: clarification (True)
+    assert is_ampm_clarification("Thursday at 4", "Thursday at 4 pm") is True
+    assert is_ampm_clarification("Friday 10", "Friday 10 am") is True
+
+
+def test_point4_explicit_retraction_cancels_confirmed_appointment():
+    """Point 4 details: Explicit retraction ('actually, can't do Thursday')
+    must cancel the confirmed appointment and update event status to CANCELLED.
+    """
+    from copilot.conversation_state_contract import (
+        extract_behavioral_bundle,
+        DownstreamInferenceState,
+        SemanticFeatureSnapshot,
+        DimensionScore,
+        EmotionState,
+    )
+
+    manager = ConversationStateManager(call_sid="sim_retraction_test")
+
+    def make_bundle(turn_id, speaker, text, agreement=0.7):
+        inf = DownstreamInferenceState(
+            call_sid="sim_retraction_test",
+            timestamp_ms=turn_id * 1000,
+            trust=DimensionScore(score=0.6, confidence=0.8, primary_horizon="last_20_30s"),
+            emotion=EmotionState(expressed_valence=0.0, tension_level=0.1, confidence=0.7),
+            pacing=DimensionScore(score=0.6, confidence=0.8, primary_horizon="current_utterance"),
+            momentum=DimensionScore(score=0.7, confidence=0.8, primary_horizon="last_60_90s"),
+            readiness=DimensionScore(score=0.7, confidence=0.8, primary_horizon="last_60_90s"),
+            engagement=DimensionScore(score=0.7, confidence=0.8, primary_horizon="last_20_30s"),
+            overall_confidence=0.80,
+        )
+        sem = SemanticFeatureSnapshot(
+            utterance_id=f"utt_{turn_id}",
+            call_sid="sim_retraction_test",
+            speaker_id=speaker,
+            agreement_score=agreement,
+        )
+        return extract_behavioral_bundle(turn_id=turn_id, speaker_id=speaker, utterance_text=text, inference_state=inf, semantic_snapshot=sem)
+
+    # Turn 1: Confirm meeting
+    b1 = make_bundle(1, "client", "I can meet Thursday at 4 to see the numbers.")
+    s1 = manager.process_turn_bundle(b1)
+    assert s1.conversion_event is not None
+    assert s1.conversion_event.status == ConversionEventStatus.CONFIRMED
+
+    # Turn 2: Retract meeting
+    b2 = make_bundle(2, "client", "Actually, can't do Thursday after all.", agreement=0.1)
+    s2 = manager.process_turn_bundle(b2)
+    assert s2.conversion_event is not None
+    assert s2.conversion_event.status == ConversionEventStatus.CANCELLED
+    assert s2.conversion_event.reversal_reason is not None
+
+
+def test_point6_older_stored_state_compatibility_and_zero_default_call():
+    """Point 6 details: Loading an older stored state without a pressure field
+    must cleanly deserialize and derive pressure/posture, and the codebase has
+    zero operational uses of default_call singleton fallback.
+    """
+    # 1. Backward compatibility: older PushStrengthRecommendation without pressure field
+    old_data = {
+        "state": "resolve_then_ask",
+        "rationale": "High readiness but persistent fee question.",
+        "recommended_action": "Address fee then ask for appointment",
+        "confidence": 0.85,
+    }
+    rec = PushStrengthRecommendation(**old_data)
+    assert rec.pressure == "moderate"
+    assert rec.strategic_posture == "advance"
+    assert rec.legacy_strategy_alias == "resolve_then_ask"
+
+    # 2. Check default_call fallback: zero operational uses across copilot codebase
+    copilot_dir = Path(__file__).resolve().parent.parent / "copilot"
+    found_uses = []
+    for py_file in copilot_dir.glob("*.py"):
+        text = py_file.read_text(encoding="utf-8")
+        if "default_call" in text:
+            found_uses.append(py_file.name)
+    assert len(found_uses) == 0, f"Found unexpected default_call in: {found_uses}"
+

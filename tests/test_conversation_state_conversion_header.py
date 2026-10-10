@@ -55,7 +55,7 @@ def test_turn_18_header_shows_appointment_confirmed_not_ready_to_close():
     assert pres["deal_milestone_status"] == "appointment_confirmed"
 
     # 2. Header label must show concrete appointment time
-    assert pres["milestone_label"] == "APPOINTMENT CONFIRMED — Thursday At 3"
+    assert pres["milestone_label"] in ("APPOINTMENT CONFIRMED — Thursday at 3", "APPOINTMENT CONFIRMED — Thursday At 3")
     assert "Ready to Close" not in pres["milestone_label"]
 
     # 3. Open concerns dossier must capture the partially resolved financial hesitation

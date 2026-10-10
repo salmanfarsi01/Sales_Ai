@@ -730,9 +730,9 @@ class PitchProXCoreIntelligenceEngine:
         if recurrence >= 3 or (has_failed_reframe and recurrence >= 2 and any(w in (turn_text or "").lower() for w in ("still", "don't get", "dont get"))):
             # Turn 7 style: persistent resistance after explanation
             primary_action = StrategicAction.VALIDATE
-            secondary_action = StrategicAction.DE_RISK
+            secondary_action = StrategicAction.REASSURE
             secondary_reason = "Reaffirm zero obligation for confirmed meeting while validating persistent concern."
-            objective = f"Protect confirmed appointment while validating persistent {category} concern and removing decision pressure."
+            objective = f"Protect confirmed appointment while validating persistent {category} concern and reaffirming zero obligation."
             reason_codes = [
                 "CONVERSION_CONFIRMED",
                 "CONFIRM_AND_PROTECT_ACTIVE",

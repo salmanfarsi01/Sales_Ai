@@ -203,13 +203,21 @@ class ConversationReplayEngine:
 
         final_state = manager.current_state.model_copy(deep=True)
 
+        # Single Source of Truth: summary's push pressure and posture derive from the decision (Point 6)
+        final_dec = timeline[-1].strategic_decision if timeline else None
+        pressure_val = str(final_dec.push_strength) if final_dec else (final_state.push_strength.pressure if final_state.push_strength else "none")
+        posture_val = final_dec.strategic_posture if final_dec else (final_state.push_strength.strategic_posture if final_state.push_strength else "protect")
+        legacy_alias = final_state.push_strength.strategy if final_state.push_strength else "confirm_and_protect"
+
         # Build conversion summary
         conv_summary = {
             "gate_is_open": final_state.conversion_gate.is_open if final_state.conversion_gate else False,
             "gate_status": final_state.conversion_gate.status if final_state.conversion_gate else "closed",
-            "push_strength": final_state.push_strength.pressure if final_state.push_strength else "none",
-            "strategic_posture": final_state.push_strength.strategic_posture if final_state.push_strength else "protect",
-            "closing_strategy": final_state.push_strength.strategy if final_state.push_strength else "confirm_and_protect",
+            "push_strength": pressure_val,
+            "pressure": pressure_val,
+            "strategic_posture": posture_val,
+            "legacy_strategy_alias": legacy_alias,
+            "closing_strategy": legacy_alias,
             "push_strength_state": final_state.push_strength.state if final_state.push_strength else "confirm_and_protect",
             "recommended_action": final_state.push_strength.recommended_action if final_state.push_strength else "",
             "failed_conditions": final_state.conversion_gate.failed_conditions if final_state.conversion_gate else [],

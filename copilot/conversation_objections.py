@@ -836,7 +836,14 @@ class ObjectionLifecycleEngine:
                 self.pending_reframe_objection_id == target_obj.objection_id
                 and (
                     bundle.agreement_score >= 0.40
-                    or any(w in bundle.utterance_text.lower() for w in ["really helpful", "that's helpful", "tell me more", "how does the", "makes sense"])
+                    or any(
+                        w in bundle.utterance_text.lower()
+                        for w in [
+                            "really helpful", "that's helpful", "tell me more", "how does the",
+                            "makes sense", "that helps", "that helps a little", "that helps a bit",
+                            "helps a little", "helps a bit"
+                        ]
+                    )
                 )
                 and bundle.boundary_score < 0.20
             )

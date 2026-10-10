@@ -23,6 +23,7 @@ from copilot.conversation_replay import ConversationReplayEngine
 from copilot.conversation_state_models import (
     ConversationStage,
     ContactPreference,
+    ConversionEventStatus,
 )
 from copilot.core_intelligence_models import StrategicAction
 from copilot.conversation_state_manager import ConversationStateManager
@@ -634,20 +635,14 @@ SCRIPTS_FOR_INVARIANT = {
         "script_h_mismatched",
         "script_b1_first_call",
         "script_b2_returning",
-        pytest.param(
-            "sim_muy04bh0_fee_complaint",
-            marks=pytest.mark.xfail(
-                strict=True,
-                reason="Known violation on sim_muy04bh0 turn 4, resolved by item 4",
-            ),
-        ),
+        "sim_muy04bh0_fee_complaint",
     ],
 )
 @pytest.mark.parametrize("run_semantic", [False, True])
 def test_gate_closed_no_commitment_close_or_confirm_protect_invariant(script_name, run_semantic):
-    """Proves that across all real script JSON files (Canonical, D filler, H mismatched, B1 first call, B2 returning)
+    """Proves that across all real script JSON files (Canonical, D filler, H mismatched, B1 first call, B2 returning, sim_muy04bh0 fee complaint)
     in either mode (semantic False or True), no turn ever selects commitment_close, high/direct push,
-    or confirm_and_protect while the meeting gate is closed.
+    or confirm_and_protect while the meeting gate is closed without an existing confirmed conversion event (Point 4).
     """
     dialogue = SCRIPTS_FOR_INVARIANT[script_name]
     engine = ConversationReplayEngine()
@@ -671,9 +666,14 @@ def test_gate_closed_no_commitment_close_or_confirm_protect_invariant(script_nam
             assert str(dec.push_strength) not in ("direct_ask", "two_window_choice", "high"), (
                 f"[{script_name}] Turn {tid} (semantic={run_semantic}) violated invariant: Gate is closed, but push is {dec.push_strength}!"
             )
-            assert "CONFIRM_AND_PROTECT_ACTIVE" not in dec.reason_codes, (
-                f"[{script_name}] Turn {tid} (semantic={run_semantic}) violated invariant: Gate is closed, but CONFIRM_AND_PROTECT is active!"
+            is_confirmed = bool(
+                step.state_after.conversion_event
+                and getattr(step.state_after.conversion_event, "status", None) in ("confirmed", ConversionEventStatus.CONFIRMED)
             )
+            if not is_confirmed:
+                assert "CONFIRM_AND_PROTECT_ACTIVE" not in dec.reason_codes, (
+                    f"[{script_name}] Turn {tid} (semantic={run_semantic}) violated invariant: Gate is closed without confirmed event, but CONFIRM_AND_PROTECT is active!"
+                )
 
 
 # =============================================================================

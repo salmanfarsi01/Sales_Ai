@@ -332,7 +332,7 @@ def test_reschedule_supersession_links_prior_confirmed_event():
     s2 = manager.process_turn_bundle(t2)
     ev_thur = s2.conversion_event
     assert ev_thur.status == ConversionEventStatus.CONFIRMED
-    assert "Thursday At 4" in ev_thur.start_at
+    assert "thursday at 4" in ev_thur.start_at.lower()
 
     # Turn 3: Reschedule to Friday at 2
     t3 = _create_turn_bundle(
@@ -346,7 +346,7 @@ def test_reschedule_supersession_links_prior_confirmed_event():
 
     assert ev_fri is not None
     assert ev_fri.status == ConversionEventStatus.CONFIRMED
-    assert "Friday At 2" in ev_fri.start_at
+    assert "friday at 2" in ev_fri.start_at.lower()
     assert ev_fri.supersedes_event_id == ev_thur.event_id
     assert ev_fri.reversal_reason == "rescheduled"
 
@@ -402,7 +402,7 @@ def test_truth_supersession_detector_event_and_meeting_fact_relation_classificat
     dec_upd = detector.evaluate_event_supersession("Can we do Friday at 2:00 PM instead?", event_thur)
     assert dec_upd.has_supersession is True
     assert dec_upd.relation == "UPDATES"
-    assert "Friday At 2:00 Pm" in dec_upd.new_truth_value
+    assert "friday at 2:00 pm" in dec_upd.new_truth_value.lower()
 
     # 3. Evaluate event supersession (UNCHANGED / Adversarial Negation)
     dec_neg = detector.evaluate_event_supersession("I do not want to cancel, we are still good for Thursday.", event_thur)
@@ -445,7 +445,7 @@ def test_fact_supersession_is_automatic_deterministic_cascade_from_event_status(
     # Active fact must show Thursday at 4
     active_facts = [f for f in s2.facts if f.fact_key == "confirmed_meeting_time" and f.status == "active"]
     assert len(active_facts) == 1
-    assert "Thursday At 4" in active_facts[0].fact_value
+    assert "thursday at 4" in active_facts[0].fact_value.lower()
 
     # Turn 3: Cancellation via explicit reversal alongside compliance boundary
     t3 = _create_turn_bundle(
@@ -468,7 +468,7 @@ def test_fact_supersession_is_automatic_deterministic_cascade_from_event_status(
     # Prior fact is preserved in superseded status with forward pointer
     superseded_facts = [f for f in s3.facts if f.fact_key == "confirmed_meeting_time" and f.status == "superseded"]
     assert len(superseded_facts) == 1
-    assert "Thursday At 4" in superseded_facts[0].fact_value
+    assert "thursday at 4" in superseded_facts[0].fact_value.lower()
     assert superseded_facts[0].superseded_by_fact_id == active_facts_post[0].fact_id
 
 
@@ -621,5 +621,5 @@ def test_generalized_hedged_language_patterns():
     s_firm = manager.process_turn_bundle(t_firm)
     assert s_firm.conversion_gate.explicit_commitment_detected is True
     assert s_firm.conversion_event.status == ConversionEventStatus.CONFIRMED
-    assert "Friday At 2" in s_firm.conversion_event.start_at
+    assert "friday at 2" in s_firm.conversion_event.start_at.lower()
 

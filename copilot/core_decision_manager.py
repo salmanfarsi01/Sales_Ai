@@ -357,7 +357,11 @@ class CoreDecisionManager:
         }
         cleaned_turn = (turn_text or "").strip().lower().rstrip("!.,")
         from .conversation_materiality import is_positive_filler
-        is_filler = cleaned_turn in filler_acknowledgments or is_positive_filler(turn_text or "")
+        has_conjunction = any(
+            re.search(p, cleaned_turn)
+            for p in [r"\bbut\b", r"\bhowever\b", r"\bstill\b", r"\balthough\b", r"\byet\b", r"\bbecause\b", r"\bthough\b"]
+        )
+        is_filler = (cleaned_turn in filler_acknowledgments or is_positive_filler(turn_text or "")) and not has_conjunction
 
         # Question pending check: if the previous action was an explicit question, closing ask,
         # coordination inquiry, or if the prompt ended with '?',
@@ -411,8 +415,9 @@ class CoreDecisionManager:
                 carried_dec.carried_forward_from_turn_id = prev_dec.carried_forward_from_turn_id or prev_dec.source_turn_id
                 carried_dec.carried_forward = True
                 carried_dec.should_prompt = False  # Point 8: no new prompt needed for non-material filler
-                # Point 2: Allow HOLD / no new prompt when nothing warrants another sentence
-                carried_dec.primary_action = StrategicAction.HOLD
+                # Point 2: Preserve active strategy and its provenance; HOLD is shown only as displayed state
+                carried_dec.primary_action = prev_dec.primary_action
+                carried_dec.display_action = "HOLD"
                 carried_dec.final_prompt_text = None
                 carried_dec.gateway_fallback_stub = None
                 if "STRATEGY_CARRIED_FORWARD" not in carried_dec.reason_codes:

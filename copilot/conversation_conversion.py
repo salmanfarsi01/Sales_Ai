@@ -55,6 +55,7 @@ def detect_explicit_reversal_in_text(text: str) -> tuple[bool, Optional[str]]:
         (r"\b(?:let's\s+not|let\s+us\s+not)\s+(?:meet|do\s+that|do\s+this|schedule)\b", "Prospect requested not to meet/schedule"),
         (r"\bforget\s+(?:about\s+)?(?:it|that|thursday|friday|monday|tuesday|wednesday|tomorrow|the\s+meeting|meeting)\b", "Prospect requested to forget scheduled meeting"),
         (r"\b(?:can't|cannot|couldn't|could\s+not)\s+make\s+it\s+(?:anymore|after\s+all|now)\b", "Prospect stated they cannot make the meeting"),
+        (r"\b(?:can't|cannot|couldn't|could\s+not)\s+(?:do|make|attend)\s+(?:monday|tuesday|wednesday|thursday|friday|saturday|sunday|tomorrow|the\s+meeting|that\s+time)\b", "Prospect retracted meeting availability"),
         (r"\bwon't\s+be\s+able\s+to\s+meet\b", "Prospect unavailable to meet"),
         (r"\b(?:call\s+off|called\s+off)\b", "Prospect called off meeting"),
         (r"\bnot\s+going\s+to\s+work\s+out\b", "Prospect stated meeting will not work out"),
@@ -69,9 +70,32 @@ def detect_explicit_reversal_in_text(text: str) -> tuple[bool, Optional[str]]:
     return False, None
 
 
+def format_time_slot(raw: Optional[str]) -> Optional[str]:
+    """Formats time slots with natural casing (e.g. 'Thursday at 4 pm', 'Friday at 10 am').
+    Prevents awkward title-casing like 'Thursday At 4 Pm' (Point 4).
+    """
+    if not raw:
+        return raw
+    tokens = str(raw).strip().split()
+    formatted = []
+    for i, t in enumerate(tokens):
+        t_lower = t.lower()
+        if i == 0:
+            formatted.append(t_lower.capitalize())
+        elif t_lower in ("at", "am", "pm", "in", "the", "on", "around"):
+            formatted.append(t_lower)
+        elif t_lower in ("morning", "afternoon", "evening", "noon"):
+            formatted.append(t_lower)
+        else:
+            formatted.append(t_lower)
+    return " ".join(formatted)
+
+
 def is_ampm_clarification(slot_a: Optional[str], slot_b: Optional[str]) -> bool:
     """Returns True if the difference between slot_a and slot_b is merely clarifying an unspecified AM/PM (Point 4).
-    e.g. 'Thursday At 4' vs 'Thursday At 4 Pm' or 'Friday 10' vs 'Friday 10 Am'.
+    e.g. 'Thursday at 4' vs 'Thursday at 4 pm' or 'Friday 10' vs 'Friday 10 am'.
+    Only a missing meridiem counts as a clarification. If both specify meridiems (e.g. '4 pm' vs '4 am'),
+    or if day/hour differs (e.g. 'Thursday at 4' vs 'Friday at 4 pm'), it is a reschedule (False).
     """
     if not slot_a or not slot_b:
         return False
@@ -79,8 +103,20 @@ def is_ampm_clarification(slot_a: Optional[str], slot_b: Optional[str]) -> bool:
     b = re.sub(r"[\.,]", "", str(slot_b).lower()).strip()
     if a == b:
         return True
-    a_no_ampm = re.sub(r"\s*(am|pm)\b", "", a).strip()
-    b_no_ampm = re.sub(r"\s*(am|pm)\b", "", b).strip()
+
+    has_am_pm_a = bool(re.search(r"\b(am|pm)\b", a))
+    has_am_pm_b = bool(re.search(r"\b(am|pm)\b", b))
+
+    # If both specify meridiem, it's a reschedule (e.g. 4 pm vs 4 am)
+    if has_am_pm_a and has_am_pm_b:
+        return False
+
+    # Exactly one must have meridiem and the other must not
+    if not (has_am_pm_a ^ has_am_pm_b):
+        return False
+
+    a_no_ampm = " ".join(re.sub(r"\s*(am|pm)\b", "", a).strip().split())
+    b_no_ampm = " ".join(re.sub(r"\s*(am|pm)\b", "", b).strip().split())
     return bool(a_no_ampm and a_no_ampm == b_no_ampm)
 
 
@@ -163,7 +199,7 @@ class MeetingConversionGateEngine:
 
         # Case A: Explicit day/time and affirmative stance in current utterance
         if time_day_match and (has_confirm_keyword or bundle.agreement_score >= 0.50):
-            return True, time_day_match.group(0).strip().title()
+            return True, format_time_slot(time_day_match.group(0).strip())
 
         # Case B: Salesperson proposed a day/time in prior turn, and prospect explicitly accepted
         if prior_bundle and prior_bundle.speaker_id == "salesperson":
@@ -177,7 +213,7 @@ class MeetingConversionGateEngine:
                 or any(re.search(rf"\b{aff}\b", text_lower) for aff in ["yeah", "yes", "definitely", "sure", "absolutely", "works", "that works", "perfect", "sounds good", "sounds fair"])
             )
             if prop_match and is_affirmative:
-                return True, prop_match.group(0).strip().title()
+                return True, format_time_slot(prop_match.group(0).strip())
 
         # Case C: Confirmed meeting time fact already active and affirmed
         confirmed_fact = next((f for f in current_state.facts if f.fact_key == "confirmed_meeting_time" and f.status == "active"), None)
@@ -1445,11 +1481,12 @@ class MeetingConversionGateEngine:
             if (gate.is_open or confirmed_fact or has_explicit_commit) and (is_confirming or is_walkthrough_turn or has_meeting_confirmation):
                 extracted_time = (
                     commit_slot
-                    or (time_slot_match.group(0).strip().title() if time_slot_match else None)
+                    or (format_time_slot(time_slot_match.group(0).strip()) if time_slot_match else None)
                     or (confirmed_fact.fact_value if confirmed_fact else None)
                     or (previous_event.start_at if previous_event and previous_event.start_at not in ("Confirmed Time Slot", "Tentative Time Slot") else None)
                 )
                 if extracted_time:
+                    extracted_time = format_time_slot(extracted_time)
                     conv_type = "property_walkthrough" if is_walkthrough_turn else (previous_event.conversion_type if previous_event else "in_person_meeting")
 
                     is_clarification = bool(

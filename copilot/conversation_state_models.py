@@ -466,10 +466,13 @@ class PushStrengthRecommendation(BaseModel):
     pressure: str = Field(default="none", description="Pressure level: none, low, moderate, high (Point 6)")
     strategic_posture: str = Field(default="protect", description="Posture: protect, advance, explore, coordinate (Point 6)")
     strategy: str = Field(default="confirm_and_protect", description="Action/strategy name: confirm_and_protect, resolve_then_ask, etc.")
+    legacy_strategy_alias: Optional[str] = Field(default=None, description="Explicit legacy strategy alias (Point 6)")
 
     def model_post_init(self, __context: Any) -> None:
         st = str(self.state)
         self.strategy = st
+        if not self.legacy_strategy_alias:
+            self.legacy_strategy_alias = st
         if st in ("confirm_and_protect", "protect_and_shorten", "respect_record_exit"):
             self.pressure = "none"
             self.strategic_posture = "protect"

@@ -93,7 +93,7 @@ from .conversation_materiality import (
 from .conversation_scoring import ConversationScoringEngine
 from .conversation_scoring_config import ConversationScoringConfig
 from .conversation_conversion_config import ConversionBlockingConfig, DEFAULT_CONVERSION_BLOCKING_CONFIG
-from .conversation_conversion import MeetingConversionGateEngine, is_ampm_clarification
+from .conversation_conversion import MeetingConversionGateEngine, is_ampm_clarification, format_time_slot
 from .conversation_stage import ConversationStageEngine
 
 LOGGER = logging.getLogger("copilot.conversation_state_manager")
@@ -341,6 +341,10 @@ class ConversationStateManager:
         # no pending suspected boundary, and no active hard boundary that prospect could retract), preserve state version without mutating.
         has_pending_suspected = self.current_state.contact_compliance.boundary_suspected
         has_active_hard_boundary = self.current_state.contact_compliance.hard_boundary_active and bundle.speaker_id == "client"
+        has_pending_reframe = bool(
+            getattr(self.objections_engine, "pending_reframe_strategy", None)
+            and bundle.speaker_id == "client"
+        )
         if (
             not materiality.is_material
             and not decision_updates
@@ -349,6 +353,7 @@ class ConversationStateManager:
             and not stage_transition_due
             and not has_pending_suspected
             and not has_active_hard_boundary
+            and not has_pending_reframe
         ):
             self.current_state.last_updated_turn_id = bundle.turn_id
             self.current_state.last_updated_timestamp_ms = bundle.timestamp_ms
@@ -828,8 +833,8 @@ class ConversationStateManager:
                 )
             )
 
-        # 4. Evaluate Objection Lifecycle (Gated by Materiality)
-        if "objections" in materiality.affected_targets:
+        # 4. Evaluate Objection Lifecycle (Gated by Materiality or Pending Reframe Response)
+        if "objections" in materiality.affected_targets or (getattr(self.objections_engine, "pending_reframe_strategy", None) and bundle.speaker_id == "client"):
             # Sync any out-of-band added objections into the lifecycle engine
             engine_ids = {o.objection_id for o in self.objections_engine._objections}
             for o in self.current_state.objections:
@@ -1545,7 +1550,7 @@ class ConversationStateManager:
             r"\bsuppose\b",
         ])
         if time_day_match and not is_negated_or_hypothetical:
-            new_val = time_day_match.group(0).strip().title()
+            new_val = format_time_slot(time_day_match.group(0).strip())
             # If earlier tentative meeting/walkthrough fact exists, supersede it directly
             tentative_f = next((f for f in self.current_state.facts if f.fact_key in ("tentative_meeting_time", "walkthrough_timing") and f.status == "active"), None)
             if tentative_f:
@@ -1599,7 +1604,7 @@ class ConversationStateManager:
                 or any(re.search(rf"\b{aff}\b", text_lower) for aff in ["yeah", "yes", "definitely", "sure", "absolutely", "works", "perfect", "sounds good"])
             )
             if prop_match and is_affirmative and not is_hedged_fact:
-                raw_time_str = prop_match.group(0).title()
+                raw_time_str = format_time_slot(prop_match.group(0).strip())
                 norm_time = raw_time_str
                 for word, num in [("One", "1:00 PM"), ("Two", "2:00 PM"), ("Three", "3:00 PM"), ("Four", "4:00 PM"), ("Five", "5:00 PM")]:
                     if f"At {word}" in norm_time:

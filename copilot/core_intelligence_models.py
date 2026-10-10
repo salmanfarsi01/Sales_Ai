@@ -26,6 +26,7 @@ class StrategicAction(str, Enum):
     FUTURE_PACE = "future_pace"
     QUESTION = "question"
     COMMITMENT_CLOSE = "commitment_close"
+    REASSURE = "reassure"
 
     def __eq__(self, other: Any) -> bool:
         val = getattr(other, "value", other)
@@ -119,6 +120,7 @@ class StrategicDecision(BaseModel):
     should_prompt: bool = True
     strategic_objective: str
     primary_action: StrategicAction
+    display_action: Optional[str] = Field(default=None, description="Presentation display action (e.g. HOLD) when primary strategy is preserved with should_prompt=False")
     strategic_posture: str = Field(default="explore", description="High-level posture: protect, advance, defend, coordinate, explore (Point 6)")
     secondary_action: Optional[StrategicAction] = None
     secondary_action_reason: Optional[str] = Field(default=None, description="Explicit justification for secondary technique (Point 9)")

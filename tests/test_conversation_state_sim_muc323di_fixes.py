@@ -131,7 +131,7 @@ def test_objection_lifecycle_reactivation_and_supersession():
     active_facts = {f.fact_key: f for f in all_facts if f.status == "active"}
 
     assert "confirmed_meeting_time" in active_facts
-    assert "Thursday At 3" in active_facts["confirmed_meeting_time"].fact_value
+    assert "thursday at 3" in active_facts["confirmed_meeting_time"].fact_value.lower()
     assert any(f.fact_key == "tentative_meeting_time" and f.status == "superseded" for f in all_facts)
 
 
@@ -189,7 +189,7 @@ def test_full_sim_muc323di_replay():
     # 2. Timeline truth supersession verified
     all_facts = report.final_state.facts
     assert any(f.fact_key == "tentative_meeting_time" and f.status == "superseded" for f in all_facts)
-    assert any(f.fact_key == "confirmed_meeting_time" and f.status == "active" and "Thursday At 3" in f.fact_value for f in all_facts)
+    assert any(f.fact_key == "confirmed_meeting_time" and f.status == "active" and "thursday at 3" in f.fact_value.lower() for f in all_facts)
 
     # 3. Persistent facts verified
     active_keys = {f.fact_key for f in all_facts if f.status == "active"}

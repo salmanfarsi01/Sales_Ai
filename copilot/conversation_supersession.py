@@ -17,6 +17,8 @@ from .conversation_state_models import (
     DealDispositionType,
 )
 
+from .conversation_conversion import format_time_slot
+
 LOGGER = logging.getLogger("copilot.conversation_supersession")
 
 SupersessionRelation = Literal["UPDATES", "REVERSES", "CONFIRMS", "UNCHANGED"]
@@ -440,7 +442,7 @@ class TruthSupersessionDetector:
                 text_lower,
             )
             if time_match:
-                new_slot = time_match.group(0).strip().title()
+                new_slot = format_time_slot(time_match.group(0).strip())
                 if new_slot.lower() != fact.fact_value.strip().lower():
                     return SupersessionDecision(
                         has_supersession=True,
@@ -494,7 +496,7 @@ class TruthSupersessionDetector:
             text_lower,
         )
         if time_match:
-            new_slot = time_match.group(0).strip().title()
+            new_slot = format_time_slot(time_match.group(0).strip())
             if active_event.start_at and new_slot.lower() != active_event.start_at.strip().lower():
                 return SupersessionDecision(
                     has_supersession=True,

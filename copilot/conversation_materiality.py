@@ -97,13 +97,24 @@ POSITIVE_FILLER_PATTERNS: List[str] = [
 
 
 def is_positive_filler(text: str) -> bool:
-    """True if utterance matches known non-material conversational filler/pleasantry whitelist."""
+    """True if utterance matches known non-material conversational filler/pleasantry whitelist.
+    Matches whole utterance only. Rejects mixed sentences with contrast or continuation conjunctions (Point 3).
+    """
     t = text.strip().lower()
+    # Reject compound or continuation sentences that qualify or continue past filler
+    conjunction_patterns = [
+        r"\bbut\b", r"\bhowever\b", r"\bstill\b", r"\balthough\b", r"\byet\b",
+        r"\bbecause\b", r"\bthough\b", r"\bexcept\b", r"\band\s+we\b", r"\band\s+i\b"
+    ]
+    if any(re.search(p, t) for p in conjunction_patterns):
+        return False
+
     deal_token_patterns = [
         r"\bscam\b", r"\bfraud\b", r"\bfee\b", r"\bfees\b", r"\bcontract\b", r"\bclosing\b",
         r"\bdeposit\b", r"\bmoney\b", r"\bdisappeared\b", r"\bvanished\b", r"\bprice\b",
         r"\bproperty\b", r"\bhouse\b", r"\bmortgage\b", r"\bemail\s+me\b", r"\btext\s+me\b",
-        r"\bdon['’]?t\s+call\b", r"\bno\s+calls\b", r"\bcall\s+me\b", r"\btext\s+only\b"
+        r"\bdon['’]?t\s+call\b", r"\bno\s+calls\b", r"\bcall\s+me\b", r"\btext\s+only\b",
+        r"\btiming\b", r"\bissue\b"
     ]
     if any(re.search(p, t) for p in deal_token_patterns):
         return False
@@ -461,7 +472,11 @@ class MaterialityFilter:
         # ---------------------------------------------------------------------
         # 1. Initial State Bootstrap: First turn must initialize baseline dimensions
         # ---------------------------------------------------------------------
-        is_initial_turn = current_state is None or getattr(current_state, "last_updated_turn_id", 0) == 0 or current_state.state_version == 0
+        is_initial_turn = current_state is None or (
+            current_state.state_version <= 1
+            and getattr(current_state, "last_updated_turn_id", 0) == 0
+            and len(getattr(current_state, "prospect_turn_ids", [])) == 0
+        )
         if is_initial_turn:
             targets.add("dimensions")
             reasons.append("Initial state bootstrap: establishing dimension baseline.")

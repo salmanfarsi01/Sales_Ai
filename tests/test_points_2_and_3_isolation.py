@@ -251,7 +251,7 @@ def test_point8_two_back_to_back_test_calls_zero_cross_call_leakage():
     final_a = rep_a.final_state
     assert final_a.conversion_gate.is_open is True
     assert final_a.dimensions.commitment == 1.00
-    assert any("Thursday At 3" in f.fact_value for f in final_a.facts)
+    assert any("thursday at 3" in f.fact_value.lower() for f in final_a.facts)
 
     # Run Test B immediately afterwards through the same engine instance
     rep_b = engine.replay_dialogue_turns("sim_suite_test_B", turns_B, save_report=False)

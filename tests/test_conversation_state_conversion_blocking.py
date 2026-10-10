@@ -286,14 +286,14 @@ def test_explicit_commitment_overrides_low_inferred_readiness_and_value():
     gate = snap.conversion_gate
 
     assert gate.explicit_commitment_detected is True
-    assert gate.commitment_slot == "Thursday At 4"
+    assert gate.commitment_slot.lower() == "thursday at 4"
 
     # Condition 4 (clear_value_reason) should be overridden
     cond4 = next(c for c in gate.conditions if c.condition_name == "clear_value_reason")
     assert cond4.met is True
     assert cond4.is_overridden is True
     assert "[OVERRIDE: Explicit commitment detected" in cond4.reason
-    assert "Thursday At 4" in cond4.reason
+    assert "thursday at 4" in cond4.reason.lower()
 
     # Condition 6 (plausible_logistics) should be satisfied
     cond6 = next(c for c in gate.conditions if c.condition_name == "plausible_logistics")
@@ -304,7 +304,7 @@ def test_explicit_commitment_overrides_low_inferred_readiness_and_value():
     assert gate.status == "open"
     # Push strength recognizes concrete commitment (confirm_and_protect)
     assert snap.push_strength.state in ("confirm_and_protect", "direct_ask")
-    assert "Thursday At 4" in snap.push_strength.rationale or "Thursday At 4" in snap.push_strength.recommended_action
+    assert "thursday at 4" in (snap.push_strength.rationale or "").lower() or "thursday at 4" in (snap.push_strength.recommended_action or "").lower()
 
 
 def test_salesperson_proposal_accepted_by_prospect_triggers_override():
@@ -336,7 +336,7 @@ def test_salesperson_proposal_accepted_by_prospect_triggers_override():
     gate = snap.conversion_gate
 
     assert gate.explicit_commitment_detected is True
-    assert "Thursday At 4:00" in gate.commitment_slot
+    assert "thursday at 4:00" in gate.commitment_slot.lower()
 
     cond4 = next(c for c in gate.conditions if c.condition_name == "clear_value_reason")
     assert cond4.met is True
@@ -438,7 +438,7 @@ def test_client_exact_scenario_commission_objection_with_thursday_at_4_pm():
 
     # 3. Explicit commitment override detected the slot
     assert gate_appt.explicit_commitment_detected is True
-    assert "Thursday At 4" in gate_appt.commitment_slot
+    assert "thursday at 4" in gate_appt.commitment_slot.lower()
 
     # 4. Entire gate is OPEN and push strength is confirm_and_protect or direct_ask
     assert gate_appt.is_open is True
