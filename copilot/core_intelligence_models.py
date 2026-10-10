@@ -123,6 +123,7 @@ class StrategicDecision(BaseModel):
     secondary_action: Optional[StrategicAction] = None
     secondary_action_reason: Optional[str] = Field(default=None, description="Explicit justification for secondary technique (Point 9)")
     push_strength: Union[PushStrengthValue, PushStrengthState, str] = Field(default="resolve_then_ask", description="Push strength pressure: none, low, moderate, high (Point 6)")
+    carried_forward: bool = Field(default=False, description="True if strategy was continued from prior turn (Point 2)")
     carried_forward_from_decision_id: Optional[str] = Field(default=None, description="Decision ID when strategy is continued from prior turn (Point 13)")
     carried_forward_from_turn_id: Optional[int] = Field(default=None, description="Turn ID when strategy is continued from prior turn (Point 13)")
     referenced_fact_ids: List[str] = Field(default_factory=list, description="IDs of facts influencing this decision (Point 12)")
@@ -151,6 +152,10 @@ class StrategicDecision(BaseModel):
     meeting_gate_open: Optional[bool] = Field(default=None, description="SNAPSHOT-ONLY: Frozen gate status at decision time. Do not use for live reads.")
     conversion_confirmed: Optional[bool] = Field(default=None, description="SNAPSHOT-ONLY: Frozen conversion status at decision time. Do not use for live reads.")
     commitment_slot: Optional[str] = Field(default=None, description="DEPRECATED/SNAPSHOT-ONLY: Frozen slot at decision time. Use resolve_commitment_slot(snapshot) for live reads.")
+
+    def model_post_init(self, __context: Any) -> None:
+        if self.carried_forward_from_turn_id is not None or "STRATEGY_CARRIED_FORWARD" in self.reason_codes:
+            self.carried_forward = True
 
     def resolve_commitment_slot(self, snapshot: Optional[Any] = None) -> Optional[str]:
         """Dynamically resolves commitment slot from canonical ConversationStateSnapshot via references (Point 12).

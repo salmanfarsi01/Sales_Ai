@@ -69,6 +69,21 @@ def detect_explicit_reversal_in_text(text: str) -> tuple[bool, Optional[str]]:
     return False, None
 
 
+def is_ampm_clarification(slot_a: Optional[str], slot_b: Optional[str]) -> bool:
+    """Returns True if the difference between slot_a and slot_b is merely clarifying an unspecified AM/PM (Point 4).
+    e.g. 'Thursday At 4' vs 'Thursday At 4 Pm' or 'Friday 10' vs 'Friday 10 Am'.
+    """
+    if not slot_a or not slot_b:
+        return False
+    a = re.sub(r"[\.,]", "", str(slot_a).lower()).strip()
+    b = re.sub(r"[\.,]", "", str(slot_b).lower()).strip()
+    if a == b:
+        return True
+    a_no_ampm = re.sub(r"\s*(am|pm)\b", "", a).strip()
+    b_no_ampm = re.sub(r"\s*(am|pm)\b", "", b).strip()
+    return bool(a_no_ampm and a_no_ampm == b_no_ampm)
+
+
 class MeetingConversionGateEngine:
     """Phase 7: Evaluates the 7-condition Meeting/Conversion Gate, Push Strength state machine,
     and Conversion Event Object tracking. Supports target-specific objection filtering and
@@ -268,6 +283,7 @@ class MeetingConversionGateEngine:
             if bundle.turn_id not in trust_evidence_turns:
                 trust_evidence_turns.append(bundle.turn_id)
 
+        is_trust_measured = getattr(dims, "trust_measured", False) or getattr(current_state.dimensions, "trust_measured", False) or (trust_val != 0.50)
         if not prospect_turns:
             cond1_status = "unknown"
             reason1 = "No prospect turns observed to evaluate trust dynamics (clean slate)"
@@ -279,13 +295,26 @@ class MeetingConversionGateEngine:
                 reason1 = f"Trust score ({trust_val:.2f}) is below minimum threshold ({cfg.gate_min_trust:.2f})"
             else:
                 reason1 = f"Emotion tension ({tension_val:.2f}) exceeds maximum allowable threshold ({cfg.gate_max_tension:.2f})"
-        elif has_trust_affirmation or has_explicit_commit:
+        elif has_trust_affirmation and is_trust_measured:
+            cond1_status = "met"
+            reason1 = f"Trust healthy ({trust_val:.2f} >= {cfg.gate_min_trust:.2f}) and tension contained ({tension_val:.2f} <= {cfg.gate_max_tension:.2f})"
+            cond1_ev = trust_evidence_turns if trust_evidence_turns else (prospect_turns[-1:] if prospect_turns else [])
+        elif has_explicit_commit:
+            # Point 5: Distinguish defaults from measured evidence throughout gate evaluation.
+            # An appointment agreement can support the appointment without establishing trust.
+            cond1_status = "met"
+            if is_trust_measured:
+                reason1 = f"Trust measured ({trust_val:.2f} >= {cfg.gate_min_trust:.2f}) and tension contained ({tension_val:.2f} <= {cfg.gate_max_tension:.2f})"
+            else:
+                reason1 = f"Trust unmeasured default ({trust_val:.2f}) and tension contained ({tension_val:.2f} <= {cfg.gate_max_tension:.2f})"
+            cond1_ev = trust_evidence_turns if trust_evidence_turns else (prospect_turns[-1:] if prospect_turns else [])
+        elif is_trust_measured and trust_val >= cfg.gate_min_trust and tension_val <= cfg.gate_max_tension:
             cond1_status = "met"
             reason1 = f"Trust healthy ({trust_val:.2f} >= {cfg.gate_min_trust:.2f}) and tension contained ({tension_val:.2f} <= {cfg.gate_max_tension:.2f})"
             cond1_ev = trust_evidence_turns if trust_evidence_turns else (prospect_turns[-1:] if prospect_turns else [])
         else:
             cond1_status = "unknown"
-            reason1 = "Trust dynamics sitting on neutral baseline without affirmative trust evidence"
+            reason1 = f"Trust dynamics sitting on neutral baseline ({trust_val:.2f} default, unmeasured) without affirmative trust evidence"
             cond1_ev = []
 
         conditions.append(
@@ -1423,7 +1452,13 @@ class MeetingConversionGateEngine:
                 if extracted_time:
                     conv_type = "property_walkthrough" if is_walkthrough_turn else (previous_event.conversion_type if previous_event else "in_person_meeting")
 
-                    if previous_event and (
+                    is_clarification = bool(
+                        previous_event
+                        and previous_event.status == ConversionEventStatus.CONFIRMED
+                        and is_ampm_clarification(previous_event.start_at, extracted_time)
+                    )
+
+                    if previous_event and not is_clarification and (
                         previous_event.status in (ConversionEventStatus.PROPOSED, ConversionEventStatus.TENTATIVE, ConversionEventStatus.ELIGIBLE, ConversionEventStatus.CANCELLED)
                         or (previous_event.status == ConversionEventStatus.CONFIRMED and previous_event.start_at and extracted_time != previous_event.start_at)
                     ):
@@ -1445,11 +1480,13 @@ class MeetingConversionGateEngine:
                         previous_event.superseded_at_turn_id = bundle.turn_id
                         return new_event
                     elif previous_event and previous_event.status == ConversionEventStatus.CONFIRMED:
+                        # Point 4: Clarifying an unspecified AM/PM updates existing appointment rather than creating a reschedule
+                        new_start = extracted_time if (extracted_time and (is_clarification or not previous_event.start_at)) else previous_event.start_at
                         return ConversionEventObject(
                             event_id=previous_event.event_id,
                             conversion_type=conv_type,
                             status=ConversionEventStatus.CONFIRMED,
-                            start_at=extracted_time,
+                            start_at=new_start,
                             location_or_format="Property Address" if conv_type == "property_walkthrough" else "Scheduled Meeting",
                             participants=self._resolve_conversion_participants(current_state, bundle, previous_event),
                             confirmation_confidence=0.90,
@@ -1497,6 +1534,10 @@ class MeetingConversionGateEngine:
         # ---------------------------------------------------------------------
         if previous_event:
             if previous_event.status == ConversionEventStatus.CANCELLED:
+                return previous_event
+            # Point 4: Preserve confirmed appointment's identity and original commitment evidence.
+            # Change its status only on relevant evidence (e.g. cancellation or reschedule).
+            if previous_event.status == ConversionEventStatus.CONFIRMED:
                 return previous_event
             # If previous event was TENTATIVE, PROPOSED, or ELIGIBLE and gate is closed:
             # Transition to BLOCKED because safety gate conditions are failing

@@ -83,6 +83,8 @@ SOFT_CONTACT_PREF_PATTERNS: List[str] = [
 POSITIVE_FILLER_PATTERNS: List[str] = [
     # Short one or two-word conversational acknowledgments
     r"^(?:yeah|yes|okay|ok|sure|right|uh-huh|yep|gotcha|mm-hm|mhm|yup|nope|no|alright|all\s+right|sounds\s+good)[\.\,\!\?]*$",
+    # Mild filler acknowledgments and pleasantries without deal tokens
+    r"^(?:that\s+helps(?:\s+a\s+(?:little|bit))?|makes\s+sense|fair\s+enough|i\s+see|got\s+it|understood)[\.\,\!\?]*$",
     # Basic pleasantries / greetings with no domain facts
     r"^(?:hi|hello|hey|good\s+(?:morning|afternoon|evening)|how\s+are\s+you(?:\s+doing)?|doing\s+well|fine\s+thanks)[\.\,\!\?]*$",
     # Polite closings / thanks with no domain constraints
@@ -386,6 +388,14 @@ class MaterialityFilter:
             pure_soft_pref = is_soft_contact_preference(text_raw, bundle) and not hard_bound and not canonical_obj
             pure_sched_constraint = is_logistical_scheduling_constraint(text_raw) and not has_resistance and not canonical_obj
 
+            if is_positive_filler(text_raw) and not pure_soft_pref and not pure_sched_constraint and not hard_bound and not canonical_obj:
+                is_bootstrap = (current_state is None) or (getattr(current_state, "last_updated_turn_id", 0) == 0)
+                if not is_bootstrap:
+                    result.affected_targets.clear()
+                    result.is_material = False
+                    result.reasoning = "Conversational acknowledgment / filler pleasantry without new structural disclosures."
+                    return result
+
             if pure_soft_pref or pure_sched_constraint:
                 # Ensure objections is purged from affected targets
                 result.affected_targets.discard("objections")
@@ -451,7 +461,7 @@ class MaterialityFilter:
         # ---------------------------------------------------------------------
         # 1. Initial State Bootstrap: First turn must initialize baseline dimensions
         # ---------------------------------------------------------------------
-        is_initial_turn = current_state is None or current_state.state_version == 0
+        is_initial_turn = current_state is None or getattr(current_state, "last_updated_turn_id", 0) == 0 or current_state.state_version == 0
         if is_initial_turn:
             targets.add("dimensions")
             reasons.append("Initial state bootstrap: establishing dimension baseline.")

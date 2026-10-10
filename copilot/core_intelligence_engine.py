@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+import re
 import logging
 from typing import Any, Dict, List, Optional
 
@@ -75,9 +76,53 @@ class PitchProXCoreIntelligenceEngine:
         # 1b. Turn-level contact preference or boundary declared on this turn
         elif self._is_contact_preference_turn(snapshot, turn_text, turn_id):
             eval_res = self._build_contact_preference_decision(snapshot, context, turn_timestamp_ms)
-        # 2. Confirmed Conversion Protection Gate (Item 9: confirm_and_protect)
+        # 2. Confirmed Conversion Protection Gate (Item 9: confirm_and_protect / Point 3)
         elif context.conversion_confirmed or context.push_strength_state == "confirm_and_protect":
-            eval_res = self._build_confirm_protect_decision(snapshot, context, turn_timestamp_ms)
+            active_turn_objection = None
+            is_deferral = False
+            t_lower = (turn_text or "").lower()
+            deferral_patterns = [
+                r"\b(?:talk|discuss|cover|look\s+at|go\s+over)\s+(?:about\s+it|it|that)?\s*(?:in|at|during)\s+(?:our\s+)?meeting\b",
+                r"\bleave\s+it\b.*?\bmeeting\b",
+                r"\btalk\s+about\s+it\s+in\s+our\s+meeting\b",
+            ]
+            if any(re.search(pat, t_lower) for pat in deferral_patterns):
+                is_deferral = True
+
+            if unresolved_objections:
+                for obj in unresolved_objections:
+                    cat = obj.canonical_category.lower()
+                    if (
+                        cat in ("commission_fee", "financial_net_proceeds", "price")
+                        and any(w in t_lower for w in ("fee", "fees", "commission", "expensive", "bothers me", "cost", "price", "numbers", "don't get it", "dont get it"))
+                    ):
+                        active_turn_objection = obj
+                        break
+                    elif any(w in t_lower for w in cat.split("_")):
+                        active_turn_objection = obj
+                        break
+                if not active_turn_objection and any(o.lifecycle_state in (ObjectionLifecycleState.ACTIVE, "active", "reactivated") for o in unresolved_objections):
+                    active_turn_objection = unresolved_objections[-1]
+
+            is_persistent_concern = (
+                active_turn_objection is not None
+                and (
+                    active_turn_objection.recurrence_count > 1
+                    or len(active_turn_objection.get_failed_strategies()) > 0
+                    or (
+                        any(w in t_lower for w in ("still", "bothers me", "don't get", "dont get"))
+                        and not any(w in t_lower for w in ("can meet", "let's meet", "lets meet", "how about", "works for me"))
+                    )
+                )
+            )
+
+            if is_deferral and unresolved_objections:
+                target_obj = active_turn_objection or unresolved_objections[-1]
+                eval_res = self._build_deferred_to_meeting_decision(snapshot, context, target_obj, turn_timestamp_ms, turn_text=turn_text)
+            elif is_persistent_concern:
+                eval_res = self._build_protect_appointment_with_concern_decision(snapshot, context, active_turn_objection, turn_timestamp_ms, turn_text=turn_text)
+            else:
+                eval_res = self._build_confirm_protect_decision(snapshot, context, turn_timestamp_ms)
         # 3. Multi-Stakeholder and Absent Decision Maker Gate (Spec 09 §3)
         elif not context.decision_maker_present and (
             snapshot.conversation_stage == ConversationStage.DECISION_RESOLUTION
@@ -591,6 +636,147 @@ class PitchProXCoreIntelligenceEngine:
             urgency="immediate",
             max_prompt_words=24,
             confidence=0.95,
+            created_at_ms=turn_timestamp_ms,
+        )
+        return DecisionEvaluationResult(decision=decision, context=context)
+
+    def _build_deferred_to_meeting_decision(
+        self,
+        snapshot: ConversationStateSnapshot,
+        context: StrategicInterpretationContext,
+        primary_obj: ObjectionRecord,
+        turn_timestamp_ms: int,
+        turn_text: str = "",
+    ) -> DecisionEvaluationResult:
+        slot = None
+        if snapshot.conversion_gate and snapshot.conversion_gate.commitment_slot:
+            slot = snapshot.conversion_gate.commitment_slot
+        elif conv := snapshot.get_active_conversion_event():
+            slot = conv.start_at
+        meeting_fact = snapshot.get_active_fact("confirmed_meeting_time")
+        if not slot and meeting_fact:
+            slot = meeting_fact.fact_value
+
+        ref_facts = [meeting_fact.fact_id] if meeting_fact else []
+
+        # Point 3: When client explicitly defers discussion to the meeting, retain that concern for follow-up
+        primary_obj.deferred_to_meeting = True
+        primary_obj.retained_for_followup = True
+        primary_obj.resolution_evidence = f"Prospect explicitly deferred {primary_obj.canonical_category} discussion to confirmed meeting on {slot or 'meeting'}"
+
+        category = primary_obj.canonical_category.replace("_", " ")
+
+        decision = StrategicDecision(
+            call_id=snapshot.call_sid,
+            source_state_version=snapshot.state_version,
+            commitment_slot=slot,
+            should_prompt=True,
+            strategic_objective=f"Acknowledge deferral of {category} discussion to confirmed meeting and retain concern for in-person review.",
+            primary_action=StrategicAction.ACKNOWLEDGE,
+            strategic_posture="protect",
+            secondary_action=None,
+            secondary_action_reason=None,
+            push_strength=PushStrengthValue("none", legacy_alias="confirm_and_protect"),
+            meeting_gate_open=context.meeting_gate_open,
+            conversion_confirmed=True,
+            referenced_fact_ids=ref_facts,
+            referenced_objection_ids=[primary_obj.objection_id],
+            reason_codes=[
+                "CONVERSION_CONFIRMED",
+                "CONFIRM_AND_PROTECT_ACTIVE",
+                "OBJECTION_DEFERRED_TO_MEETING",
+                "RETAINED_FOR_FOLLOWUP",
+            ],
+            do_not_do=["reopen_settled_concerns", "push_for_commitments", "dismiss_deferred_item"],
+            what_to_protect=["confirmed_appointment", "deferred_agenda_item"],
+            question_allowed=False,
+            retrieval_needed=False,
+            urgency="immediate",
+            max_prompt_words=24,
+            confidence=0.95,
+            created_at_ms=turn_timestamp_ms,
+        )
+        return DecisionEvaluationResult(decision=decision, context=context)
+
+    def _build_protect_appointment_with_concern_decision(
+        self,
+        snapshot: ConversationStateSnapshot,
+        context: StrategicInterpretationContext,
+        primary_obj: ObjectionRecord,
+        turn_timestamp_ms: int,
+        turn_text: str = "",
+    ) -> DecisionEvaluationResult:
+        slot = None
+        if snapshot.conversion_gate and snapshot.conversion_gate.commitment_slot:
+            slot = snapshot.conversion_gate.commitment_slot
+        elif conv := snapshot.get_active_conversion_event():
+            slot = conv.start_at
+        meeting_fact = snapshot.get_active_fact("confirmed_meeting_time")
+        if not slot and meeting_fact:
+            slot = meeting_fact.fact_value
+
+        ref_facts = [meeting_fact.fact_id] if meeting_fact else []
+        failed_strategies = primary_obj.get_failed_strategies()
+        category = primary_obj.canonical_category.replace("_", " ")
+
+        do_not_do = ["premature_close", "dismiss_concern", "reopen_settled_logistics", "repeat_rejected_explanation"]
+        do_not_do.extend(failed_strategies)
+
+        # Point 3: Protect appointment while responding to current concern.
+        # Use attempted strategy and outcome when selecting next action.
+        recurrence = primary_obj.recurrence_count
+        has_failed_reframe = primary_obj.has_strategy_failed("hyperlocal_marketing_differentiation") or primary_obj.has_strategy_failed("value_justification")
+
+        if recurrence >= 3 or (has_failed_reframe and recurrence >= 2 and any(w in (turn_text or "").lower() for w in ("still", "don't get", "dont get"))):
+            # Turn 7 style: persistent resistance after explanation
+            primary_action = StrategicAction.VALIDATE
+            secondary_action = StrategicAction.DE_RISK
+            secondary_reason = "Reaffirm zero obligation for confirmed meeting while validating persistent concern."
+            objective = f"Protect confirmed appointment while validating persistent {category} concern and removing decision pressure."
+            reason_codes = [
+                "CONVERSION_CONFIRMED",
+                "CONFIRM_AND_PROTECT_ACTIVE",
+                "PROTECT_APPOINTMENT_ADDRESS_CONCERN",
+                "OBJECTION_PERSISTENT",
+                "AVOID_REPEATED_EXPLANATION",
+            ]
+        else:
+            # Turn 6 style: concern persists after initial explanation
+            primary_action = StrategicAction.ACKNOWLEDGE
+            secondary_action = StrategicAction.QUANTIFY
+            secondary_reason = "Offer transparent numbers and net proceeds review at confirmed meeting without repeating rejected staging pitch."
+            objective = f"Protect confirmed appointment while acknowledging {category} concern and proposing net sheet review at the meeting."
+            reason_codes = [
+                "CONVERSION_CONFIRMED",
+                "CONFIRM_AND_PROTECT_ACTIVE",
+                "PROTECT_APPOINTMENT_ADDRESS_CONCERN",
+                "OBJECTION_PERSISTENT",
+                "PREVENT_FAILED_STRATEGY_REPETITION",
+            ]
+
+        decision = StrategicDecision(
+            call_id=snapshot.call_sid,
+            source_state_version=snapshot.state_version,
+            commitment_slot=slot,
+            should_prompt=True,
+            strategic_objective=objective,
+            primary_action=primary_action,
+            strategic_posture="protect",
+            secondary_action=secondary_action,
+            secondary_action_reason=secondary_reason,
+            push_strength=PushStrengthValue("none", legacy_alias="confirm_and_protect"),
+            meeting_gate_open=context.meeting_gate_open,
+            conversion_confirmed=True,
+            referenced_fact_ids=ref_facts,
+            referenced_objection_ids=[primary_obj.objection_id],
+            reason_codes=reason_codes,
+            do_not_do=do_not_do,
+            what_to_protect=["confirmed_appointment", "established_rapport"],
+            question_allowed=False,
+            retrieval_needed=False,
+            urgency="immediate",
+            max_prompt_words=24,
+            confidence=0.85,
             created_at_ms=turn_timestamp_ms,
         )
         return DecisionEvaluationResult(decision=decision, context=context)

@@ -409,6 +409,7 @@ class CoreDecisionManager:
                 # Chained carry-forward: always point to the original root decision and turn
                 carried_dec.carried_forward_from_decision_id = prev_dec.carried_forward_from_decision_id or prev_dec.decision_id
                 carried_dec.carried_forward_from_turn_id = prev_dec.carried_forward_from_turn_id or prev_dec.source_turn_id
+                carried_dec.carried_forward = True
                 carried_dec.should_prompt = False  # Point 8: no new prompt needed for non-material filler
                 # Point 2: Allow HOLD / no new prompt when nothing warrants another sentence
                 carried_dec.primary_action = StrategicAction.HOLD
@@ -498,6 +499,7 @@ class CoreDecisionManager:
                 carried_dec.source_event_id = effective_event_id
                 carried_dec.carried_forward_from_decision_id = prev_dec.carried_forward_from_decision_id or prev_dec.decision_id
                 carried_dec.carried_forward_from_turn_id = prev_dec.carried_forward_from_turn_id or prev_dec.source_turn_id
+                carried_dec.carried_forward = True
                 carried_dec.should_prompt = False  # Point 8: Rep already spoke; suppress prompt generation
                 if "STRATEGY_CARRIED_FORWARD" not in carried_dec.reason_codes:
                     carried_dec.reason_codes.append("STRATEGY_CARRIED_FORWARD")

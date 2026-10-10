@@ -86,6 +86,12 @@ class FileExtractor:
     @staticmethod
     def _extract_pdf(file_path: Path, content: bytes) -> ExtractedContent:
         """Extract text from PDF using PyMuPDF."""
+        global fitz
+        if fitz is None:
+            try:
+                import fitz
+            except Exception:
+                fitz = None
         if fitz is None:
             raise ValueError("PyMuPDF (fitz) is not available on this environment.")
         text_parts = []

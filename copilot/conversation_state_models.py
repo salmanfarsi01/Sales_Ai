@@ -194,6 +194,8 @@ class ObjectionRecord(BaseModel):
     driver_layer: Optional[ObjectionDriverLayer] = None
     strategy_outcomes: List[StrategyAttemptOutcome] = Field(default_factory=list)
     dormancy_evidence: Optional[DormancyEvidence] = None
+    deferred_to_meeting: bool = Field(default=False, description="True when prospect explicitly defers discussion of this objection to the scheduled meeting (Point 3)")
+    retained_for_followup: bool = Field(default=False, description="True when concern is retained for meeting follow-up (Point 3)")
 
     def get_failed_strategies(self) -> List[str]:
         """Returns list of strategy tags that failed (insufficient or rejected) on this objection."""
@@ -454,11 +456,39 @@ class MeetingConversionGate(BaseModel):
 
 
 class PushStrengthRecommendation(BaseModel):
-    """Strategic recommendation for how assertive to be when closing (Phase 7)."""
+    """Strategic recommendation for how assertive to be when closing (Phase 7 / Point 6).
+    Action/posture describes strategy; push strength describes pressure.
+    """
     state: PushStrengthState
     rationale: str
     recommended_action: str
     confidence: float = Field(1.0, ge=0.0, le=1.0)
+    pressure: str = Field(default="none", description="Pressure level: none, low, moderate, high (Point 6)")
+    strategic_posture: str = Field(default="protect", description="Posture: protect, advance, explore, coordinate (Point 6)")
+    strategy: str = Field(default="confirm_and_protect", description="Action/strategy name: confirm_and_protect, resolve_then_ask, etc.")
+
+    def model_post_init(self, __context: Any) -> None:
+        st = str(self.state)
+        self.strategy = st
+        if st in ("confirm_and_protect", "protect_and_shorten", "respect_record_exit"):
+            self.pressure = "none"
+            self.strategic_posture = "protect"
+        elif st in ("resolve_then_ask", "two_window_choice"):
+            self.pressure = "moderate"
+            self.strategic_posture = "advance"
+        elif st == "direct_ask":
+            self.pressure = "high"
+            self.strategic_posture = "advance"
+        elif st in ("reduce_friction_reask", "explore_conditional_terms"):
+            self.pressure = "low"
+            self.strategic_posture = "explore"
+        elif st in ("none", "low", "moderate", "high"):
+            self.pressure = st
+
+    @property
+    def push_strength(self) -> str:
+        """Pressure level describing closing push strength (Point 6)."""
+        return self.pressure
 
 
 class ConversionEventObject(BaseModel):

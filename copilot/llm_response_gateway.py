@@ -287,6 +287,24 @@ class LLMResponseGateway:
                 return "I completely understand their caution—there's no obligation whatsoever, and we can address any concerns directly together."
             return "It makes total sense to coordinate with your partner—would it be helpful if we found a time when you are both available?"
 
+        if "OBJECTION_DEFERRED_TO_MEETING" in reasons:
+            slot = decision.resolve_commitment_slot(snapshot) if hasattr(decision, "resolve_commitment_slot") else getattr(decision, "commitment_slot", None)
+            if not slot and snapshot:
+                fact = snapshot.get_active_fact("confirmed_meeting_time") if hasattr(snapshot, "get_active_fact") else None
+                slot = fact.fact_value if fact else "our meeting"
+            cleaned_slot = re.sub(r"\bAt\b", "at", str(slot or "our meeting"))
+            return f"Sounds great, we'll leave that for {cleaned_slot} and walk through all the numbers together then."
+
+        if "PROTECT_APPOINTMENT_ADDRESS_CONCERN" in reasons:
+            slot = decision.resolve_commitment_slot(snapshot) if hasattr(decision, "resolve_commitment_slot") else getattr(decision, "commitment_slot", None)
+            if not slot and snapshot:
+                fact = snapshot.get_active_fact("confirmed_meeting_time") if hasattr(snapshot, "get_active_fact") else None
+                slot = fact.fact_value if fact else "our meeting"
+            cleaned_slot = re.sub(r"\bAt\b", "at", str(slot or "our meeting"))
+            if action == StrategicAction.VALIDATE or decision.secondary_action == StrategicAction.DE_RISK:
+                return f"I hear you—it's a significant investment. There's zero obligation on {cleaned_slot}; we'll walk through everything openly so you can decide what makes sense."
+            return f"I completely understand your concern on the commission. When we meet on {cleaned_slot}, we'll look directly at your net proceeds breakdown together so you can see the exact bottom line."
+
         if action == StrategicAction.ACKNOWLEDGE:
             if "CONVERSION_CONFIRMED" in decision.reason_codes:
                 slot = decision.resolve_commitment_slot(snapshot) if hasattr(decision, "resolve_commitment_slot") else getattr(decision, "commitment_slot", None)

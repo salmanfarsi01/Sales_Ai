@@ -93,7 +93,7 @@ from .conversation_materiality import (
 from .conversation_scoring import ConversationScoringEngine
 from .conversation_scoring_config import ConversationScoringConfig
 from .conversation_conversion_config import ConversionBlockingConfig, DEFAULT_CONVERSION_BLOCKING_CONFIG
-from .conversation_conversion import MeetingConversionGateEngine
+from .conversation_conversion import MeetingConversionGateEngine, is_ampm_clarification
 from .conversation_stage import ConversationStageEngine
 
 LOGGER = logging.getLogger("copilot.conversation_state_manager")
@@ -1093,12 +1093,14 @@ class ConversationStateManager:
                     )
             elif conv_res.status == ConversionEventStatus.CONFIRMED and conv_res.start_at:
                 if active_meeting_fact and active_meeting_fact.fact_value.strip().lower() != conv_res.start_at.strip().lower():
+                    is_clarification = is_ampm_clarification(active_meeting_fact.fact_value, conv_res.start_at)
+                    note_text = f"Meeting time clarified to '{conv_res.start_at}'" if is_clarification else (conv_res.reversal_reason or f"Meeting rescheduled to '{conv_res.start_at}'")
                     old_f, new_f = self.facts_manager.supersede_fact(
                         old_fact_id=active_meeting_fact.fact_id,
                         new_fact_value=conv_res.start_at,
                         source_turn_id=bundle.turn_id,
                         timestamp_ms=bundle.timestamp_ms,
-                        notes=conv_res.reversal_reason or f"Meeting rescheduled to '{conv_res.start_at}'",
+                        notes=note_text,
                     )
                     self.current_state.facts = self.facts_manager.get_all_facts()
                     next_version += 1
@@ -1566,12 +1568,14 @@ class ConversationStateManager:
             else:
                 active_f = next((f for f in self.current_state.facts if f.fact_key == "confirmed_meeting_time" and f.status == "active"), None)
                 if active_f and active_f.fact_value.strip().lower() != new_val.strip().lower():
+                    is_clarification = is_ampm_clarification(active_f.fact_value, new_val)
+                    note_text = f"Meeting time clarified to '{new_val}'" if is_clarification else f"Meeting rescheduled to '{new_val}'"
                     self.facts_manager.supersede_fact(
                         old_fact_id=active_f.fact_id,
                         new_fact_value=new_val,
                         source_turn_id=bundle.turn_id,
                         timestamp_ms=bundle.timestamp_ms,
-                        notes=f"Meeting rescheduled to '{new_val}'",
+                        notes=note_text,
                     )
         elif self.prior_bundle and self.prior_bundle.speaker_id == "salesperson":
             # Case B: Salesperson proposed a day/time and prospect confirmed affirmatively without hedging
