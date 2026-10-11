@@ -444,7 +444,7 @@ class GateConditionResult(BaseModel):
 class MeetingConversionGate(BaseModel):
     """Boolean safety gate with explainable condition census (Phase 7)."""
     is_open: bool = Field(False, description="True if and only if all 7 conditions are satisfied simultaneously")
-    status: Literal["open", "closed"] = "closed"
+    status: Literal["open", "closed", "achieved"] = "closed"
     conversion_target: str = Field("appointment", description="Active conversion ask (e.g. appointment, signed_listing_agreement, permission_to_follow_up)")
     conditions: List[GateConditionResult] = Field(default_factory=list)
     failed_conditions: List[str] = Field(default_factory=list)

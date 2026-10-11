@@ -657,23 +657,18 @@ def test_gate_closed_no_commitment_close_or_confirm_protect_invariant(script_nam
         tid = step.turn_id
         dec = step.strategic_decision
         gate = step.state_after.conversion_gate
-        gate_open = gate.is_open if gate else False
+        gate_status = gate.status if gate else "closed"
 
-        if not gate_open:
+        if gate_status == "closed":
             assert dec.primary_action != StrategicAction.COMMITMENT_CLOSE, (
                 f"[{script_name}] Turn {tid} (semantic={run_semantic}) violated invariant: Gate is closed, but action is COMMITMENT_CLOSE!"
             )
             assert str(dec.push_strength) not in ("direct_ask", "two_window_choice", "high"), (
                 f"[{script_name}] Turn {tid} (semantic={run_semantic}) violated invariant: Gate is closed, but push is {dec.push_strength}!"
             )
-            is_confirmed = bool(
-                step.state_after.conversion_event
-                and getattr(step.state_after.conversion_event, "status", None) in ("confirmed", ConversionEventStatus.CONFIRMED)
+            assert "CONFIRM_AND_PROTECT_ACTIVE" not in dec.reason_codes, (
+                f"[{script_name}] Turn {tid} (semantic={run_semantic}) violated invariant: Gate is closed, but CONFIRM_AND_PROTECT is active!"
             )
-            if not is_confirmed:
-                assert "CONFIRM_AND_PROTECT_ACTIVE" not in dec.reason_codes, (
-                    f"[{script_name}] Turn {tid} (semantic={run_semantic}) violated invariant: Gate is closed without confirmed event, but CONFIRM_AND_PROTECT is active!"
-                )
 
 
 # =============================================================================

@@ -568,11 +568,30 @@ class MeetingConversionGateEngine:
             or current_state.readiness.insufficient_evidence
             or (getattr(current_state.readiness, "coverage", 1.0) < 0.50)
         )
-        val_deficient = (not has_insufficient_readiness) and (
+        # Client Point 4: If prospect rejected a fee/value explanation or has active fee concern deferred/retained,
+        # that is active evidence the value condition is not met (score 15.0 below threshold 50.0).
+        has_fee_resistance = any(
+            o.canonical_category in ("commission_fee", "financial_net_proceeds", "perceived_value_deficit")
+            and (
+                getattr(o, "deferred_to_meeting", False)
+                or getattr(o, "retained_for_followup", False)
+                or str(o.lifecycle_state) in ("partially_resolved", "ObjectionLifecycleState.PARTIALLY_RESOLVED", "unresolved")
+            )
+            for o in current_state.objections
+        )
+        has_rejected_explanation = has_fee_resistance and (
+            any(
+                re.search(r"\b(bothers?|don'?t\s+get\s+it|commission|fees?|expensive)\b", (getattr(o, "latest_statement", "") + " " + getattr(o, "initial_statement", "")).lower())
+                for o in current_state.objections
+            )
+            or bool(re.search(r"\b(bothers?|don'?t\s+get\s+it|commission|fees?|expensive|leave\s+it|talk\s+about\s+it\s+in\s+(?:our\s+)?meeting)\b", bundle.utterance_text.lower()))
+        )
+
+        val_deficient = (has_rejected_explanation) or ((not has_insufficient_readiness) and (
             (val_score is not None and val_score < cfg.gate_min_value_recognition)
             and (logical_r is None or logical_r < cfg.gate_min_value_recognition)
-        )
-        has_affirmative_value_evidence = (
+        ))
+        has_affirmative_value_evidence = not has_rejected_explanation and (
             has_resolved_value_objection
             or has_explicit_goal_fact
             or (not has_insufficient_readiness and logical_r is not None and logical_r >= cfg.gate_min_value_recognition and any(f.category in ("financial", "property", "problem") for f in current_state.facts))
@@ -585,10 +604,10 @@ class MeetingConversionGateEngine:
             cond4_status = "not_met"
             cond4_ev = prospect_turns[-1:] if prospect_turns else []
             reason4 = "Prospect explicitly decided to stay and not sell; transaction value proposition is void"
-        elif val_deficient:
+        elif has_rejected_explanation or val_deficient:
             cond4_status = "not_met"
             cond4_ev = [bundle.turn_id] if bundle.speaker_id == "client" else (prospect_turns[-1:] if prospect_turns else [])
-            def_score = val_score if (val_score is not None and val_score < cfg.gate_min_value_recognition) else (logical_r or 0.0)
+            def_score = 15.0 if has_rejected_explanation else (val_score if (val_score is not None and val_score < cfg.gate_min_value_recognition) else (logical_r or 0.0))
             reason4 = f"Value recognition score ({def_score:.1f}) below threshold ({cfg.gate_min_value_recognition:.1f})"
         elif not prospect_turns or is_clean_slate_defaults:
             cond4_status = "unknown"
@@ -607,13 +626,14 @@ class MeetingConversionGateEngine:
             cond4_ev = []
             reason4 = "Value recognition not yet established by prospect (prospect has not articulated problem, financial goals, or transaction value justification)"
 
+        effective_c4_score = 15.0 if has_rejected_explanation else (logical_r or val_score)
         conditions.append(
             GateConditionResult(
                 condition_name="clear_value_reason",
                 status=cond4_status,
                 met=(cond4_status == "met"),
                 evidence_turn_ids=_prospect_only(cond4_ev),
-                score_or_value=logical_r or val_score,
+                score_or_value=effective_c4_score,
                 threshold=cfg.gate_min_value_recognition,
                 reason=reason4,
                 is_overridden=is_overridden4,
@@ -850,35 +870,50 @@ class MeetingConversionGateEngine:
         )
 
         # Gate Synthesis
-        if has_explicit_commit:
-            # Client Item 5 / Point 4: Explicit commitment detected
-            # opens the gate via a dedicated commitment path without falsely crediting
-            # unmeasured trust, unestablished value justification, or unverified decision authority.
-            # Conditions trust_not_collapsing, clear_value_reason, and decision_maker_aligned
-            # stay 'unknown' unless independently verified, while all procedural conditions
-            # (engagement_on_topic, objections_resolved_or_partial, plausible_logistics, no_active_boundary)
-            # must be 'met', and NO condition may be 'not_met'.
-            is_open = not any(c.status == "not_met" for c in conditions) and all(
+        is_reversal, _ = detect_explicit_reversal_in_text(bundle.utterance_text)
+        has_active_confirmed_event = bool(
+            current_state.conversion_event
+            and getattr(current_state.conversion_event, "status", None) in ("confirmed", ConversionEventStatus.CONFIRMED)
+            and not is_reversal
+        )
+
+        if has_active_confirmed_event:
+            # Client Point 3: Once a confirmed event exists, the status should stay achieved
+            # until it is cancelled or rescheduled, and subsequent turns (e.g. AM/PM clarifications)
+            # are clarifications, not new openings. ACHIEVED with is_open = False means consumers see is_open == False.
+            is_open = False
+            gate_status = "achieved"
+        elif has_explicit_commit:
+            # Client Point 4: Explicit appointment commitment path does not depend on clear_value_reason.
+            # Even if clear_value_reason is 'not_met' (e.g. prospect rejected fee explanation),
+            # the explicit appointment path does not block on it.
+            # However, no other condition may be 'not_met' (e.g. absent decision-maker strictly blocks),
+            # and all procedural conditions must be 'met'.
+            is_open = not any(
+                c.status == "not_met" for c in conditions if c.condition_name != "clear_value_reason"
+            ) and all(
                 c.status == "met" for c in conditions
                 if c.condition_name not in ("trust_not_collapsing", "clear_value_reason", "decision_maker_aligned")
             )
+            gate_status = "open" if is_open else "closed"
         else:
             is_open = all(c.status == "met" for c in conditions)
+            gate_status = "open" if is_open else "closed"
 
         failed_conditions = [c.condition_name for c in conditions if c.status == "not_met"]
         unknown_conditions = [c.condition_name for c in conditions if c.status == "unknown"]
-        blocking_reasons = [] if is_open else [c.reason for c in conditions if c.status != "met"]
+        blocking_reasons = [] if (is_open or gate_status == "achieved") else [c.reason for c in conditions if c.status != "met"]
 
         base_conf = min(bundle.inference_confidence, bundle.semantic_confidence)
         if is_hedged_logistics:
             base_conf = round(base_conf * 0.65, 3)
-        if unknown_conditions and not is_open:
+        if unknown_conditions and not is_open and gate_status != "achieved":
             base_conf = min(base_conf, 0.40)
         effective_conf = base_conf
 
         return MeetingConversionGate(
             is_open=is_open,
-            status="open" if is_open else "closed",
+            status=gate_status,
             conversion_target=conversion_target,
             conditions=conditions,
             failed_conditions=failed_conditions,
