@@ -176,5 +176,5 @@ def test_condition_met_requires_prospect_originated_evidence_turn_ids():
             assert len(cond.evidence_turn_ids) > 0
             assert 2 in cond.evidence_turn_ids
         else:
-            assert cond.condition_name == "trust_not_collapsing"
+            assert cond.condition_name in ("trust_not_collapsing", "clear_value_reason", "decision_maker_aligned")
             assert cond.status == "unknown"

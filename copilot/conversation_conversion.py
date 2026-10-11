@@ -581,12 +581,7 @@ class MeetingConversionGateEngine:
         val_ok = not has_decision_to_stay and not is_vague_filler and not val_deficient and has_affirmative_value_evidence
 
         is_overridden4 = False
-        if has_explicit_commit and not has_decision_to_stay:
-            cond4_status = "met"
-            is_overridden4 = True
-            cond4_ev = [bundle.turn_id] if bundle.speaker_id == "client" else (prospect_turns[-1:] if prospect_turns else [bundle.turn_id])
-            reason4 = f"[OVERRIDE: Explicit commitment detected: '{commit_slot or bundle.utterance_text}'] Clear value justification established"
-        elif has_decision_to_stay:
+        if has_decision_to_stay:
             cond4_status = "not_met"
             cond4_ev = prospect_turns[-1:] if prospect_turns else []
             reason4 = "Prospect explicitly decided to stay and not sell; transaction value proposition is void"
@@ -643,10 +638,6 @@ class MeetingConversionGateEngine:
             cond5_status = "not_met"
             cond5_ev = dm_fact_turns if dm_fact_turns else (prospect_turns[-1:] if prospect_turns else [])
             reason5 = "Decision-maker absent, unaligned, or consultation required with unconfirmed party"
-        elif has_explicit_commit:
-            cond5_status = "met"
-            cond5_ev = [bundle.turn_id] if bundle.speaker_id == "client" else (prospect_turns[-1:] if prospect_turns else [bundle.turn_id])
-            reason5 = f"Decision authority confirmed via explicit commitment ({dec.primary_decision_maker or 'self-authorized'})"
         elif not prospect_turns or is_clean_slate_defaults:
             cond5_status = "unknown"
             cond5_ev = []
@@ -859,12 +850,17 @@ class MeetingConversionGateEngine:
         )
 
         # Gate Synthesis
-        if is_appointment_target and has_explicit_commit:
-            # Point 5 / Client Audit: Explicit commitment on appointment target
-            # opens the gate without claiming established trust, leaving trust_not_collapsing
-            # as unknown, provided no condition is 'not_met' and all non-trust conditions are 'met'.
+        if has_explicit_commit:
+            # Client Item 5 / Point 4: Explicit commitment detected
+            # opens the gate via a dedicated commitment path without falsely crediting
+            # unmeasured trust, unestablished value justification, or unverified decision authority.
+            # Conditions trust_not_collapsing, clear_value_reason, and decision_maker_aligned
+            # stay 'unknown' unless independently verified, while all procedural conditions
+            # (engagement_on_topic, objections_resolved_or_partial, plausible_logistics, no_active_boundary)
+            # must be 'met', and NO condition may be 'not_met'.
             is_open = not any(c.status == "not_met" for c in conditions) and all(
-                c.status == "met" for c in conditions if c.condition_name != "trust_not_collapsing"
+                c.status == "met" for c in conditions
+                if c.condition_name not in ("trust_not_collapsing", "clear_value_reason", "decision_maker_aligned")
             )
         else:
             is_open = all(c.status == "met" for c in conditions)

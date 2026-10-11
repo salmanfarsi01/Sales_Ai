@@ -509,9 +509,13 @@ class CoreDecisionManager:
                 if "STRATEGY_CARRIED_FORWARD" not in carried_dec.reason_codes:
                     carried_dec.reason_codes.append("STRATEGY_CARRIED_FORWARD")
                 carried_dec.strategic_objective = f"Continuation from Turn {carried_dec.carried_forward_from_turn_id}: {prev_dec.strategic_objective}"
-                # Recomputed confidence and breakdown from current snapshot (Gap 3)
-                carried_dec.confidence = final_decision.confidence
-                carried_dec.confidence_breakdown = dict(final_decision.confidence_breakdown) if final_decision.confidence_breakdown else {}
+                # Point 1 Re-baseline: Rep continuations strictly carry the client turn's confidence
+                # and breakdown identically, avoiding unanchored recomputation drift
+                carried_dec.confidence = prev_dec.confidence
+                carried_dec.confidence_breakdown = dict(prev_dec.confidence_breakdown) if prev_dec.confidence_breakdown else {}
+                carried_dec.push_strength = prev_dec.push_strength
+                if "LOW_CONFIDENCE_ACTION_DOWNGRADE" in prev_dec.reason_codes and "LOW_CONFIDENCE_ACTION_DOWNGRADE" not in carried_dec.reason_codes:
+                    carried_dec.reason_codes.append("LOW_CONFIDENCE_ACTION_DOWNGRADE")
                 # Re-attach full trace from current snapshot and context to maintain snapshot consistency (Point 1)
                 self.engine._attach_full_trace(
                     decision=carried_dec,

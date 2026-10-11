@@ -1568,7 +1568,7 @@ class ConversationStateManager:
                     "fact_key": "confirmed_meeting_time",
                     "fact_value": new_val,
                     "confidence": 0.85,
-                    "notes": f"Prospect confirmed meeting time directly: '{bundle.utterance_text[:60]}'",
+                    "notes": f"Prospect offered meeting time: '{bundle.utterance_text[:60]}'",
                 })
             else:
                 active_f = next((f for f in self.current_state.facts if f.fact_key == "confirmed_meeting_time" and f.status == "active"), None)

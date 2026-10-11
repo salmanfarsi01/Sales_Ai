@@ -658,7 +658,7 @@ def test_point1_snapshot_consistency_turn4_carry_forward():
     At Turn 4, the rep turn is a continuation of Turn 3's strategy.
     The decision bound to Turn 4's snapshot V10 MUST:
     - Have primary_action == ACKNOWLEDGE, strategic_posture == PROTECT, push_strength == NONE
-    - Have dynamically recomputed confidence matching the new snapshot (0.845, NOT Turn 3's 0.925)
+    - Have carried confidence matching the client turn snapshot (0.805, identical to Turn 3)
     - Report reason_codes: ['CONVERSION_CONFIRMED', 'CONFIRM_AND_PROTECT_ACTIVE', 'STRATEGY_CARRIED_FORWARD']
     - Report meeting_gate_open == False (matching V10 conversion_gate closed state)
     - In evidence_considered: report Gate: CLOSED (NEVER Turn 3's Gate: OPEN)
@@ -689,9 +689,9 @@ def test_point1_snapshot_consistency_turn4_carry_forward():
     assert dec4.primary_action == StrategicAction.ACKNOWLEDGE
     assert dec4.strategic_posture == "protect"
     assert dec4.push_strength == "none"
-    # Carried confidence is recomputed from the new snapshot, NOT the old Turn 3 value
-    assert dec4.confidence == 0.725
-    assert dec4.confidence != dec3.confidence
+    # Carried rep rows strictly carry their client turn's confidence (Turn 3: 0.805)
+    assert dec4.confidence == dec3.confidence
+    assert dec4.confidence == 0.805
     assert "CONVERSION_CONFIRMED" in dec4.reason_codes
     assert "CONFIRM_AND_PROTECT_ACTIVE" in dec4.reason_codes
     assert "STRATEGY_CARRIED_FORWARD" in dec4.reason_codes

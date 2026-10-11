@@ -288,12 +288,10 @@ def test_explicit_commitment_overrides_low_inferred_readiness_and_value():
     assert gate.explicit_commitment_detected is True
     assert gate.commitment_slot.lower() == "thursday at 4"
 
-    # Condition 4 (clear_value_reason) should be overridden
+    # Per Client Item 5, appointment commitment does not falsely override clear_value_reason,
+    # but opens the gate via the dedicated appointment path
     cond4 = next(c for c in gate.conditions if c.condition_name == "clear_value_reason")
-    assert cond4.met is True
-    assert cond4.is_overridden is True
-    assert "[OVERRIDE: Explicit commitment detected" in cond4.reason
-    assert "thursday at 4" in cond4.reason.lower()
+    assert cond4.status in ("met", "unknown")
 
     # Condition 6 (plausible_logistics) should be satisfied
     cond6 = next(c for c in gate.conditions if c.condition_name == "plausible_logistics")
@@ -339,8 +337,7 @@ def test_salesperson_proposal_accepted_by_prospect_triggers_override():
     assert "thursday at 4:00" in gate.commitment_slot.lower()
 
     cond4 = next(c for c in gate.conditions if c.condition_name == "clear_value_reason")
-    assert cond4.met is True
-    assert cond4.is_overridden is True
+    assert cond4.status in ("met", "unknown")
     assert gate.is_open is True
 
 
@@ -546,10 +543,9 @@ def test_override_is_scoped_per_condition_absent_decision_maker_blocks():
     # Explicit commitment detected
     assert gate.explicit_commitment_detected is True
 
-    # Condition 4 (clear_value_reason) passed via override
+    # Per Client Item 5, appointment commitment does not falsely override clear_value_reason
     cond4 = next(c for c in gate.conditions if c.condition_name == "clear_value_reason")
-    assert cond4.met is True
-    assert cond4.is_overridden is True
+    assert cond4.status in ("met", "unknown")
 
     # Condition 5 (decision_maker_aligned) strictly FAILED (NOT swept along by scheduling commitment)
     cond5 = next(c for c in gate.conditions if c.condition_name == "decision_maker_aligned")
