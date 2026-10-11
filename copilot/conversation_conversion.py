@@ -884,17 +884,22 @@ class MeetingConversionGateEngine:
             is_open = False
             gate_status = "achieved"
         elif has_explicit_commit:
-            # Client Point 4: Explicit appointment commitment path does not depend on clear_value_reason.
-            # Even if clear_value_reason is 'not_met' (e.g. prospect rejected fee explanation),
-            # the explicit appointment path does not block on it.
-            # However, no other condition may be 'not_met' (e.g. absent decision-maker strictly blocks),
-            # and all procedural conditions must be 'met'.
-            is_open = not any(
+            # Rule: An appointment agreement opens the gate when no condition other than
+            # value is not_met, and engagement, objections, logistics, and boundary are met.
+            # Trust, value, and authority may be unknown.
+            no_non_value_fails = not any(
                 c.status == "not_met" for c in conditions if c.condition_name != "clear_value_reason"
-            ) and all(
-                c.status == "met" for c in conditions
-                if c.condition_name not in ("trust_not_collapsing", "clear_value_reason", "decision_maker_aligned")
             )
+            required_met_conditions = {
+                "engagement_on_topic",
+                "objections_resolved_or_partial",
+                "plausible_logistics",
+                "no_active_boundary",
+            }
+            procedural_met = all(
+                c.status == "met" for c in conditions if c.condition_name in required_met_conditions
+            )
+            is_open = no_non_value_fails and procedural_met
             gate_status = "open" if is_open else "closed"
         else:
             is_open = all(c.status == "met" for c in conditions)

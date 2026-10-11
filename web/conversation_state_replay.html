@@ -1124,6 +1124,7 @@
       const milestone = conv.deal_milestone_status || (
         ceConfirmed ? 'appointment_confirmed' :
         (ceTentative ? 'appointment_tentative' :
+        (conv.gate_status === 'achieved' ? 'appointment_confirmed' :
         (gateOpen ? 'ready_to_close' :
         (conv.gate_status === 'closed' ? 'blocked' : 'pursuing')))
       );
@@ -1210,10 +1211,14 @@
           ? `<span class="badge badge-material">Mat: [${step.materiality.affected_targets.join(',')}]</span>`
           : '<span class="badge badge-muted">Filler</span>';
 
-        const stepGateOpen = step.state_after.conversion_gate && step.state_after.conversion_gate.is_open;
-        const gateBadge = stepGateOpen
-          ? '<span class="badge badge-open" style="font-size:10px">Gate Open</span>'
-          : '<span class="badge badge-closed" style="font-size:10px">Gate Closed</span>';
+        const stepGate = step.state_after.conversion_gate;
+        const stepGateStatus = stepGate ? (stepGate.status || (stepGate.is_open ? 'open' : 'closed')) : 'closed';
+        const stepGateOpen = stepGate && stepGate.is_open;
+        const gateBadge = stepGateStatus === 'achieved'
+          ? '<span class="badge badge-open" style="font-size:10px">ACHIEVED</span>'
+          : (stepGateOpen
+            ? '<span class="badge badge-open" style="font-size:10px">Gate Open</span>'
+            : '<span class="badge badge-closed" style="font-size:10px">Gate Closed</span>');
 
         const turnStage = step.state_after.conversation_stage || '';
         const stageBadge = turnStage
@@ -1230,7 +1235,7 @@
         if (hasActiveObjections) telemetryDots += '<span class="badge badge-closed" style="font-size:9px; padding:1px 4px;" title="Active Objection">OBJ</span> ';
         if (hasBoundary) telemetryDots += '<span class="badge badge-closed" style="font-size:9px; padding:1px 4px; background:#FEF2F2; color:#DC2626; border:1px solid #FECACA;" title="Boundary Reached">BND</span> ';
         if (hasCancelled) telemetryDots += '<span class="badge badge-closed" style="font-size:9px; padding:1px 4px; background:#FEF2F2; color:#DC2626; border:1px solid #FCA5A5;" title="Conversion Cancelled">CNCL</span> ';
-        if (hasConv || stepGateOpen) telemetryDots += '<span class="badge badge-open" style="font-size:9px; padding:1px 4px;" title="Conversion Confirmed / Gate Open">GATE</span> ';
+        if (hasConv || stepGateOpen || stepGateStatus === 'achieved') telemetryDots += '<span class="badge badge-open" style="font-size:9px; padding:1px 4px;" title="Conversion Confirmed / Gate Open">GATE</span> ';
 
         card.innerHTML = `
         <div class="turn-header">
@@ -1278,7 +1283,9 @@
         const turnCe = sAfter.conversion_event;
         const turnCeConfirmed = turnCe && (turnCe.status === 'confirmed' || turnCe.status === 'CONFIRMED');
         const turnCeTentative = turnCe && (turnCe.status === 'tentative' || turnCe.status === 'TENTATIVE');
-        const turnGateOpen = sAfter.conversion_gate ? sAfter.conversion_gate.is_open : false;
+        const turnGate = sAfter.conversion_gate;
+        const turnGateStatus = turnGate ? (turnGate.status || (turnGate.is_open ? 'open' : 'closed')) : 'closed';
+        const turnGateOpen = turnGate ? turnGate.is_open : false;
         const turnPush = sAfter.push_strength ? sAfter.push_strength.state : '—';
         const turnStage = sAfter.conversation_stage || '—';
         const isRegression = turnStage === 'decision_resolution' && turnNum === 10;
@@ -1287,8 +1294,10 @@
           ? `APPOINTMENT CONFIRMED — ${turnCe.start_at || 'confirmed'}`
           : (turnCeTentative
               ? `TENTATIVE — ${turnCe.start_at || 'time pending'}`
-              : (turnGateOpen ? 'Turn Gate: OPEN' : 'Turn Gate: CLOSED'));
-        const turnMilestoneClass = (turnCeConfirmed || turnGateOpen) ? 'badge-open' : (turnCeTentative ? 'badge-push' : 'badge-closed');
+              : (turnGateStatus === 'achieved'
+                  ? 'Turn Gate: ACHIEVED'
+                  : (turnGateOpen ? 'Turn Gate: OPEN' : 'Turn Gate: CLOSED')));
+        const turnMilestoneClass = (turnCeConfirmed || turnGateOpen || turnGateStatus === 'achieved') ? 'badge-open' : (turnCeTentative ? 'badge-push' : 'badge-closed');
         pillsEl.innerHTML = `
           <span class="badge ${stageBadgeClass}" style="font-weight:600;">Stage: ${escapeHtml(String(turnStage).toUpperCase())}${isRegression ? ' (REGRESSION)' : ''}</span>
           <span class="badge ${turnMilestoneClass}">${escapeHtml(turnMilestone)}</span>
@@ -1760,12 +1769,12 @@
 
       <!-- Conversion Gate & Push Strength -->
       ${gate && gate.conditions && gate.conditions.length > 0 ? `
-        <div class="card-unit" style="border: 1px solid ${gate.is_open ? 'var(--prospect-border)' : 'var(--danger-border)'}; background: ${gate.is_open ? '#F0FDF4' : '#FEF2F2'};">
+        <div class="card-unit" style="border: 1px solid ${gate.status === 'achieved' ? '#86EFAC' : (gate.is_open ? 'var(--prospect-border)' : 'var(--danger-border)')}; background: ${gate.status === 'achieved' ? '#F0FDF4' : (gate.is_open ? '#F0FDF4' : '#FEF2F2')};">
           <div class="card-unit-title">
             <span style="color:#000000; font-weight:700;">Meeting / Conversion Gate</span>
             <div style="display:flex; align-items:center; gap:6px;">
               <span class="badge" style="background:#F1F5F9; color:#0F172A; border:1px solid #CBD5E1; font-size:11px;">Target: ${escapeHtml(gate.conversion_target || 'appointment')}</span>
-              <span class="badge ${gate.is_open ? 'badge-open' : 'badge-closed'}">${gate.is_open ? 'OPEN' : 'CLOSED'}</span>
+              <span class="badge ${gate.status === 'achieved' ? 'badge-open' : (gate.is_open ? 'badge-open' : 'badge-closed')}">${gate.status === 'achieved' ? 'ACHIEVED' : (gate.is_open ? 'OPEN' : 'CLOSED')}</span>
             </div>
           </div>
 

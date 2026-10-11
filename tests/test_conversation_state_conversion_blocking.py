@@ -726,3 +726,90 @@ def test_point2_advance_via_blocker_clearance_and_regress_via_new_evidence():
     assert "transitioned to CLOSED" in gate_close_change.reason
     assert "decision_maker_aligned" in gate_close_change.reason
 
+
+def test_absent_decision_maker_blocks_explicit_commitment_appointment_opening():
+    """Verify that an absent decision-maker (not_met) strictly blocks the explicit-commitment
+    appointment gate opening, whereas unknown authority allows it to open.
+
+    Rule: An appointment agreement opens the gate when no condition other than value is not_met,
+    and engagement, objections, logistics and boundary are met. Trust, value and authority
+    may be unknown. But an absent decision-maker evaluates to not_met, which blocks the gate.
+    """
+    # 1. Clean slate baseline: prospect agrees to an appointment with UNKNOWN authority
+    # Gate opens because authority is unknown (not not_met), trust is unknown, value is unknown,
+    # but explicit commitment satisfies logistics, engagement, and boundary/objections are clear.
+    mgr_unknown = ConversationStateManager(call_sid="CA_test_unknown_auth", conversion_target="appointment")
+    t1_unknown = _create_turn_bundle(
+        turn_id=1,
+        speaker_id="client",
+        text="Sure, Thursday at 3pm works, let's meet then.",
+        trust=0.50,
+        engagement=0.70,
+        agreement=0.80,
+    )
+    s1_unknown = mgr_unknown.process_turn_bundle(t1_unknown)
+    gate_unknown = s1_unknown.conversion_gate
+
+    assert gate_unknown.explicit_commitment_detected is True
+    dm_cond_unknown = next(c for c in gate_unknown.conditions if c.condition_name == "decision_maker_aligned")
+    assert dm_cond_unknown.status == "unknown"
+    assert gate_unknown.is_open is True
+    assert gate_unknown.status == "open"
+
+    # 2. Absent spouse baseline: prospect agrees to the exact same appointment time,
+    # BUT spouse is known to be absent.
+    # Gate MUST remain CLOSED because decision_maker_aligned is not_met.
+    mgr_absent = ConversationStateManager(call_sid="CA_test_absent_dm", conversion_target="appointment")
+    t1_setup = _create_turn_bundle(
+        turn_id=1,
+        speaker_id="client",
+        text="My wife is on the deed with me, but she works afternoons so she's not here right now.",
+        trust=0.60,
+        engagement=0.65,
+    )
+    mgr_absent.process_turn_bundle(
+        t1_setup,
+        decision_updates={
+            "primary_decision_maker": "Co-Owners (Husband & Wife)",
+            "decision_maker_present": False,
+            "stakeholders": [
+                DecisionStakeholder(name="Husband", role="owner", presence="on_call"),
+                DecisionStakeholder(name="Wife", role="spouse", presence="absent"),
+            ],
+        },
+    )
+
+    t2_commit = _create_turn_bundle(
+        turn_id=2,
+        speaker_id="client",
+        text="Thursday at 3pm works, let's lock it in.",
+        trust=0.65,
+        engagement=0.75,
+        agreement=0.85,
+    )
+    s2_absent = mgr_absent.process_turn_bundle(t2_commit)
+    gate_absent = s2_absent.conversion_gate
+
+    assert gate_absent.explicit_commitment_detected is True
+    dm_cond_absent = next(c for c in gate_absent.conditions if c.condition_name == "decision_maker_aligned")
+    assert dm_cond_absent.status == "not_met"
+    # Even with explicit commitment, absent decision maker strictly blocks opening!
+    assert gate_absent.is_open is False
+    assert gate_absent.status == "closed"
+    assert "decision_maker_aligned" in gate_absent.failed_conditions
+
+    # 3. Standard path without explicit commitment: unknown authority keeps gate closed
+    mgr_no_commit = ConversationStateManager(call_sid="CA_test_no_commit", conversion_target="appointment")
+    t1_no_commit = _create_turn_bundle(
+        turn_id=1,
+        speaker_id="client",
+        text="Tell me about what you guys do.",
+        trust=0.50,
+        engagement=0.65,
+    )
+    s1_no_commit = mgr_no_commit.process_turn_bundle(t1_no_commit)
+    gate_no_commit = s1_no_commit.conversion_gate
+    assert gate_no_commit.explicit_commitment_detected is False
+    assert gate_no_commit.is_open is False
+    assert gate_no_commit.status == "closed"
+

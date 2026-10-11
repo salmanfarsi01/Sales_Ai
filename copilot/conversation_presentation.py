@@ -59,6 +59,8 @@ def compute_deal_milestone_status(state: ConversationStateSnapshot) -> str:
         return "appointment_confirmed"
     if ce and getattr(ce, "status", None) in (ConversionEventStatus.TENTATIVE, "tentative"):
         return "appointment_tentative"
+    if gate and getattr(gate, "status", None) == "achieved":
+        return "appointment_confirmed"
     if gate and getattr(gate, "is_open", False):
         return "ready_to_close"
     if gate and not getattr(gate, "is_open", False):
