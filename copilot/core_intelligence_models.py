@@ -213,19 +213,23 @@ class StrategicDecision(BaseModel):
         if gate_open is None and self.strategic_interpretation:
             gate_open = self.strategic_interpretation.get("meeting_gate_open")
 
+        gate_status = getattr(self, "gate_status", None)
+        if gate_status is None and self.strategic_interpretation:
+            gate_status = self.strategic_interpretation.get("gate_status")
+
         is_confirmed = self.conversion_confirmed
         if is_confirmed is None and self.strategic_interpretation:
             is_confirmed = self.strategic_interpretation.get("conversion_confirmed")
 
         violation_reason: Optional[str] = None
 
-        # 1. Closed Gate Constraint: When meeting gate is explicitly closed,
+        # 1. Closed/Achieved Gate Constraint: When meeting gate is closed or achieved,
         # close-style pushes (direct_ask, two_window_choice, high) and COMMITMENT_CLOSE are strictly forbidden.
-        if gate_open is False:
+        if gate_open is False or gate_status in ("closed", "achieved"):
             if self.primary_action == StrategicAction.COMMITMENT_CLOSE:
-                violation_reason = f"primary_action cannot be COMMITMENT_CLOSE when meeting gate is closed (decision_id={self.decision_id})"
+                violation_reason = f"primary_action cannot be COMMITMENT_CLOSE when meeting gate is closed or achieved (decision_id={self.decision_id})"
             elif self.push_strength in ("direct_ask", "two_window_choice") or (str(self.push_strength) == "high" and self.primary_action == StrategicAction.COMMITMENT_CLOSE):
-                violation_reason = f"push_strength cannot be close-style '{self.push_strength}' when meeting gate is closed (decision_id={self.decision_id})"
+                violation_reason = f"push_strength cannot be close-style '{self.push_strength}' when meeting gate is closed or achieved (decision_id={self.decision_id})"
             elif (self.push_strength == "confirm_and_protect" or self.strategic_posture == "protect") and not is_confirmed and "CONVERSION_CONFIRMED" in self.reason_codes:
                 violation_reason = f"push_strength cannot be confirm_and_protect when gate is closed without a confirmed conversion (decision_id={self.decision_id})"
 

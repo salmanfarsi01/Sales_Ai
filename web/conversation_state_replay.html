@@ -1121,13 +1121,20 @@
       const gateOpen = conv.gate_is_open;
 
       // Determine milestone
-      const milestone = conv.deal_milestone_status || (
-        ceConfirmed ? 'appointment_confirmed' :
-        (ceTentative ? 'appointment_tentative' :
-        (conv.gate_status === 'achieved' ? 'appointment_confirmed' :
-        (gateOpen ? 'ready_to_close' :
-        (conv.gate_status === 'closed' ? 'blocked' : 'pursuing')))
-      );
+      let milestone = conv.deal_milestone_status;
+      if (!milestone) {
+        if (ceConfirmed || conv.gate_status === 'achieved') {
+          milestone = 'appointment_confirmed';
+        } else if (ceTentative) {
+          milestone = 'appointment_tentative';
+        } else if (gateOpen) {
+          milestone = 'ready_to_close';
+        } else if (conv.gate_status === 'closed') {
+          milestone = 'blocked';
+        } else {
+          milestone = 'pursuing';
+        }
+      }
 
       // Determine label
       const milestoneLabel = conv.milestone_label || (
