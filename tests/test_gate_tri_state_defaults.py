@@ -171,7 +171,10 @@ def test_condition_met_requires_prospect_originated_evidence_turn_ids():
 
     assert gate.is_open is True
     for cond in gate.conditions:
-        assert cond.status == "met"
-        assert cond.met is True
-        assert len(cond.evidence_turn_ids) > 0
-        assert 2 in cond.evidence_turn_ids
+        if cond.status == "met":
+            assert cond.met is True
+            assert len(cond.evidence_turn_ids) > 0
+            assert 2 in cond.evidence_turn_ids
+        else:
+            assert cond.condition_name == "trust_not_collapsing"
+            assert cond.status == "unknown"

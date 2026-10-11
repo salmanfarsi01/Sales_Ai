@@ -1,29 +1,21 @@
 import json, sys
+from pathlib import Path
 sys.path.insert(0, ".")
-from copilot.conversation_state_contract import BehavioralSignalInputBundle
-from copilot.conversation_state_manager import ConversationStateManager
-from copilot.core_intelligence_engine import PitchProXCoreIntelligenceEngine
+from copilot.conversation_replay import ConversationReplayEngine
 
-with open("reports/synthetic/conversation_state_sim_mucj0p5s.json", encoding="utf-8") as f:
-    data = json.load(f)
-
-mgr = ConversationStateManager(call_sid="sim_mucj0p5s")
-core = PitchProXCoreIntelligenceEngine()
+raw_turns = json.loads(Path("data/script_canonical.json").read_text(encoding="utf-8"))
+engine = ConversationReplayEngine()
+report = engine.replay_dialogue_turns(call_sid="sim_mucj0p5s", raw_turns=raw_turns, save_report=True, run_semantic_analysis=False)
 
 timeline_records = []
-for t in data["timeline"]:
-    eb = BehavioralSignalInputBundle(**t["evidence_bundle"])
-    snap = mgr.process_turn_bundle(eb)
-    eval_res = core.evaluate(snap, turn_speaker=eb.speaker_id, turn_text=eb.utterance_text)
-    
+for step in report.timeline:
     rec = {
-        "turn_id": eb.turn_id,
-        "speaker_id": eb.speaker_id,
-        "utterance_text": eb.utterance_text,
-        "evidence_bundle": eb.model_dump(),
-        "state_snapshot": snap.model_dump(),
-        "strategic_decision": eval_res.decision.model_dump() if eval_res and eval_res.decision else None,
-        "strategic_context": eval_res.context.model_dump() if eval_res and eval_res.context else None,
+        "turn_id": step.turn_id,
+        "speaker_id": step.evidence_bundle.speaker_id,
+        "utterance_text": step.evidence_bundle.utterance_text,
+        "evidence_bundle": step.evidence_bundle.model_dump(),
+        "state_snapshot": step.state_after.model_dump(),
+        "strategic_decision": step.strategic_decision.model_dump() if step.strategic_decision else None,
     }
     timeline_records.append(rec)
 
@@ -31,7 +23,7 @@ golden_data = {
     "call_sid": "sim_mucj0p5s",
     "description": "Full-field corrected golden snapshot of 18-turn benchmark conversation",
     "timeline": timeline_records,
-    "final_state": mgr.current_state.model_dump(),
+    "final_state": report.final_state.model_dump(),
 }
 
 with open("reports/synthetic/conversation_state_sim_mucj0p5s_golden.json", "w", encoding="utf-8") as f:

@@ -1095,15 +1095,15 @@ def test_point10_confirmed_conversion_unmeasured_trust_discount_exemption_bounda
     )
     dec = eval_res.decision
 
-    # 1. Trust confidence must not be capped to 0.45 because confirmed conversion is exempt
-    assert dec.confidence_breakdown["trust_confidence"] == 0.70
+    # 1. Under Point 5 Re-baseline, unmeasured trust is capped at 0.45 (no exemption for confirmed conversions)
+    assert dec.confidence_breakdown["trust_confidence"] == 0.45
     assert dec.confidence_breakdown["momentum_adjustment"] == -0.08
 
-    # 2. Final confidence calculation: 0.80 * 0.70 + 0.70 * 0.30 - 0.08 = 0.6900
-    assert dec.confidence == 0.6900
-    assert dec.confidence >= engine.confidence_threshold
+    # 2. Final confidence calculation: 0.80 * 0.70 + 0.45 * 0.30 - 0.08 = 0.560 + 0.135 - 0.08 = 0.6150
+    assert dec.confidence == 0.6150
 
-    # 4. Full Replay Condition Verification: Base 0.90, trust_confidence 0.85, advancing +0.04 -> 0.925
+    # 4. Full Replay Condition Verification (Point 5 Re-baseline):
+    # Base 0.90, unmeasured trust capped at 0.45, advancing +0.04 -> 0.805
     snap_replay = snap.model_copy(deep=True)
     snap_replay.dimensions.trust_confidence = 0.85
     snap_replay.conversion_gate.confidence = 0.90
@@ -1115,9 +1115,9 @@ def test_point10_confirmed_conversion_unmeasured_trust_discount_exemption_bounda
         turn_text="Thursday at 3 works, and my wife will be there.",
         turn_id=18,
     )
-    # 0.90 * 0.70 + 0.85 * 0.30 + 0.04 = 0.630 + 0.255 + 0.040 = 0.9250
-    assert eval_replay.decision.confidence == 0.9250
-    assert eval_replay.decision.confidence_breakdown["final_confidence"] == 0.9250
+    # 0.90 * 0.70 + 0.45 * 0.30 + 0.04 = 0.630 + 0.135 + 0.040 = 0.8050
+    assert eval_replay.decision.confidence == 0.8050
+    assert eval_replay.decision.confidence_breakdown["final_confidence"] == 0.8050
 
 
 def test_point10_recurring_objection_low_confidence_push_capping():

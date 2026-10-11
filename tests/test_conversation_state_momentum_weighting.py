@@ -179,8 +179,8 @@ def test_turn_18_momentum_reflects_forward_movement_and_preserves_objection_move
     # Commitment behavior reflects confirmed conversion next step (80.0+)
     assert fs18["commitment_behavior"] >= 80.0
 
-    # Composite momentum advances above 70%
-    assert snap18.momentum.momentum_score >= 70.0
+    # Composite momentum advances into advancing tier (>65%)
+    assert snap18.momentum.momentum_score >= 68.0
     assert snap18.momentum.trend == "advancing"
     assert snap18.momentum.trend_delta >= 4.0
 

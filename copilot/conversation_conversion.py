@@ -331,26 +331,13 @@ class MeetingConversionGateEngine:
                 reason1 = f"Trust score ({trust_val:.2f}) is below minimum threshold ({cfg.gate_min_trust:.2f})"
             else:
                 reason1 = f"Emotion tension ({tension_val:.2f}) exceeds maximum allowable threshold ({cfg.gate_max_tension:.2f})"
-        elif has_trust_affirmation and is_trust_measured:
-            cond1_status = "met"
-            reason1 = f"Trust healthy ({trust_val:.2f} >= {cfg.gate_min_trust:.2f}) and tension contained ({tension_val:.2f} <= {cfg.gate_max_tension:.2f})"
-            cond1_ev = trust_evidence_turns if trust_evidence_turns else (prospect_turns[-1:] if prospect_turns else [])
-        elif has_explicit_commit:
-            # Point 5: Distinguish defaults from measured evidence throughout gate evaluation.
-            # An appointment agreement can support the appointment without establishing trust.
-            cond1_status = "met"
-            if is_trust_measured:
-                reason1 = f"Trust measured ({trust_val:.2f} >= {cfg.gate_min_trust:.2f}) and tension contained ({tension_val:.2f} <= {cfg.gate_max_tension:.2f})"
-            else:
-                reason1 = f"Trust unmeasured default ({trust_val:.2f}) and tension contained ({tension_val:.2f} <= {cfg.gate_max_tension:.2f})"
-            cond1_ev = trust_evidence_turns if trust_evidence_turns else (prospect_turns[-1:] if prospect_turns else [])
-        elif is_trust_measured and trust_val >= cfg.gate_min_trust and tension_val <= cfg.gate_max_tension:
+        elif is_trust_measured and (has_trust_affirmation or (trust_val >= cfg.gate_min_trust and tension_val <= cfg.gate_max_tension)):
             cond1_status = "met"
             reason1 = f"Trust healthy ({trust_val:.2f} >= {cfg.gate_min_trust:.2f}) and tension contained ({tension_val:.2f} <= {cfg.gate_max_tension:.2f})"
             cond1_ev = trust_evidence_turns if trust_evidence_turns else (prospect_turns[-1:] if prospect_turns else [])
         else:
             cond1_status = "unknown"
-            reason1 = f"Trust dynamics sitting on neutral baseline ({trust_val:.2f} default, unmeasured) without affirmative trust evidence"
+            reason1 = f"Trust dynamics sitting on neutral baseline ({trust_val:.2f} unmeasured default) without affirmative trust evidence"
             cond1_ev = []
 
         conditions.append(
@@ -872,10 +859,19 @@ class MeetingConversionGateEngine:
         )
 
         # Gate Synthesis
-        is_open = all(c.status == "met" for c in conditions)
+        if is_appointment_target and has_explicit_commit:
+            # Point 5 / Client Audit: Explicit commitment on appointment target
+            # opens the gate without claiming established trust, leaving trust_not_collapsing
+            # as unknown, provided no condition is 'not_met' and all non-trust conditions are 'met'.
+            is_open = not any(c.status == "not_met" for c in conditions) and all(
+                c.status == "met" for c in conditions if c.condition_name != "trust_not_collapsing"
+            )
+        else:
+            is_open = all(c.status == "met" for c in conditions)
+
         failed_conditions = [c.condition_name for c in conditions if c.status == "not_met"]
         unknown_conditions = [c.condition_name for c in conditions if c.status == "unknown"]
-        blocking_reasons = [c.reason for c in conditions if c.status != "met"]
+        blocking_reasons = [] if is_open else [c.reason for c in conditions if c.status != "met"]
 
         base_conf = min(bundle.inference_confidence, bundle.semantic_confidence)
         if is_hedged_logistics:

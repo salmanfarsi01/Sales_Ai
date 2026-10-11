@@ -679,7 +679,7 @@ def test_point1_snapshot_consistency_turn4_carry_forward():
     res3 = cdm.evaluate_state(snapshot=snap3, turn_speaker="client", turn_text=step3["text"], turn_id=3)
     dec3 = res3.decision
     assert dec3.meeting_gate_open is True
-    assert dec3.confidence == 0.925
+    assert dec3.confidence == 0.805
 
     # Evaluate Turn 4 (Rep turn continuation)
     res4 = cdm.evaluate_state(snapshot=snap4, turn_speaker="salesperson", turn_text=step4["text"], turn_id=4)
@@ -690,7 +690,7 @@ def test_point1_snapshot_consistency_turn4_carry_forward():
     assert dec4.strategic_posture == "protect"
     assert dec4.push_strength == "none"
     # Carried confidence is recomputed from the new snapshot, NOT the old Turn 3 value
-    assert dec4.confidence == 0.845
+    assert dec4.confidence == 0.725
     assert dec4.confidence != dec3.confidence
     assert "CONVERSION_CONFIRMED" in dec4.reason_codes
     assert "CONFIRM_AND_PROTECT_ACTIVE" in dec4.reason_codes

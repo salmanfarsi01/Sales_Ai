@@ -116,10 +116,15 @@ class PitchProXCoreIntelligenceEngine:
                 )
             )
 
+            has_active_concern_in_turn = (
+                active_turn_objection is not None
+                and any(w in t_lower for w in ("fee", "fees", "commission", "expensive", "cost", "price", "still", "bothers me", "don't get", "dont get", "too much"))
+            )
+
             if is_deferral and unresolved_objections:
                 target_obj = active_turn_objection or unresolved_objections[-1]
                 eval_res = self._build_deferred_to_meeting_decision(snapshot, context, target_obj, turn_timestamp_ms, turn_text=turn_text)
-            elif is_persistent_concern:
+            elif active_turn_objection is not None and (is_persistent_concern or has_active_concern_in_turn):
                 eval_res = self._build_protect_appointment_with_concern_decision(snapshot, context, active_turn_objection, turn_timestamp_ms, turn_text=turn_text)
             else:
                 eval_res = self._build_confirm_protect_decision(snapshot, context, turn_timestamp_ms)
@@ -284,13 +289,8 @@ class PitchProXCoreIntelligenceEngine:
             breakdown["base_source"] = base
 
         # Trust confidence weight: if trust is unmeasured, discount its contribution
-        # Exemption: Explicitly confirmed conversions (Point 5 / Point 10 harmony)
-        is_confirmed_conversion = (
-            context.conversion_confirmed
-            or "CONVERSION_CONFIRMED" in decision.reason_codes
-            or "CONFIRM_AND_PROTECT_ACTIVE" in decision.reason_codes
-        )
-        is_trust_measured = getattr(snapshot.dimensions, "trust_measured", False) or (context.trust_score != 50.0) or is_confirmed_conversion
+        # Point 5 / Client Audit: Do not grant default trust credit to confirmed conversions
+        is_trust_measured = getattr(snapshot.dimensions, "trust_measured", False) or (context.trust_score != 50.0)
         trust_conf = snapshot.dimensions.trust_confidence if is_trust_measured else min(self.unmeasured_trust_cap, snapshot.dimensions.trust_confidence)
         breakdown["trust_confidence"] = trust_conf
 

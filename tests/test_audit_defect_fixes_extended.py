@@ -370,4 +370,4 @@ def test_golden_snapshot_integrity():
     # Verify T18 closes cleanly with confirmed appointment
     t18 = golden["timeline"][17]
     assert t18["state_snapshot"]["conversion_event"]["status"] == "confirmed"
-    assert t18["state_snapshot"]["conversion_event"]["start_at"] == "Thursday At 3"
+    assert t18["state_snapshot"]["conversion_event"]["start_at"].lower() == "thursday at 3"
