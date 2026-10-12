@@ -158,7 +158,7 @@ class StrategyAttemptOutcome(BaseModel):
     attempted_at_turn_id: int
     prospect_response_turn_id: int
     prospect_response_summary: str = Field(..., description="Explanation of how prospect reacted, e.g. partial_acceptance_objection_persists")
-    effectiveness: Literal["effective", "partial", "insufficient", "rejected", "no_response"]
+    effectiveness: Literal["effective", "partial", "insufficient", "rejected", "no_response", "deferred"]
     evidence: Dict[str, float] = Field(default_factory=dict, description="Behavioral signals from response turn, e.g. agreement_score, specificity_score")
     timestamp_ms: int = 0
 
@@ -464,6 +464,8 @@ class PushStrengthRecommendation(BaseModel):
     recommended_action: str
     confidence: float = Field(1.0, ge=0.0, le=1.0)
     pressure: str = Field(default="none", description="Pressure level: none, low, moderate, high (Point 6)")
+    preliminary_ceiling: str = Field(default="moderate", description="State preliminary pressure ceiling: none, low, moderate, high (Point 6)")
+    selected_pressure: Optional[str] = Field(default=None, description="Selected pressure from StrategicDecision (distinct from state ceiling)")
     strategic_posture: str = Field(default="protect", description="Posture: protect, advance, explore, coordinate (Point 6)")
     strategy: str = Field(default="confirm_and_protect", description="Action/strategy name: confirm_and_protect, resolve_then_ask, etc.")
     legacy_strategy_alias: Optional[str] = Field(default=None, description="Explicit legacy strategy alias (Point 6)")
@@ -487,6 +489,7 @@ class PushStrengthRecommendation(BaseModel):
             self.strategic_posture = "explore"
         elif st in ("none", "low", "moderate", "high"):
             self.pressure = st
+        self.preliminary_ceiling = self.pressure
 
     @property
     def push_strength(self) -> str:

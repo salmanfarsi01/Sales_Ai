@@ -833,14 +833,15 @@ class ConversationStateManager:
                 )
             )
 
-        # 4. Evaluate Objection Lifecycle (Gated by Materiality or Pending Reframe Response)
-        if "objections" in materiality.affected_targets or (getattr(self.objections_engine, "pending_reframe_strategy", None) and bundle.speaker_id == "client"):
-            # Sync any out-of-band added objections into the lifecycle engine
-            engine_ids = {o.objection_id for o in self.objections_engine._objections}
-            for o in self.current_state.objections:
-                if o.objection_id not in engine_ids:
-                    self.objections_engine._objections.append(o)
+        # 4. Evaluate Objection Lifecycle (Gated by Materiality, Deferral, or Pending Reframe Response)
+        # Sync any out-of-band added objections into the lifecycle engine
+        engine_ids = {o.objection_id for o in self.objections_engine._objections}
+        for o in self.current_state.objections:
+            if o.objection_id not in engine_ids:
+                self.objections_engine._objections.append(o)
 
+        from .conversation_objections import is_meeting_deferral_statement
+        if "objections" in materiality.affected_targets or is_meeting_deferral_statement(bundle.utterance_text) or (getattr(self.objections_engine, "pending_reframe_strategy", None) and bundle.speaker_id == "client"):
             updated_objs, obj_changes, next_version = self.objections_engine.evaluate_turn(
                 bundle=bundle,
                 current_version=next_version,

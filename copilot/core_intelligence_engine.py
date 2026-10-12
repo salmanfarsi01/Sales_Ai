@@ -659,11 +659,7 @@ class PitchProXCoreIntelligenceEngine:
 
         ref_facts = [meeting_fact.fact_id] if meeting_fact else []
 
-        # Point 3: When client explicitly defers discussion to the meeting, retain that concern for follow-up
-        primary_obj.deferred_to_meeting = True
-        primary_obj.retained_for_followup = True
-        primary_obj.resolution_evidence = f"Prospect explicitly deferred {primary_obj.canonical_category} discussion to confirmed meeting on {slot or 'meeting'}"
-
+        # Point 3: Deferral flag is set strictly by the state layer (ObjectionLifecycleEngine)
         category = primary_obj.canonical_category.replace("_", " ")
 
         decision = StrategicDecision(

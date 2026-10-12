@@ -148,6 +148,37 @@ def is_objection_concession_statement(utterance_text: str) -> bool:
     return any(re.search(p, clean) for p in concession_patterns)
 
 
+MEETING_DEFERRAL_PATTERNS = [
+    r"\b(?:talk|discuss|cover|look\s+at|go\s+over|review|address)\s+(?:about\s+it|it|that|everything|the\s+fees?|fees?|numbers?|details)?\s*(?:in|at|during|when\s+we\s+meet)\b",
+    r"\b(?:we\s+can|we'll|we\s+will|let's)\s+(?:go\s+over|talk\s+about|discuss|cover|look\s+at|address|review)\s+(?:the\s+fees?|fees?|it|that|everything|the\s+numbers)?\s*(?:in|at|during|when\s+we\s+meet|in\s+our\s+meeting|at\s+the\s+meeting)\b",
+    r"\b(?:leave|save|push|table)\s+it\b.*?\b(?:for\s+the\s+|in\s+the\s+|to\s+the\s+|in\s+our\s+|until\s+our\s+|until\s+the\s+)?meeting\b",
+    r"\b(?:leave\s+it|save\s+it)\b.*?\b(?:we\s+will|we'll|we\s+can)\s+(?:talk|discuss|go\s+over)\b",
+    r"\btalk\s+(?:about\s+it|more\s+about\s+it)\s+in\s+(?:our\s+|the\s+)?meeting\b",
+    r"\b(?:figure|sort)\s+(?:it\s+all|that|it)\s+out\s+(?:in|at|during|when\s+we\s+meet)\b",
+    r"\b(?:go\s+over|review|discuss)\s+(?:the\s+)?(?:fees?|commission|numbers?|costs?)\s+when\s+we\s+meet\b",
+]
+
+NEGATIVE_DEFERRAL_PATTERNS = [
+    r"\bwhat\s+time\s+is\s+the\s+meeting\b",
+    r"\blet['’]?s\s+meet\s+to\s+sign\b",
+    r"\bwhere\s+is\s+the\s+meeting\b",
+    r"\bwho\s+is\s+(?:coming|attending)\b",
+    r"\bcan\s+we\s+reschedule\s+the\s+meeting\b",
+]
+
+
+def is_meeting_deferral_statement(utterance_text: str) -> bool:
+    """Detects whether prospect defers objection discussion to the scheduled meeting.
+    Excludes meeting operational questions or pure signing readiness statements.
+    """
+    if not utterance_text:
+        return False
+    clean = utterance_text.lower().strip()
+    if any(re.search(p, clean) for p in NEGATIVE_DEFERRAL_PATTERNS):
+        return False
+    return any(re.search(p, clean) for p in MEETING_DEFERRAL_PATTERNS)
+
+
 def classify_objection_label(utterance_text: str) -> Optional[str]:
     """Classifies the semantic category label for an objection utterance.
 
@@ -253,7 +284,7 @@ class ObjectionLifecycleEngine:
         self,
         target_obj: ObjectionRecord,
         bundle: BehavioralSignalInputBundle,
-        effectiveness: Literal["effective", "partial", "insufficient", "rejected", "no_response"],
+        effectiveness: Literal["effective", "partial", "insufficient", "rejected", "no_response", "deferred"],
         summary: str,
         next_version: int,
         changes: List[StateChangeRecord],
@@ -565,9 +596,24 @@ class ObjectionLifecycleEngine:
                     matched_obj.latest_statement = bundle.utterance_text
                     matched_obj.last_updated_turn_id = bundle.turn_id
 
-                    # If concern repeats after a failed reframe, it remains/reverts to ACTIVE
-                    if bundle.recurrence_type == "concern_after_failed_reframe" and matched_obj.lifecycle_state == "partially_resolved":
+                    # Reiterate concern: reverts partially_resolved or partially_addressed back to ACTIVE
+                    old_s = getattr(matched_obj.lifecycle_state, "value", matched_obj.lifecycle_state)
+                    if old_s in ("partially_resolved", "partially_addressed"):
                         matched_obj.lifecycle_state = ObjectionLifecycleState.ACTIVE
+                        next_version += 1
+                        changes.append(
+                            StateChangeRecord(
+                                state_version_before=next_version - 1,
+                                state_version_after=next_version,
+                                field_path=f"objections.{matched_obj.objection_id}.lifecycle_state",
+                                old_value=old_s,
+                                new_value=ObjectionLifecycleState.ACTIVE.value,
+                                triggering_turn_id=bundle.turn_id,
+                                evidence_ids=bundle.contributing_evidence_ids,
+                                reason=f"Objection '{matched_obj.canonical_category}' reiterated by prospect; reverted from {old_s} to ACTIVE.",
+                                timestamp_ms=bundle.timestamp_ms,
+                            )
+                        )
 
                     next_version += 1
                     changes.append(
@@ -683,6 +729,67 @@ class ObjectionLifecycleEngine:
                             )
                         )
 
+            # Check if this statement is deferring the concern to a meeting
+            target_concern = matched_obj or (new_obj if 'new_obj' in locals() else None)
+            is_deferral = is_meeting_deferral_statement(bundle.utterance_text)
+            if is_deferral and target_concern:
+                if not getattr(target_concern, "deferred_to_meeting", False):
+                    target_concern.deferred_to_meeting = True
+                    target_concern.retained_for_followup = True
+                    target_concern.latest_statement = bundle.utterance_text
+                    target_concern.last_updated_turn_id = bundle.turn_id
+                    next_version += 1
+                    changes.append(
+                        StateChangeRecord(
+                            state_version_before=next_version - 1,
+                            state_version_after=next_version,
+                            field_path=f"objections.{target_concern.objection_id}.deferred_to_meeting",
+                            old_value=False,
+                            new_value=True,
+                            triggering_turn_id=bundle.turn_id,
+                            evidence_ids=bundle.contributing_evidence_ids,
+                            reason=f"Objection '{target_concern.canonical_category}' explicitly deferred to scheduled meeting by prospect; retained as active open concern.",
+                            timestamp_ms=bundle.timestamp_ms,
+                        )
+                    )
+
+                # Keep objection strictly ACTIVE (never partially_resolved or resolved on deferral)
+                old_ls = getattr(target_concern.lifecycle_state, "value", target_concern.lifecycle_state)
+                if old_ls not in (ObjectionLifecycleState.ACTIVE.value, "active"):
+                    target_concern.lifecycle_state = ObjectionLifecycleState.ACTIVE
+                    next_version += 1
+                    changes.append(
+                        StateChangeRecord(
+                            state_version_before=next_version - 1,
+                            state_version_after=next_version,
+                            field_path=f"objections.{target_concern.objection_id}.lifecycle_state",
+                            old_value=old_ls,
+                            new_value=ObjectionLifecycleState.ACTIVE.value,
+                            triggering_turn_id=bundle.turn_id,
+                            evidence_ids=bundle.contributing_evidence_ids,
+                            reason=f"Deferred objection '{target_concern.canonical_category}' preserved in ACTIVE state for in-person review.",
+                            timestamp_ms=bundle.timestamp_ms,
+                        )
+                    )
+
+                if self.pending_reframe_strategy:
+                    next_version = self._record_strategy_outcome(
+                        target_obj=target_concern,
+                        bundle=bundle,
+                        effectiveness="deferred",
+                        summary=f"Prospect deferred discussion of '{target_concern.canonical_category}' to scheduled meeting following '{self.pending_reframe_strategy}' reframe",
+                        next_version=next_version,
+                        changes=changes,
+                    )
+                    self.pending_reframe_objection_id = None
+                    self.pending_reframe_strategy = None
+                    self.pending_reframe_turn_id = None
+
+                self.pending_reframe_objection_id = None
+                self.pending_reframe_strategy = None
+                self.pending_reframe_turn_id = None
+                return self._objections, changes, next_version
+
             # If a reframe was pending and prospect reiterated/raised an objection, record as rejected
             if self.pending_reframe_strategy:
                 reframe_target = self.get_objection_by_id(self.pending_reframe_objection_id) if self.pending_reframe_objection_id else (matched_obj or (new_obj if 'new_obj' in locals() else None))
@@ -771,10 +878,68 @@ class ObjectionLifecycleEngine:
         target_obj = (
             self.get_objection_by_id(self.pending_reframe_objection_id)
             if self.pending_reframe_objection_id
-            else self.get_objection_by_id(self.active_focus_objection_id)
+            else (
+                self.get_objection_by_id(self.active_focus_objection_id)
+                if self.active_focus_objection_id
+                else next((o for o in reversed(self._objections) if o.lifecycle_state in ("active", "unresolved", "clarified", "partially_resolved", "reactivated", ObjectionLifecycleState.ACTIVE)), None)
+            )
         )
 
         if target_obj and target_obj.lifecycle_state in ("active", "unresolved", "clarified", "partially_resolved", "reactivated", ObjectionLifecycleState.ACTIVE):
+            is_deferral = is_meeting_deferral_statement(bundle.utterance_text)
+            if is_deferral:
+                if not getattr(target_obj, "deferred_to_meeting", False):
+                    target_obj.deferred_to_meeting = True
+                    target_obj.retained_for_followup = True
+                    target_obj.latest_statement = bundle.utterance_text
+                    target_obj.last_updated_turn_id = bundle.turn_id
+                    next_version += 1
+                    changes.append(
+                        StateChangeRecord(
+                            state_version_before=next_version - 1,
+                            state_version_after=next_version,
+                            field_path=f"objections.{target_obj.objection_id}.deferred_to_meeting",
+                            old_value=False,
+                            new_value=True,
+                            triggering_turn_id=bundle.turn_id,
+                            evidence_ids=bundle.contributing_evidence_ids,
+                            reason=f"Objection '{target_obj.canonical_category}' explicitly deferred to scheduled meeting by prospect; retained as active open concern.",
+                            timestamp_ms=bundle.timestamp_ms,
+                        )
+                    )
+
+                # Keep objection strictly ACTIVE (never partially_resolved or resolved on deferral)
+                old_ls = getattr(target_obj.lifecycle_state, "value", target_obj.lifecycle_state)
+                if old_ls not in (ObjectionLifecycleState.ACTIVE.value, "active"):
+                    target_obj.lifecycle_state = ObjectionLifecycleState.ACTIVE
+                    next_version += 1
+                    changes.append(
+                        StateChangeRecord(
+                            state_version_before=next_version - 1,
+                            state_version_after=next_version,
+                            field_path=f"objections.{target_obj.objection_id}.lifecycle_state",
+                            old_value=old_ls,
+                            new_value=ObjectionLifecycleState.ACTIVE.value,
+                            triggering_turn_id=bundle.turn_id,
+                            evidence_ids=bundle.contributing_evidence_ids,
+                            reason=f"Deferred objection '{target_obj.canonical_category}' preserved in ACTIVE state for in-person review.",
+                            timestamp_ms=bundle.timestamp_ms,
+                        )
+                    )
+
+                if self.pending_reframe_strategy:
+                    next_version = self._record_strategy_outcome(
+                        target_obj=target_obj,
+                        bundle=bundle,
+                        effectiveness="deferred",
+                        summary=f"Prospect deferred discussion of '{target_obj.canonical_category}' to scheduled meeting following '{self.pending_reframe_strategy}' reframe",
+                        next_version=next_version,
+                        changes=changes,
+                    )
+                    self.pending_reframe_objection_id = None
+                    self.pending_reframe_strategy = None
+                    self.pending_reframe_turn_id = None
+
             # Check for FULL RESOLUTION (Scoped specifically to this targeted objection)
             # Requires forward behavioral commitment on this topic (agreement >= 0.75 or future_language >= 0.60)
             # OR explicit concession/reversal by prospect
@@ -786,11 +951,24 @@ class ObjectionLifecycleEngine:
                 bundle.utterance_text.lower(),
             ))
 
-            is_scoped_resolution = (
-                bundle.agreement_score >= 0.75
-                or bundle.future_language_score >= 0.60
-                or (bundle.readiness.score >= 0.70 and bundle.agreement_score >= 0.65)
-                or concession_detected
+            is_scoped_resolution = (not is_deferral) and (
+                concession_detected
+                or (
+                    target_obj.lifecycle_state in ("partially_resolved", ObjectionLifecycleState.PARTIALLY_RESOLVED)
+                    and (
+                        bundle.agreement_score >= 0.75
+                        or bundle.future_language_score >= 0.60
+                        or (bundle.readiness.score >= 0.70 and bundle.agreement_score >= 0.65)
+                    )
+                )
+                or (
+                    self.pending_reframe_objection_id == target_obj.objection_id
+                    and (
+                        bundle.agreement_score >= 0.75
+                        or bundle.future_language_score >= 0.60
+                        or (bundle.readiness.score >= 0.70 and bundle.agreement_score >= 0.65)
+                    )
+                )
             ) and bundle.boundary_score < 0.20
 
             if is_scoped_resolution:
@@ -833,7 +1011,8 @@ class ObjectionLifecycleEngine:
             # Requires positive prospect acknowledgement (agreement >= 0.40) following an agent reframe,
             # or process curiosity/openness, but without full forward resolution commitment.
             is_partial_acceptance = (
-                self.pending_reframe_objection_id == target_obj.objection_id
+                not is_deferral
+                and self.pending_reframe_objection_id == target_obj.objection_id
                 and (
                     bundle.agreement_score >= 0.40
                     or any(

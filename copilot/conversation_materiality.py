@@ -284,6 +284,12 @@ class MaterialityFilter:
                 forced_targets.update(["objections", "dimensions"])
                 forced_reasons.append(f"Deterministic Override: client expressed canonical objection ({obj_label}).")
 
+        # 3c. Client Meeting Deferral Override
+        from .conversation_objections import is_meeting_deferral_statement
+        if bundle.speaker_id == "client" and is_meeting_deferral_statement(bundle.utterance_text):
+            forced_targets.update(["objections", "facts"])
+            forced_reasons.append("Deterministic Override: client deferred objection to scheduled meeting.")
+
         # 4. Explicit Payload Fact Updates Overrides
         if has_explicit_fact_updates:
             forced_targets.add("facts")

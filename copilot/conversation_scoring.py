@@ -260,7 +260,6 @@ class ConversationScoringEngine:
             or bool(bundle.emotion.observable_signals)
             or dims.emotion_tension > 0.25
             or dims.emotion_tension < 0.15
-            or bool(current_state.objections)
         )
         if has_tension_ev:
             inv_tension = (1.0 - dims.emotion_tension) * 100.0
@@ -291,10 +290,12 @@ class ConversationScoringEngine:
         if has_engagement_ev:
             logical_sub_components.append((dims.engagement * 100.0, 0.30))
 
+        is_spec_measured = getattr(bundle, "specificity_measured", False)
         has_spec_or_future_ev = (
-            getattr(bundle, "specificity_measured", False)
+            is_spec_measured
             or getattr(bundle, "future_language_measured", False)
-            or abs(bundle.specificity_score - 0.50) > 0.05
+            or (abs(bundle.specificity_score - 0.50) > 0.05 and abs(bundle.specificity_score - 0.60) > 0.001)
+            or (abs(bundle.specificity_score - 0.50) > 0.05 and is_spec_measured)
             or bundle.future_language_score > 0.20
             or any(f.category in ("problem", "financial", "property") and f.status == "active" for f in current_state.facts)
         )

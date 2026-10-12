@@ -683,7 +683,7 @@
       <div id="kpiOpenConcerns" style="margin-top: 4px;"></div>
     </div>
     <div class="kpi-item">
-      <span class="kpi-label">Final Push Recommendation</span>
+      <span class="kpi-label">Final Push (Selected Pressure)</span>
       <span class="kpi-value" id="kpiPush"><span class="badge badge-muted">—</span></span>
     </div>
     <div class="kpi-item">
@@ -1169,7 +1169,10 @@
       document.getElementById('kpiGate').innerHTML = gateHtml;
 
       // Push badge
-      document.getElementById('kpiPush').innerHTML = `<span class="badge badge-push">${conv.push_strength || '—'}</span>`;
+      const finalPushVal = conv.push_strength || (conv.pressure || '—');
+      const finalAlias = conv.legacy_strategy_alias || (finalState.push_strength ? finalState.push_strength.state : '');
+      const aliasBadge = finalAlias ? `<div style="font-size:10px;color:#64748B;margin-top:2px;">Alias: ${escapeHtml(finalAlias)}</div>` : '';
+      document.getElementById('kpiPush').innerHTML = `<span class="badge badge-push">${escapeHtml(finalPushVal)}</span>${aliasBadge}`;
 
       // Momentum
       const momScore = formatNumber(conv.momentum_score, 0);
@@ -1681,7 +1684,7 @@
             <div style="display:flex; gap:6px; flex-wrap:wrap; margin-bottom:6px;">
               <span class="badge" style="background:#4F46E5; color:#FFFFFF; font-weight:700; font-size:11px;">PRIMARY: ${escapeHtml(String(sd.primary_action).toUpperCase())}</span>
               ${sd.secondary_action ? `<span class="badge" style="background:#EEF2FF; color:#4338CA; border:1px solid #C7D2FE; font-weight:600; font-size:11px;">SECONDARY: ${escapeHtml(String(sd.secondary_action).toUpperCase())}</span>` : ''}
-              <span class="badge badge-push" style="font-size:10.5px;">Push: ${escapeHtml(sd.push_strength)}</span>
+              <span class="badge badge-push" style="font-size:10.5px;">Selected Pressure: ${escapeHtml(sd.push_strength && sd.push_strength.pressure ? sd.push_strength.pressure : sd.push_strength)}</span>
             </div>
             <div style="font-size:12px; color:#1E1B4B; margin-bottom:6px; background:#F8FAFC; padding:6px 8px; border-radius:4px; border:1px solid #E0E7FF;">
               <strong>Objective:</strong> ${escapeHtml(sd.strategic_objective)}
@@ -1792,12 +1795,23 @@
             </div>
           ` : ''}
 
-          <div style="margin: 10px 0;">
-            <div style="font-size: 11px; text-transform: uppercase; color: #334155; font-weight: 700;">Push Strength Recommendation</div>
-            <div style="display:flex;align-items:center;gap:8px;margin-top:4px;">
-              <span class="badge badge-push" style="font-size:13px;padding:3px 10px;">${push.state || '—'}</span>
+          <div style="margin: 10px 0; background: #FFFFFF; border: 1px solid var(--border); border-radius: 6px; padding: 10px 12px;">
+            <div style="font-size: 11px; text-transform: uppercase; color: #334155; font-weight: 700; margin-bottom: 6px;">Push Strength & Pressure Ceiling</div>
+            <div style="display:flex; flex-direction:column; gap:4px;">
+              <div style="font-size: 12px; color: #000000;">
+                <strong style="color:#000000;">Selected Pressure:</strong>
+                <span class="badge badge-push" style="font-size:11px;padding:2px 8px;margin-left:4px;">${escapeHtml(sd ? (sd.push_strength && sd.push_strength.pressure ? sd.push_strength.pressure : sd.push_strength) : (push.selected_pressure || push.pressure || '—'))}</span>
+              </div>
+              <div style="font-size: 12px; color: #000000;">
+                <strong style="color:#000000;">State Preliminary Ceiling:</strong>
+                <span class="mono" style="font-weight:600; color:#475569; margin-left:4px;">${escapeHtml(push.preliminary_ceiling || push.pressure || 'moderate')}</span>
+              </div>
+              <div style="font-size: 11.5px; color: #475569;">
+                <strong style="color:#000000;">Preliminary Strategy Alias (Legacy):</strong>
+                <span class="mono" style="color:#475569; margin-left:4px;">${escapeHtml(push.legacy_strategy_alias || push.state || 'resolve_then_ask')}</span>
+              </div>
             </div>
-            <div style="font-size: 12px; margin-top: 6px; color: #000000;">
+            <div style="font-size: 12px; margin-top: 8px; color: #000000;">
               <strong style="color:#000000;">Action:</strong> <span style="color:#000000;">${escapeHtml(push.recommended_action || '—')}</span>
             </div>
             <div style="font-size: 11.5px; color: #1E293B; margin-top: 4px;">
