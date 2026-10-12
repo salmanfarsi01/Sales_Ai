@@ -1294,7 +1294,11 @@ class PitchProXCoreIntelligenceEngine:
             )
             or decision.primary_action == StrategicAction.COMMITMENT_CLOSE
         )
-        has_insufficient_ev = (snapshot.readiness and snapshot.readiness.insufficient_evidence) or (snapshot.readiness and snapshot.readiness.readiness_score is None)
+        has_insufficient_ev = (
+            (snapshot.readiness and snapshot.readiness.insufficient_evidence)
+            or (snapshot.readiness and snapshot.readiness.readiness_score is None)
+            or context.readiness_score is None
+        )
         if readiness_relevant:
             if has_insufficient_ev:
                 evidence.append("Readiness: UNKNOWN (Insufficient Evidence)")
@@ -1391,7 +1395,7 @@ class PitchProXCoreIntelligenceEngine:
             "boundary_suspected": context.boundary_suspected,
             "push_strength_state": context.push_strength_state,
             "active_objections": context.active_objections,
-            "readiness_score": None if has_insufficient_ev else round(context.readiness_score, 1),
+            "readiness_score": None if (has_insufficient_ev or context.readiness_score is None) else round(context.readiness_score, 1),
             "momentum_trend": context.momentum_trend,
             "cross_metric_penalties": context.cross_metric_penalties,
         }

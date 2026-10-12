@@ -107,6 +107,7 @@ def compute_open_concerns(state: ConversationStateSnapshot) -> List[Dict[str, An
                 "category": o.canonical_category,
                 "lifecycle_state": getattr(st, "value", str(st)),
                 "latest_statement": o.latest_statement,
+                "deferral_statement": getattr(o, "deferral_statement", None),
                 "deferred_to_meeting": getattr(o, "deferred_to_meeting", False),
                 "retained_for_followup": getattr(o, "retained_for_followup", False),
             })
@@ -131,7 +132,11 @@ def format_open_concerns_summary(concerns: List[Dict[str, Any]]) -> str:
         st = str(c.get("lifecycle_state", "active")).lower()
         st_disp = LIFECYCLE_DISPLAY_MAPPING.get(st, st.replace("_", " "))
         if c.get("deferred_to_meeting"):
-            parts.append(f"{cat_disp} — deferred to meeting")
+            stmt = c.get("latest_statement")
+            if stmt:
+                parts.append(f"{cat_disp} — deferred to meeting: '{stmt}'")
+            else:
+                parts.append(f"{cat_disp} — deferred to meeting")
         else:
             parts.append(f"{cat_disp} — {st_disp}")
 

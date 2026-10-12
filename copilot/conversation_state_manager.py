@@ -269,6 +269,50 @@ class ConversationStateManager:
             metadata=metadata,
         )
 
+    def finalize_call(self) -> List[Any]:
+        """Automatically called at call completion to persist open concerns and deferred objections to memory.
+
+        Iterates active and deferred objections and persists eligible records to ProspectMemoryStore
+        when user_id and prospect_id are provided (Point 15).
+        """
+        if not self.user_id or not self.prospect_id:
+            LOGGER.debug("Memory persistence skipped on call finalize: user_id or prospect_id not set.")
+            return []
+
+        saved_records = []
+        for obj in self.current_state.objections:
+            is_deferred = getattr(obj, "deferred_to_meeting", False)
+            is_active = obj.lifecycle_state in (
+                ObjectionLifecycleState.ACTIVE,
+                "active",
+                ObjectionLifecycleState.UNRESOLVED,
+                "unresolved",
+                ObjectionLifecycleState.REACTIVATED,
+                "reactivated",
+            )
+            if is_deferred or is_active:
+                status_desc = "deferred to scheduled meeting" if is_deferred else f"remains {obj.lifecycle_state}"
+                stmt = obj.latest_statement or obj.initial_statement
+                content = f"Prospect objection '{obj.canonical_category}' {status_desc}: '{stmt}'."
+                rec = self.save_prospect_memory(
+                    memory_type="objection",
+                    key=obj.canonical_category,
+                    value={
+                        "category": obj.canonical_category,
+                        "deferred_to_meeting": is_deferred,
+                        "retained_for_followup": getattr(obj, "retained_for_followup", False),
+                        "latest_statement": obj.latest_statement,
+                        "deferral_statement": getattr(obj, "deferral_statement", None),
+                        "lifecycle_state": getattr(obj.lifecycle_state, "value", str(obj.lifecycle_state)),
+                    },
+                    content=content,
+                    source_turn_id=obj.last_updated_turn_id,
+                    confidence=obj.confidence,
+                )
+                if rec:
+                    saved_records.append(rec)
+        return saved_records
+
 
     def process_turn_bundle(
         self,

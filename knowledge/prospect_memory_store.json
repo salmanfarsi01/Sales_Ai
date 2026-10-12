@@ -1407,6 +1407,36 @@
         "content": "Selling a 2-bedroom condo",
         "confidence": 1.0,
         "metadata": {}
+      },
+      {
+        "memory_id": "mem_396a663a7c",
+        "user_id": "rep_david",
+        "prospect_id": "prospect_timeline_only",
+        "source_call_sid": "call_david_prior",
+        "timestamp": 1791788630379,
+        "memory_type": "timeline",
+        "source_turn_id": 2,
+        "source_event_id": null,
+        "key": "timeline_horizon",
+        "value": "six_months",
+        "content": "Moving in six months",
+        "confidence": 1.0,
+        "metadata": {}
+      },
+      {
+        "memory_id": "mem_e20fac00bf",
+        "user_id": "rep_david",
+        "prospect_id": "prospect_timeline_only",
+        "source_call_sid": "call_david_prior",
+        "timestamp": 1791788630380,
+        "memory_type": "fact",
+        "source_turn_id": 3,
+        "source_event_id": null,
+        "key": "property_type",
+        "value": "condo",
+        "content": "Selling a 2-bedroom condo",
+        "confidence": 1.0,
+        "metadata": {}
       }
     ]
   },

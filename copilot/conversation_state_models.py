@@ -196,6 +196,7 @@ class ObjectionRecord(BaseModel):
     dormancy_evidence: Optional[DormancyEvidence] = None
     deferred_to_meeting: bool = Field(default=False, description="True when prospect explicitly defers discussion of this objection to the scheduled meeting (Point 3)")
     retained_for_followup: bool = Field(default=False, description="True when concern is retained for meeting follow-up (Point 3)")
+    deferral_statement: Optional[str] = Field(default=None, description="The prospect utterance that deferred this concern to the scheduled meeting (Point 3)")
 
     def get_failed_strategies(self) -> List[str]:
         """Returns list of strategy tags that failed (insufficient or rejected) on this objection."""
@@ -466,6 +467,7 @@ class PushStrengthRecommendation(BaseModel):
     pressure: str = Field(default="none", description="Pressure level: none, low, moderate, high (Point 6)")
     preliminary_ceiling: str = Field(default="moderate", description="State preliminary pressure ceiling: none, low, moderate, high (Point 6)")
     selected_pressure: Optional[str] = Field(default=None, description="Selected pressure from StrategicDecision (distinct from state ceiling)")
+    push_strength: str = Field(default="none", description="Closing push strength pressure level: none, low, moderate, high (Point 6)")
     strategic_posture: str = Field(default="protect", description="Posture: protect, advance, explore, coordinate (Point 6)")
     strategy: str = Field(default="confirm_and_protect", description="Action/strategy name: confirm_and_protect, resolve_then_ask, etc.")
     legacy_strategy_alias: Optional[str] = Field(default=None, description="Explicit legacy strategy alias (Point 6)")
@@ -490,11 +492,7 @@ class PushStrengthRecommendation(BaseModel):
         elif st in ("none", "low", "moderate", "high"):
             self.pressure = st
         self.preliminary_ceiling = self.pressure
-
-    @property
-    def push_strength(self) -> str:
-        """Pressure level describing closing push strength (Point 6)."""
-        return self.pressure
+        self.push_strength = self.selected_pressure or self.pressure
 
 
 class ConversionEventObject(BaseModel):

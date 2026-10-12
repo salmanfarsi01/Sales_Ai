@@ -201,6 +201,7 @@ class ConversationReplayEngine:
             timeline.append(step)
             prior_bundle = bundle
 
+        manager.finalize_call()
         final_state = manager.current_state.model_copy(deep=True)
 
         # Single Source of Truth: summary's push pressure and posture derive from the decision (Point 6)

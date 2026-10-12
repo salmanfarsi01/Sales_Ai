@@ -736,7 +736,9 @@ class ObjectionLifecycleEngine:
                 if not getattr(target_concern, "deferred_to_meeting", False):
                     target_concern.deferred_to_meeting = True
                     target_concern.retained_for_followup = True
-                    target_concern.latest_statement = bundle.utterance_text
+                    target_concern.deferral_statement = bundle.utterance_text
+                    if not target_concern.latest_statement:
+                        target_concern.latest_statement = bundle.utterance_text
                     target_concern.last_updated_turn_id = bundle.turn_id
                     next_version += 1
                     changes.append(
@@ -891,7 +893,9 @@ class ObjectionLifecycleEngine:
                 if not getattr(target_obj, "deferred_to_meeting", False):
                     target_obj.deferred_to_meeting = True
                     target_obj.retained_for_followup = True
-                    target_obj.latest_statement = bundle.utterance_text
+                    target_obj.deferral_statement = bundle.utterance_text
+                    if not target_obj.latest_statement:
+                        target_obj.latest_statement = bundle.utterance_text
                     target_obj.last_updated_turn_id = bundle.turn_id
                     next_version += 1
                     changes.append(
