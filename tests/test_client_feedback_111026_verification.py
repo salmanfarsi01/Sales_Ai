@@ -243,7 +243,10 @@ def test_deferred_concern_remains_active_not_partially_resolved():
 
 def test_deferred_concern_eligible_memory_processing_and_isolation(tmp_path):
     """Client requirement:
-    - save_prospect_memory writes objection record with turn provenance
+    - save_prospect_memory / finalize_call writes objection record with turn provenance
+    - End-to-end replay engine execution calls finalize_call() and persists concern
+    - Duplicate prevention: calling finalize_call() twice or re-saving in Call 2 does not create duplicate records
+    - Fail-closed: missing user_id returns [] cleanly without crashing teardown
     - Second call by same user loads it into loaded_prospect_memory (not facts)
     - Different user gets zero exposure
     """
@@ -252,16 +255,21 @@ def test_deferred_concern_eligible_memory_processing_and_isolation(tmp_path):
     user_bob = "user_agent_bob_99"
     prospect_p1 = "prospect_homeowner_77"
 
-    # Call 1: Alice has call with prospect, records deferred objection in state
+    # 1. Fail-closed test: missing user_id or prospect_id must fail closed and return [] without crashing
+    mgr_no_user = ConversationStateManager(call_sid="call_no_user", memory_store=store)
+    assert mgr_no_user.finalize_call() == []
+
+    # 2. Call 1: Alice has call with prospect, records deferred objection in state
+    call1_sid = "call_1_alice_prospect"
     mgr_call1 = ConversationStateManager(
-        call_sid="call_1_alice_prospect",
+        call_sid=call1_sid,
         user_id=user_alice,
         prospect_id=prospect_p1,
         memory_store=store,
     )
-    b3 = _make_bundle(3, "client", "Your commission is still too expensive.", "call_1_alice_prospect")
+    b3 = _make_bundle(3, "client", "Your commission is still too expensive.", call1_sid)
     mgr_call1.process_turn_bundle(b3)
-    b8 = _make_bundle(8, "client", "ok leave it we will talk about it in our meeting Thursday at 4 pm", "call_1_alice_prospect")
+    b8 = _make_bundle(8, "client", "ok leave it we will talk about it in our meeting Thursday at 4 pm", call1_sid)
     mgr_call1.process_turn_bundle(b8)
 
     # Automated call finalization: persists deferred open concerns to memory automatically
@@ -269,7 +277,7 @@ def test_deferred_concern_eligible_memory_processing_and_isolation(tmp_path):
     assert len(saved_records) == 1
     rec = saved_records[0]
     assert rec is not None
-    assert rec.source_call_sid == "call_1_alice_prospect"
+    assert rec.source_call_sid == call1_sid
     assert rec.source_turn_id == 8
     assert rec.user_id == user_alice
     assert rec.prospect_id == prospect_p1
@@ -277,7 +285,13 @@ def test_deferred_concern_eligible_memory_processing_and_isolation(tmp_path):
     assert rec.value["latest_statement"] == "Your commission is still too expensive."
     assert rec.value["deferral_statement"] == "ok leave it we will talk about it in our meeting Thursday at 4 pm"
 
-    # Call 2: Alice calls the same prospect again -> Loads into loaded_prospect_memory
+    # 3. Duplicate Prevention Test: calling finalize_call() a second time on the same call must NOT duplicate memory
+    saved_records_repeat = mgr_call1.finalize_call()
+    assert len(saved_records_repeat) == 1
+    all_alice_records = store.retrieve_memories(user_id=user_alice, prospect_id=prospect_p1)
+    assert len(all_alice_records) == 1, "Duplicate finalize_call() must not create duplicate memory items"
+
+    # 4. Call 2: Alice calls the same prospect again -> Loads into loaded_prospect_memory
     mgr_call2_alice = ConversationStateManager(
         call_sid="call_2_alice_prospect",
         user_id=user_alice,
@@ -290,14 +304,22 @@ def test_deferred_concern_eligible_memory_processing_and_isolation(tmp_path):
     loaded = mgr_call2_alice.current_state.loaded_prospect_memory[0]
     assert loaded.key == "commission_fee"
     assert loaded.memory_type == "objection"
-    assert loaded.provenance.source_call_sid == "call_1_alice_prospect"
+    assert loaded.provenance.source_call_sid == call1_sid
     assert loaded.provenance.source_turn_id == 8
 
     # CRITICAL: Must NOT be injected into facts!
     fact_keys = [f.fact_key for f in mgr_call2_alice.current_state.facts]
     assert "commission_fee" not in fact_keys
 
-    # Call 3: Bob (different user) calls the same prospect -> ZERO retrieval
+    # 5. Call 2 re-save de-duplication: finalize_call on Call 2 updates rather than duplicating
+    b_c2 = _make_bundle(2, "client", "Still wondering about the fee we talked about.", "call_2_alice_prospect")
+    mgr_call2_alice.process_turn_bundle(b_c2)
+    saved_c2 = mgr_call2_alice.finalize_call()
+    assert len(saved_c2) == 1
+    all_alice_after_c2 = store.retrieve_memories(user_id=user_alice, prospect_id=prospect_p1)
+    assert len(all_alice_after_c2) == 1, "Second call re-saving objection must update, not duplicate"
+
+    # 6. Call 3: Bob (different user) calls the same prospect -> ZERO retrieval
     mgr_call3_bob = ConversationStateManager(
         call_sid="call_3_bob_prospect",
         user_id=user_bob,
@@ -529,54 +551,54 @@ def test_canonical_18_turn_readiness_evolution_and_cap_behavior():
 def test_ui_renders_selected_pressure_and_preliminary_alias_labels():
     """Client requirement: Node test verifying that 'Selected Pressure' and
     'Preliminary Strategy Alias (Legacy)' render in web/conversation_state_replay.html.
+    Extracts the actual Push Strength template directly from web/conversation_state_replay.html.
     """
     html_path = Path("web/conversation_state_replay.html")
     assert html_path.exists()
     content = html_path.read_text(encoding="utf-8")
 
-    # Verify literal label existence in the DOM markup
+    # 1. Verify literal label existence in the DOM markup
     assert "Selected Pressure" in content
     assert "Preliminary Strategy Alias (Legacy)" in content
     assert "State Preliminary Ceiling" in content
 
-    # Run Node.js evaluation to verify JS render string output
-    node_script = """
-    const push = {
+    # 2. Extract the exact Push Strength card template from conversation_state_replay.html
+    match = re.search(
+        r"(<div style=\"margin: 10px 0; background: #FFFFFF; border: 1px solid var\(--border\);[\s\S]*?Push Strength & Pressure Ceiling[\s\S]*?Rationale:[\s\S]*?</div>\s*</div>)",
+        content,
+    )
+    assert match is not None, "Could not extract Push Strength card template from HTML"
+    card_template = match.group(1)
+
+    # 3. Run Node.js evaluation on the extracted template
+    node_script = f"""
+    const push = {{
       state: "resolve_then_ask",
       pressure: "moderate",
       preliminary_ceiling: "moderate",
       legacy_strategy_alias: "resolve_then_ask",
       recommended_action: "Engage prospect",
       rationale: "Discover needs"
-    };
-    const sd = {
-      push_strength: { pressure: "none" },
+    }};
+    const sd = {{
+      push_strength: {{ pressure: "none" }},
       primary_action: "acknowledge"
-    };
+    }};
 
-    function escapeHtml(str) { return String(str); }
+    function escapeHtml(str) {{ return String(str); }}
 
-    const renderedHtml = `
-      <div>
-        <strong>Selected Pressure:</strong>
-        <span>${escapeHtml(sd.push_strength.pressure)}</span>
-      </div>
-      <div>
-        <strong>State Preliminary Ceiling:</strong>
-        <span>${escapeHtml(push.preliminary_ceiling)}</span>
-      </div>
-      <div>
-        <strong>Preliminary Strategy Alias (Legacy):</strong>
-        <span>${escapeHtml(push.legacy_strategy_alias)}</span>
-      </div>
-    `;
+    const renderedHtml = `{card_template}`;
 
     if (!renderedHtml.includes("Selected Pressure:") ||
         !renderedHtml.includes("State Preliminary Ceiling:") ||
-        !renderedHtml.includes("Preliminary Strategy Alias (Legacy):")) {
+        !renderedHtml.includes("Preliminary Strategy Alias (Legacy):")) {{
       console.error("Missing required labels in rendered output!");
       process.exit(1);
-    }
+    }}
+    if (!renderedHtml.includes("none") || !renderedHtml.includes("moderate") || !renderedHtml.includes("resolve_then_ask")) {{
+      console.error("Values not rendered properly in template!");
+      process.exit(1);
+    }}
     console.log("NODE_TEST_PASSED");
     """
     res = subprocess.run(["node", "-e", node_script], capture_output=True, text=True, check=True)

@@ -259,7 +259,12 @@ class ProspectMemoryStore:
 
         existing = self._storage[u_id][p_id]
         for idx, item in enumerate(existing):
-            if item.memory_id == record.memory_id:
+            if (
+                item.memory_id == record.memory_id
+                or (item.source_call_sid == record.source_call_sid and item.memory_type == record.memory_type and item.key == record.key)
+                or (item.memory_type == "objection" and item.key == record.key)
+            ):
+                record.memory_id = item.memory_id
                 existing[idx] = record
                 self._persist()
                 return record
