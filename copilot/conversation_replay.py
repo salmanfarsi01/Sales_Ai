@@ -17,7 +17,7 @@ from .conversation_state_models import (
 from .conversation_materiality import MaterialityClassification
 from .conversation_state_manager import ConversationStateManager
 from .core_intelligence_models import StrategicDecision
-from .core_decision_manager import CoreDecisionManager
+from .core_decision_manager import CoreDecisionManager, StrategicDecisionCache
 from .llm_response_gateway import LLMResponseGateway
 
 LOGGER = logging.getLogger("copilot.conversation_replay")
@@ -129,6 +129,8 @@ class ConversationReplayEngine:
 
         timeline: List[TurnReplayStep] = []
         prior_bundle: Optional[BehavioralSignalInputBundle] = None
+        # Client Feedback 141026 / Isolation: Clear any prior cache for this call_sid to prevent stale UUID leakage
+        StrategicDecisionCache.clear(call_sid)
         decision_manager = CoreDecisionManager(call_sid=call_sid)
         gateway = LLMResponseGateway()
 

@@ -60,6 +60,62 @@ class StrategicDecisionCache:
         cls._call_turn_index[(str(call_sid), eff_turn)] = frozen
 
     @classmethod
+    def validate_evidence_consistency(
+        cls,
+        decision: Optional[StrategicDecision],
+        snapshot: Optional[Any],
+    ) -> Tuple[bool, str]:
+        """Validates that all evidence references (facts, objections, stakeholders)
+        in the StrategicDecision resolve strictly within the bound ConversationStateSnapshot (Client Feedback 141026).
+        """
+        if decision is None:
+            return False, "decision is None"
+        if snapshot is None:
+            return True, "No snapshot provided for evidence consistency check"
+
+        # 1. Facts
+        state_fact_ids = {getattr(f, "fact_id", None) for f in getattr(snapshot, "facts", [])}
+        for fid in getattr(decision, "referenced_fact_ids", []):
+            if fid and fid not in state_fact_ids:
+                return (
+                    False,
+                    f"Evidence reference mismatch: referenced_fact_id '{fid}' not found in bound snapshot facts (state_version {getattr(snapshot, 'state_version', '?')})",
+                )
+
+        # 2. Objections
+        state_obj_ids = {getattr(o, "objection_id", None) for o in getattr(snapshot, "objections", [])}
+        for oid in getattr(decision, "referenced_objection_ids", []):
+            if oid and oid not in state_obj_ids:
+                return (
+                    False,
+                    f"Evidence reference mismatch: referenced_objection_id '{oid}' not found in bound snapshot objections (state_version {getattr(snapshot, 'state_version', '?')})",
+                )
+
+        # 3. Stakeholders
+        state_stk_ids = set()
+        for s in getattr(snapshot, "stakeholders", []):
+            if hasattr(s, "stakeholder_id") and s.stakeholder_id:
+                state_stk_ids.add(s.stakeholder_id)
+            if hasattr(s, "role") and s.role:
+                state_stk_ids.add(f"stakeholder_{s.role}")
+                state_stk_ids.add(s.role)
+        if hasattr(snapshot, "decision_structure") and getattr(snapshot.decision_structure, "stakeholders", None):
+            for s in snapshot.decision_structure.stakeholders:
+                if hasattr(s, "stakeholder_id") and s.stakeholder_id:
+                    state_stk_ids.add(s.stakeholder_id)
+                if hasattr(s, "role") and s.role:
+                    state_stk_ids.add(f"stakeholder_{s.role}")
+                    state_stk_ids.add(s.role)
+        for sid in getattr(decision, "referenced_stakeholder_ids", []):
+            if sid and sid not in state_stk_ids:
+                return (
+                    False,
+                    f"Evidence reference mismatch: referenced_stakeholder_id '{sid}' not found in bound snapshot stakeholders (state_version {getattr(snapshot, 'state_version', '?')})",
+                )
+
+        return True, "All referenced evidence IDs resolve within bound snapshot"
+
+    @classmethod
     def get_strictly_bound(
         cls,
         call_sid: str,
@@ -67,10 +123,13 @@ class StrategicDecisionCache:
         source_state_version: int,
         source_event_id: str,
         state_call_sid: str,
+        snapshot: Optional[Any] = None,
     ) -> Optional[StrategicDecision]:
         """Validates all four keys together: call_sid + turn_id + source_state_version + source_event_id,
-        and enforces mandatory state_call_sid source state ownership (Point 1).
-        Rejects lookup if any key mismatches, is missing, or if state_call_sid does not match call_sid.
+        enforces mandatory state_call_sid source state ownership (Point 1),
+        and verifies that all evidence references resolve within the bound snapshot (Client Feedback 141026).
+        Rejects lookup if any key mismatches, is missing, if state_call_sid does not match call_sid,
+        or if referenced facts/objections do not exist in the snapshot.
         """
         if not call_sid or turn_id is None or source_state_version is None or not source_event_id:
             return None
@@ -94,6 +153,10 @@ class StrategicDecisionCache:
                 and actual_event
                 and actual_event == str(source_event_id)
             ):
+                if snapshot is not None:
+                    ev_valid, _ = cls.validate_evidence_consistency(dec, snapshot)
+                    if not ev_valid:
+                        return None
                 return dec.model_copy(deep=True)
         return None
 
@@ -106,9 +169,12 @@ class StrategicDecisionCache:
         source_state_version: int,
         source_event_id: str,
         state_call_sid: str,
+        snapshot: Optional[Any] = None,
     ) -> Tuple[bool, str]:
-        """Validates that a decision strictly matches all 4 keys.
-        Fails if any key is missing or null on either side, or if state_call_sid does not match (Point 1).
+        """Validates that a decision strictly matches all 4 keys and resolves all evidence references
+        within the bound snapshot (Client Feedback 141026).
+        Fails if any key is missing or null on either side, if state_call_sid does not match (Point 1),
+        or if referenced facts/objections/stakeholders do not exist in the snapshot.
         """
         if decision is None:
             return False, "decision is None"
@@ -154,7 +220,13 @@ class StrategicDecisionCache:
         if actual_event != expected_event and actual_event != f"ev_t{turn_id}":
             return False, f"source_event_id mismatch: expected '{expected_event}', got '{actual_event}'"
 
-        return True, "Valid 4-key binding"
+        # 5. Evidence Reference Consistency (Client Feedback 141026)
+        if snapshot is not None:
+            ev_ok, ev_reason = cls.validate_evidence_consistency(decision, snapshot)
+            if not ev_ok:
+                return False, ev_reason
+
+        return True, "Valid 4-key binding and evidence reference consistency"
 
     @classmethod
     def get(
@@ -164,10 +236,11 @@ class StrategicDecisionCache:
         turn_id: Optional[int] = None,
         source_event_id: Optional[str] = None,
         state_call_sid: Optional[str] = None,
+        snapshot: Optional[Any] = None,
     ) -> Optional[StrategicDecision]:
         """Retrieves a cached decision. When turn_id and source_event_id are provided,
-        strictly validates all 4 keys together (call_sid, turn_id, source_state_version, source_event_id)
-        and verifies mandatory state_call_sid.
+        strictly validates all 4 keys together (call_sid, turn_id, source_state_version, source_event_id),
+        verifies mandatory state_call_sid, and verifies evidence reference consistency against snapshot.
         """
         if not call_sid:
             raise ValueError("call_sid is required to query cached StrategicDecision.")
@@ -181,6 +254,7 @@ class StrategicDecisionCache:
                 source_state_version=source_state_version,
                 source_event_id=source_event_id,
                 state_call_sid=state_call_sid,
+                snapshot=snapshot,
             )
 
         if turn_id is not None:
@@ -298,7 +372,18 @@ class CoreDecisionManager:
             ):
                 return False, "Cannot carry forward confirmation or close strategy while active objection is recurring (Client Item 3)"
 
-        # 4. Invariant Validator Check
+        # 4. Evidence reference consistency: Carried strategy's referenced facts and objections
+        # must exist in the target snapshot (Client Feedback 141026).
+        state_fact_ids = {getattr(f, "fact_id", None) for f in getattr(snapshot, "facts", [])}
+        for fid in getattr(strategy, "referenced_fact_ids", []):
+            if fid and fid not in state_fact_ids:
+                return False, f"Cannot carry forward strategy: referenced_fact_id '{fid}' does not exist in target snapshot"
+        state_obj_ids = {getattr(o, "objection_id", None) for o in getattr(snapshot, "objections", [])}
+        for oid in getattr(strategy, "referenced_objection_ids", []):
+            if oid and oid not in state_obj_ids:
+                return False, f"Cannot carry forward strategy: referenced_objection_id '{oid}' does not exist in target snapshot"
+
+        # 5. Invariant Validator Check
         try:
             test_dec = strategy.model_copy(deep=True)
             test_dec.meeting_gate_open = is_gate_open
@@ -323,7 +408,7 @@ class CoreDecisionManager:
         effective_turn_id = turn_id if turn_id is not None else getattr(snapshot, "last_updated_turn_id", None)
         effective_event_id = f"ev_turn_{effective_turn_id}_v{snapshot.state_version}" if (effective_turn_id is not None and snapshot.state_version is not None) else None
 
-        # Point 1 & Point 3: Process-level cache check validating all four keys
+        # Point 1 & Point 3: Process-level cache check validating all four keys + snapshot evidence references
         if use_cache and snapshot.state_version is not None and effective_turn_id is not None and effective_event_id and not playbook and not calibration:
             snap_call_sid = (getattr(snapshot, "call_sid", None) or "").strip()
             # If snapshot has no valid call_sid, refuse cache lookup (fail-closed, never fail-open)
@@ -336,6 +421,7 @@ class CoreDecisionManager:
                     source_state_version=int(snapshot.state_version),
                     source_event_id=effective_event_id,
                     state_call_sid=snap_call_sid,
+                    snapshot=snapshot,
                 )
             if cached_decision is not None:
                 context = self.engine._build_context(snapshot)

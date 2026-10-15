@@ -1623,7 +1623,58 @@
           };
         }
 
-        return { valid: true, reason: "All four keys valid (call_sid + turn_id + source_state_version + source_event_id)" };
+        // 5. Validate evidence reference consistency: all referenced IDs must exist in source snapshot (Client Feedback 141026)
+        const stateFacts = new Set((sa.facts || []).map(f => f.fact_id));
+        if (Array.isArray(d.referenced_fact_ids)) {
+          for (const fid of d.referenced_fact_ids) {
+            if (fid && !stateFacts.has(fid)) {
+              return {
+                valid: false,
+                reason: `Evidence reference mismatch: referenced_fact_id '${fid}' not found in source snapshot facts (V${expectedVersion})`
+              };
+            }
+          }
+        }
+        const stateObjs = new Set((sa.objections || []).map(o => o.objection_id));
+        if (Array.isArray(d.referenced_objection_ids)) {
+          for (const oid of d.referenced_objection_ids) {
+            if (oid && !stateObjs.has(oid)) {
+              return {
+                valid: false,
+                reason: `Evidence reference mismatch: referenced_objection_id '${oid}' not found in source snapshot objections (V${expectedVersion})`
+              };
+            }
+          }
+        }
+        const stateStks = new Set();
+        (sa.stakeholders || []).forEach(s => {
+          if (s.stakeholder_id) stateStks.add(s.stakeholder_id);
+          if (s.role) {
+            stateStks.add(s.role);
+            stateStks.add(`stakeholder_${s.role}`);
+          }
+        });
+        if (sa.decision_structure && Array.isArray(sa.decision_structure.stakeholders)) {
+          sa.decision_structure.stakeholders.forEach(s => {
+            if (s.stakeholder_id) stateStks.add(s.stakeholder_id);
+            if (s.role) {
+              stateStks.add(s.role);
+              stateStks.add(`stakeholder_${s.role}`);
+            }
+          });
+        }
+        if (Array.isArray(d.referenced_stakeholder_ids)) {
+          for (const sid of d.referenced_stakeholder_ids) {
+            if (sid && !stateStks.has(sid)) {
+              return {
+                valid: false,
+                reason: `Evidence reference mismatch: referenced_stakeholder_id '${sid}' not found in source snapshot stakeholders (V${expectedVersion})`
+              };
+            }
+          }
+        }
+
+        return { valid: true, reason: "All four keys and evidence references valid (call_sid + turn_id + source_state_version + source_event_id + evidence consistency)" };
       }
 
       const bindingCheck = validateDecisionBinding(sd, step, sAfter, currentReport ? currentReport.call_sid : null);
@@ -1653,7 +1704,7 @@
             <div><span style="color: #4338CA; font-weight: 700; display:block;">SOURCE EVENT / TURN</span> <strong class="mono" style="color: #1E1B4B; font-size: 10.5px;">${escapeHtml(sd.source_event_id || ('ev_t' + step.turn_id))} (T${step.turn_id})</strong></div>
           </div>
           <div style="display:flex; justify-content:space-between; align-items:center; background:#DCFCE7; border:1px solid #BBF7D0; border-radius:4px; padding:3px 8px; margin-bottom:10px; font-size:9.5px; color:#15803D;">
-            <span><strong>4-Key Bound:</strong> call_sid + turn_id + source_state_version + source_event_id</span>
+            <span><strong>4-Key Bound:</strong> call_sid + turn_id + source_state_version + source_event_id + evidence consistency</span>
             <span class="mono" style="font-weight:700;">PASSED</span>
           </div>
 
@@ -1682,7 +1733,8 @@
               <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 6px; font-size: 11px; color: #1E293B;">
                 <div>Gate Status: <strong style="color:${sd.strategic_interpretation.meeting_gate_open ? '#16A34A' : '#DC2626'}">${sd.strategic_interpretation.meeting_gate_open ? 'OPEN' : 'CLOSED'}</strong></div>
                 <div>Decision Maker: <strong>${sd.strategic_interpretation.decision_maker_present ? 'Present' : 'Absent'}</strong></div>
-                <div>Push Strength: <span class="badge badge-push" style="font-size:9.5px; padding:1px 5px;">${escapeHtml(sd.strategic_interpretation.push_strength_state || '—')}</span></div>
+                <div>Strategy / Posture: <span class="badge badge-push" style="font-size:9.5px; padding:1px 5px;">${escapeHtml(sd.strategic_interpretation.strategy_posture || sd.strategic_posture || sd.strategic_interpretation.push_strength_state || '—')}</span></div>
+                <div>Selected Pressure: <strong class="mono" style="color:#0F172A; font-size:11px;">${escapeHtml(sd.strategic_interpretation.selected_pressure || (sd.push_strength && sd.push_strength.pressure ? sd.push_strength.pressure : String(sd.push_strength || 'none')))}</strong></div>
                 <div>Readiness Score: <strong>${(sd.strategic_interpretation.readiness_score !== null && sd.strategic_interpretation.readiness_score !== undefined) ? sd.strategic_interpretation.readiness_score + '%' : 'UNKNOWN (Insufficient Evidence)'}</strong></div>
                 <div>Boundary State: <strong style="color:${sd.strategic_interpretation.hard_boundary_active ? '#DC2626' : (sd.strategic_interpretation.boundary_suspected ? '#D97706' : '#16A34A')}">${sd.strategic_interpretation.hard_boundary_active ? 'CONFIRMED' : (sd.strategic_interpretation.boundary_suspected ? 'SUSPECTED' : 'CLEAR')}</strong></div>
                 <div>Active Objections: <strong>${(sd.strategic_interpretation.active_objections || []).length}</strong></div>
@@ -1693,7 +1745,7 @@
                 </div>
               ` : ''}
             ` : `
-              <div style="font-size: 11px; color: #64748B;">Cross-metric evaluation complete: stage ${escapeHtml(String(sAfter.conversation_stage || 'discovery'))}, push strength ${escapeHtml(sd.push_strength)}.</div>
+              <div style="font-size: 11px; color: #64748B;">Cross-metric evaluation complete: stage ${escapeHtml(String(sAfter.conversation_stage || 'discovery'))}, strategy/posture ${escapeHtml(sd.strategic_posture || sd.push_strength)}, selected pressure ${escapeHtml((sd.push_strength && sd.push_strength.pressure) ? sd.push_strength.pressure : sd.push_strength)}.</div>
             `}
           </div>
 
