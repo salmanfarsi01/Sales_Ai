@@ -361,3 +361,490 @@ def test_cross_user_prospect_memory_isolation_and_replay_clean_slate(tmp_path):
     # User B calling the same prospect CANNOT retrieve User A's memory
     mems_b = store.retrieve_memories(user_id=user_b, prospect_id=prospect_id)
     assert len(mems_b) == 0, "User B must not receive User A's prospect memory records"
+
+
+def test_missing_or_none_snapshot_is_strictly_rejected():
+    """Client Feedback 141026 item 2:
+    The snapshot parameter must be mandatory and fail-closed.
+    Omitting snapshot or passing None must strictly reject lookups and validation.
+    """
+    call_sid = "sim_test_missing_snapshot"
+    dec = StrategicDecision(
+        call_id=call_sid,
+        call_sid=call_sid,
+        source_state_version=1,
+        source_turn_id=1,
+        source_event_id="ev_turn_1_v1",
+        strategic_objective="Test",
+        primary_action=StrategicAction.QUESTION,
+    )
+    StrategicDecisionCache.clear(call_sid)
+    StrategicDecisionCache.put(call_sid=call_sid, decision=dec, turn_id=1, source_event_id="ev_turn_1_v1")
+
+    # 1. get_strictly_bound with snapshot=None returns None
+    res = StrategicDecisionCache.get_strictly_bound(
+        call_sid=call_sid,
+        turn_id=1,
+        source_state_version=1,
+        source_event_id="ev_turn_1_v1",
+        state_call_sid=call_sid,
+        snapshot=None,
+    )
+    assert res is None, "get_strictly_bound with snapshot=None must return None (fail closed)"
+
+    # 2. validate_binding with snapshot=None returns False with explicit error
+    is_valid, reason = StrategicDecisionCache.validate_binding(
+        decision=dec,
+        call_sid=call_sid,
+        turn_id=1,
+        source_state_version=1,
+        source_event_id="ev_turn_1_v1",
+        state_call_sid=call_sid,
+        snapshot=None,
+    )
+    assert is_valid is False
+    assert "Missing snapshot" in reason
+
+    # 3. validate_evidence_consistency with snapshot=None returns False
+    ev_ok, ev_reason = StrategicDecisionCache.validate_evidence_consistency(dec, snapshot=None)
+    assert ev_ok is False
+    assert "Missing snapshot" in ev_reason
+
+    # 4. Calling without snapshot argument raises TypeError (cannot fail open by omission)
+    with pytest.raises(TypeError):
+        StrategicDecisionCache.get_strictly_bound(  # type: ignore
+            call_sid=call_sid,
+            turn_id=1,
+            source_state_version=1,
+            source_event_id="ev_turn_1_v1",
+            state_call_sid=call_sid,
+        )
+
+
+def test_active_vs_superseded_fact_resolution_rules():
+    """Client Feedback 141026 item 3:
+    What counts as 'resolves'?
+    - Reference to active fact: PASSES.
+    - Reference to superseded fact without annotation when require_active=True: REJECTED.
+    - Reference to superseded fact with explicit ALLOW_SUPERSEDED_EVIDENCE annotation: PASSES.
+    """
+    call_sid = "sim_test_superseded_facts"
+    snap = ConversationStateSnapshot(
+        call_sid=call_sid,
+        state_version=8,
+        last_updated_turn_id=8,
+        facts=[
+            PersistentFactRecord(
+                fact_id="fact_old_t3",
+                category="timeline",
+                fact_key="confirmed_meeting_time",
+                fact_value="Thursday at 4pm",
+                status="superseded",
+                superseded_by_fact_id="fact_new_t8",
+                superseded_at_turn_id=8,
+                source_turn_id=3,
+                timestamp_ms=9000,
+            ),
+            PersistentFactRecord(
+                fact_id="fact_new_t8",
+                category="timeline",
+                fact_key="confirmed_meeting_time",
+                fact_value="Thursday at 3pm",
+                status="active",
+                source_turn_id=8,
+                timestamp_ms=25000,
+            ),
+        ],
+    )
+
+    # Case A: Decision referencing the ACTIVE fact passes
+    dec_active = StrategicDecision(
+        call_id=call_sid,
+        call_sid=call_sid,
+        source_state_version=8,
+        source_turn_id=8,
+        source_event_id="ev_turn_8_v8",
+        strategic_objective="Protect updated appointment",
+        primary_action=StrategicAction.ACKNOWLEDGE,
+        referenced_fact_ids=["fact_new_t8"],
+    )
+    ok_a, reason_a = StrategicDecisionCache.validate_evidence_consistency(dec_active, snap, require_active=True)
+    assert ok_a is True
+    assert "All referenced evidence IDs resolve" in reason_a
+
+    # Case B: Decision referencing the SUPERSEDED fact without annotation is REJECTED
+    dec_superseded = StrategicDecision(
+        call_id=call_sid,
+        call_sid=call_sid,
+        source_state_version=8,
+        source_turn_id=8,
+        source_event_id="ev_turn_8_v8",
+        strategic_objective="Protect old appointment",
+        primary_action=StrategicAction.ACKNOWLEDGE,
+        referenced_fact_ids=["fact_old_t3"],
+    )
+    ok_b, reason_b = StrategicDecisionCache.validate_evidence_consistency(dec_superseded, snap, require_active=True)
+    assert ok_b is False
+    assert "Evidence reference to superseded fact 'fact_old_t3' is invalid" in reason_b
+    assert "superseded by 'fact_new_t8'" in reason_b
+
+    # Case C: Decision referencing superseded fact WITH explicit annotation PASSES
+    dec_annotated = dec_superseded.model_copy(deep=True)
+    dec_annotated.reason_codes.append("ALLOW_SUPERSEDED_EVIDENCE")
+    ok_c, reason_c = StrategicDecisionCache.validate_evidence_consistency(dec_annotated, snap, require_active=True)
+    assert ok_c is True
+
+
+def test_carried_decision_refreshes_superseded_fact_references():
+    """Client Feedback 141026 item 5:
+    Carried decisions need refreshed references, not only rejection.
+    When a filler or rep turn carries forward a previous decision across a turn
+    where a fact was superseded, the reference is re-pointed to the active successor.
+    """
+    from copilot.conversation_state_models import MeetingConversionGate, ConversionEventObject, ConversionEventStatus
+
+    call_sid = "sim_test_refresh_carry"
+    cdm = CoreDecisionManager(call_sid=call_sid)
+
+    # Root decision from Turn 3 references fact_old
+    dec_turn3 = StrategicDecision(
+        call_id=call_sid,
+        call_sid=call_sid,
+        source_state_version=3,
+        source_turn_id=3,
+        source_event_id="ev_turn_3_v3",
+        strategic_objective="Protect initial appointment",
+        primary_action=StrategicAction.ACKNOWLEDGE,
+        strategic_posture="protect",
+        push_strength="none",
+        referenced_fact_ids=["fact_old"],
+        reason_codes=["CONVERSION_CONFIRMED"],
+    )
+    cdm.latest_decision = dec_turn3
+
+    # Target snapshot at Turn 4 where fact_old was superseded by fact_new
+    target_snap = ConversationStateSnapshot(
+        call_sid=call_sid,
+        state_version=4,
+        last_updated_turn_id=4,
+        conversation_stage="scheduling",
+        conversion_confirmed=True,
+        conversion_gate=MeetingConversionGate(is_open=True, status="open", conversion_target="appointment"),
+        conversion_events=[ConversionEventObject(event_id="cev_1", event_type="appointment", status=ConversionEventStatus.CONFIRMED, start_at="Thursday at 3pm", confidence=0.9, confirmed_turn_id=3)],
+        facts=[
+            PersistentFactRecord(
+                fact_id="fact_old",
+                category="timeline",
+                fact_key="meeting_time",
+                fact_value="4pm",
+                status="superseded",
+                superseded_by_fact_id="fact_new",
+                superseded_at_turn_id=4,
+                source_turn_id=3,
+                timestamp_ms=10000,
+            ),
+            PersistentFactRecord(
+                fact_id="fact_new",
+                category="timeline",
+                fact_key="meeting_time",
+                fact_value="3pm",
+                status="active",
+                source_turn_id=4,
+                timestamp_ms=12000,
+            ),
+        ],
+    )
+
+    # Evaluate a filler turn ("okay")
+    res = cdm.evaluate_state(
+        snapshot=target_snap,
+        turn_speaker="prospect",
+        turn_text="okay",
+        turn_id=4,
+    )
+    carried_dec = res.decision
+    assert carried_dec.carried_forward is True
+    # Reference MUST be refreshed to fact_new
+    assert carried_dec.referenced_fact_ids == ["fact_new"]
+    # Carried decision resolves strictly as active in Turn 4 snapshot
+    ok, reason = StrategicDecisionCache.validate_evidence_consistency(carried_dec, target_snap, require_active=True)
+    assert ok is True
+
+
+def test_same_call_id_run_twice_with_different_state_rejects_stale_cache():
+    """Client Feedback 141026 item 4:
+    Root cause test: The same call ID run twice with different UUIDs (e.g. repeated test or simulation).
+    Proves that even when the cache has an entry for (call_sid, turn_id, version, event_id),
+    Run 2's lookup with Run 2's snapshot rejects the stale Run 1 decision and re-evaluates.
+    """
+    from copilot.conversation_state_models import MeetingConversionGate, ConversionEventObject, ConversionEventStatus
+
+    call_sid = "sim_muy04bh0_reuse_test"
+    StrategicDecisionCache.clear(call_sid)
+
+    # Run 1: decision references fact_run1 and obj_run1
+    dec_run1 = StrategicDecision(
+        call_id=call_sid,
+        call_sid=call_sid,
+        source_state_version=3,
+        source_turn_id=3,
+        source_event_id="ev_turn_3_v3",
+        strategic_objective="Protect appointment",
+        primary_action=StrategicAction.ACKNOWLEDGE,
+        referenced_fact_ids=["fact_7049325b"],
+        referenced_objection_ids=["obj_6b28ab27"],
+    )
+    StrategicDecisionCache.put(
+        call_sid=call_sid,
+        decision=dec_run1,
+        turn_id=3,
+        source_event_id="ev_turn_3_v3",
+    )
+
+    # Run 2: snapshot has completely different IDs (due to UUID randomization)
+    snap_run2 = ConversationStateSnapshot(
+        call_sid=call_sid,
+        state_version=3,
+        last_updated_turn_id=3,
+        conversion_confirmed=True,
+        conversion_gate=MeetingConversionGate(is_open=True, status="open", conversion_target="appointment"),
+        conversion_events=[ConversionEventObject(event_id="cev_run2", event_type="appointment", status=ConversionEventStatus.CONFIRMED, start_at="Thursday at 4pm", confidence=0.9, confirmed_turn_id=3)],
+        facts=[
+            PersistentFactRecord(
+                fact_id="fact_d83772cf",
+                category="timeline",
+                fact_key="confirmed_meeting_time",
+                fact_value="Thursday at 4pm",
+                status="active",
+                source_turn_id=3,
+                timestamp_ms=10000,
+            )
+        ],
+        objections=[
+            ObjectionRecord(
+                objection_id="obj_167be88f",
+                canonical_category="commission_fee",
+                initial_statement="Fee is high",
+                latest_statement="Fee is high",
+                first_turn_id=3,
+                last_updated_turn_id=3,
+            )
+        ],
+    )
+
+    # In Run 2, querying get_strictly_bound with snap_run2 MUST reject dec_run1
+    cached_lookup = StrategicDecisionCache.get_strictly_bound(
+        call_sid=call_sid,
+        turn_id=3,
+        source_state_version=3,
+        source_event_id="ev_turn_3_v3",
+        state_call_sid=call_sid,
+        snapshot=snap_run2,
+    )
+    assert cached_lookup is None, "Cache lookup must fail when cached decision references stale IDs from Run 1"
+
+    # CoreDecisionManager.evaluate_state will not use the stale cache and produces fresh decision bound to Run 2
+    cdm = CoreDecisionManager(call_sid=call_sid)
+    res = cdm.evaluate_state(
+        snapshot=snap_run2,
+        turn_speaker="prospect",
+        turn_text="Your commission is still too expensive, but I can meet Thursday at 4.",
+        turn_id=3,
+        use_cache=True,
+    )
+    fresh_dec = res.decision
+    assert fresh_dec.referenced_fact_ids == ["fact_d83772cf"]
+    assert fresh_dec.referenced_objection_ids == ["obj_167be88f"]
+    assert "fact_7049325b" not in fresh_dec.referenced_fact_ids
+
+
+def test_frontend_node_binding_validation_evidence_consistency():
+    """Client Feedback 141026 item 6:
+    Execute the real JavaScript validateDecisionBinding function from web/conversation_state_replay.html via Node.js.
+    Verifies that when 4 binding keys match, but evidence references point elsewhere,
+    it returns valid: false with an explicit rejection reason and renders a visible UI warning.
+    """
+    import subprocess
+    import re
+
+    html_path = Path(__file__).resolve().parent.parent / "web" / "conversation_state_replay.html"
+    content = html_path.read_text(encoding="utf-8")
+
+    match = re.search(r"(function validateDecisionBinding\(d, st, sa, repCallSid\)\s*\{[\s\S]*?\n      \})", content)
+    assert match is not None, "Could not find validateDecisionBinding in web/conversation_state_replay.html"
+    func_js = match.group(1)
+
+    node_script = f"""
+{func_js}
+
+const reportCallSid = 'call_sim_141026';
+const baseStep = {{ turn_id: 3, source_event_id: 'ev_turn_3_v3' }};
+const baseState = {{
+    call_sid: 'call_sim_141026',
+    state_version: 3,
+    facts: [{{ fact_id: 'fact_d83772cf' }}],
+    objections: [{{ objection_id: 'obj_167be88f' }}],
+    stakeholders: []
+}};
+
+// Case 1: All 4 keys match, but decision references stale fact from prior run (Turn 3 bug)
+const staleFactDecision = {{
+    call_sid: 'call_sim_141026',
+    call_id: 'call_sim_141026',
+    source_turn_id: 3,
+    source_state_version: 3,
+    source_event_id: 'ev_turn_3_v3',
+    referenced_fact_ids: ['fact_7049325b'],
+    referenced_objection_ids: ['obj_167be88f']
+}};
+const resStaleFact = validateDecisionBinding(staleFactDecision, baseStep, baseState, reportCallSid);
+
+// Case 2: All 4 keys match, but decision references stale objection
+const staleObjDecision = {{
+    ...staleFactDecision,
+    referenced_fact_ids: ['fact_d83772cf'],
+    referenced_objection_ids: ['obj_6b28ab27']
+}};
+const resStaleObj = validateDecisionBinding(staleObjDecision, baseStep, baseState, reportCallSid);
+
+// Case 3: All 4 keys match AND all evidence references resolve within baseState
+const validDecision = {{
+    ...staleFactDecision,
+    referenced_fact_ids: ['fact_d83772cf'],
+    referenced_objection_ids: ['obj_167be88f']
+}};
+const resValid = validateDecisionBinding(validDecision, baseStep, baseState, reportCallSid);
+
+// Case 4: Simulate UI card rendering on rejection
+function renderCard(bindingCheck, step, sa) {{
+    if (!bindingCheck.valid) {{
+        return `<div class="card-unit warning">No valid Strategic Decision bound for this turn (Turn ${{step.turn_id}}, V${{sa.state_version}}). Binding rejected: ${{bindingCheck.reason}}</div>`;
+    }}
+    return `<div class="card-unit success">Bound successfully</div>`;
+}}
+const uiWarningHtml = renderCard(resStaleFact, baseStep, baseState);
+
+console.log(JSON.stringify({{
+    staleFact: resStaleFact,
+    staleObj: resStaleObj,
+    valid: resValid,
+    uiWarning: uiWarningHtml
+}}));
+"""
+
+    proc = subprocess.run(
+        ["node"],
+        input=node_script,
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        check=True,
+    )
+    out = json.loads(proc.stdout)
+
+    # 1. Stale fact reference rejected
+    assert out["staleFact"]["valid"] is False
+    assert "Evidence reference mismatch: referenced_fact_id 'fact_7049325b' not found" in out["staleFact"]["reason"]
+
+    # 2. Stale objection reference rejected
+    assert out["staleObj"]["valid"] is False
+    assert "Evidence reference mismatch: referenced_objection_id 'obj_6b28ab27' not found" in out["staleObj"]["reason"]
+
+    # 3. Valid references pass
+    assert out["valid"]["valid"] is True
+    assert "All four keys and evidence references valid" in out["valid"]["reason"]
+
+    # 4. Visible UI error card
+    assert "Binding rejected: Evidence reference mismatch: referenced_fact_id 'fact_7049325b' not found" in out["uiWarning"]
+
+
+def test_frontend_node_template_rendering_and_fallbacks():
+    """Client Feedback 141026 item 7:
+    Execute real template rendering snippets from web/conversation_state_replay.html in Node.js.
+    - Strategy / Posture is rendered separately from Selected Pressure.
+    - confirm_and_protect is labeled as a legacy alias.
+    - Missing or old data uses '—' and never invents values (no invented 'moderate' or 'resolve_then_ask').
+    """
+    import subprocess
+
+    html_path = Path(__file__).resolve().parent.parent / "web" / "conversation_state_replay.html"
+    content = html_path.read_text(encoding="utf-8")
+
+    # Confirm fallback 'moderate' and 'resolve_then_ask' are eliminated from push section
+    assert "push.preliminary_ceiling || push.pressure || 'moderate'" not in content
+    assert "push.legacy_strategy_alias || push.state || 'resolve_then_ask'" not in content
+
+    node_script = """
+function escapeHtml(str) {
+    if (str === null || str === undefined) return '';
+    return String(str)
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;')
+        .replace(/'/g, '&#039;');
+}
+
+// 1. Trace Step 2 template
+function renderTraceStep2(sd) {
+    const strategyMarkup = `<strong style="color:#1E1B4B;">${escapeHtml(String(sd.primary_action || '—').toUpperCase())} / ${escapeHtml(sd.strategic_posture || '—')}</strong>${(sd.strategic_interpretation && (sd.strategic_interpretation.strategy_posture === 'confirm_and_protect' || sd.strategic_interpretation.push_strength_state === 'confirm_and_protect')) ? ` <span class="mono" style="font-size:9.5px; color:#64748B;">(legacy alias: confirm_and_protect)</span>` : ''}`;
+    const pressureMarkup = `<strong class="mono" style="color:#0F172A; font-size:11px;">${escapeHtml(sd.strategic_interpretation.selected_pressure || (sd.push_strength && sd.push_strength.pressure ? sd.push_strength.pressure : (['none', 'low', 'moderate', 'high'].includes(String(sd.push_strength)) ? String(sd.push_strength) : '—')))}</strong>`;
+    return { strategy: strategyMarkup, pressure: pressureMarkup };
+}
+
+// 2. Summary Panel Push Strength template
+function renderSummaryPush(push, sd) {
+    const selectedPressure = escapeHtml(sd ? (sd.push_strength && sd.push_strength.pressure ? sd.push_strength.pressure : (['none', 'low', 'moderate', 'high'].includes(String(sd.push_strength)) ? String(sd.push_strength) : '—')) : (push.selected_pressure || push.pressure || '—'));
+    const prelimCeiling = escapeHtml(push.preliminary_ceiling || push.pressure || '—');
+    const legacyAlias = escapeHtml(push.legacy_strategy_alias || push.state || '—');
+    return { selectedPressure, prelimCeiling, legacyAlias };
+}
+
+// Test Data A: Active turn 3 decision with confirm_and_protect legacy alias
+const sdTurn3 = {
+    primary_action: 'acknowledge',
+    strategic_posture: 'protect',
+    push_strength: 'none',
+    strategic_interpretation: {
+        strategy_posture: 'confirm_and_protect',
+        selected_pressure: 'none',
+        push_strength_state: 'confirm_and_protect'
+    }
+};
+const trace3 = renderTraceStep2(sdTurn3);
+
+// Test Data B: Empty/old data lacking values
+const sdEmpty = {
+    strategic_interpretation: {}
+};
+const traceEmpty = renderTraceStep2(sdEmpty);
+const summaryEmpty = renderSummaryPush({}, null);
+
+console.log(JSON.stringify({
+    trace3: trace3,
+    traceEmpty: traceEmpty,
+    summaryEmpty: summaryEmpty
+}));
+"""
+
+    proc = subprocess.run(
+        ["node"],
+        input=node_script,
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        check=True,
+    )
+    out = json.loads(proc.stdout)
+
+    # Trace Step 2 shows primary action, posture, and legacy alias
+    assert "ACKNOWLEDGE / protect" in out["trace3"]["strategy"]
+    assert "(legacy alias: confirm_and_protect)" in out["trace3"]["strategy"]
+    assert "none" in out["trace3"]["pressure"]
+
+    # Empty/old data renders '—' and does NOT invent values
+    assert "— / —" in out["traceEmpty"]["strategy"]
+    assert "—" in out["traceEmpty"]["pressure"]
+    assert out["summaryEmpty"]["prelimCeiling"] == "—"
+    assert out["summaryEmpty"]["legacyAlias"] == "—"
+

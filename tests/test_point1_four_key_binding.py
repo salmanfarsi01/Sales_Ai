@@ -29,6 +29,28 @@ from copilot.conversation_state_contract import BehavioralSignalInputBundle, Dim
 from copilot.conversation_materiality import MaterialityClassification
 
 
+def make_snap(call_sid: str, version: int = 4, turn_id: int = 4, facts=None, objections=None, stakeholders=None):
+    return ConversationStateSnapshot(
+        state_id=f"state_{call_sid}_v{version}",
+        call_sid=call_sid,
+        state_version=version,
+        last_updated_turn_id=turn_id,
+        conversation_stage="discovery",
+        conversion_gate=MeetingConversionGate(
+            is_open=True,
+            status="open",
+            conversion_target="appointment",
+            conditions=[],
+        ),
+        conversion_confirmed=False,
+        readiness=ReadinessBreakdown(readiness_score=72.5, confidence=0.8),
+        decision_structure=DecisionStructure(decision_maker_present=True, confidence=0.8),
+        facts=facts or [],
+        objections=objections or [],
+        stakeholders=stakeholders or [],
+    )
+
+
 def test_point1_same_version_different_turns_within_same_call():
     """Client Requirement Point 1:
     Two different turns in the same call share the same source_state_version (e.g. V4).
@@ -73,6 +95,9 @@ def test_point1_same_version_different_turns_within_same_call():
     StrategicDecisionCache.put(call_sid=call_sid, decision=dec_turn4, turn_id=4, source_event_id="ev_turn_4_v4")
     StrategicDecisionCache.put(call_sid=call_sid, decision=dec_turn5, turn_id=5, source_event_id="ev_turn_5_v4")
 
+    snap_t4 = make_snap(call_sid, version=4, turn_id=4)
+    snap_t5 = make_snap(call_sid, version=4, turn_id=5)
+
     # 1. Strictly bound lookup for Turn 4 retrieves Turn 4's decision (CLARIFY), NEVER Turn 5's decision (REFRAME)
     bound_t4 = StrategicDecisionCache.get_strictly_bound(
         call_sid=call_sid,
@@ -80,6 +105,7 @@ def test_point1_same_version_different_turns_within_same_call():
         source_state_version=4,
         source_event_id="ev_turn_4_v4",
         state_call_sid=call_sid,
+        snapshot=snap_t4,
     )
     assert bound_t4 is not None
     assert bound_t4.source_turn_id == 4
@@ -93,6 +119,7 @@ def test_point1_same_version_different_turns_within_same_call():
         source_state_version=4,
         source_event_id="ev_turn_5_v4",
         state_call_sid=call_sid,
+        snapshot=snap_t5,
     )
     assert bound_t5 is not None
     assert bound_t5.source_turn_id == 5
@@ -107,6 +134,7 @@ def test_point1_same_version_different_turns_within_same_call():
         source_state_version=4,
         source_event_id="ev_turn_5_v4",
         state_call_sid=call_sid,
+        snapshot=snap_t4,
     ) is None
 
     # Query Turn 5 with Turn 4's event ID
@@ -116,6 +144,7 @@ def test_point1_same_version_different_turns_within_same_call():
         source_state_version=4,
         source_event_id="ev_turn_4_v4",
         state_call_sid=call_sid,
+        snapshot=snap_t5,
     ) is None
 
     # 4. CoreDecisionManager strictly bound retrieval
@@ -126,6 +155,7 @@ def test_point1_same_version_different_turns_within_same_call():
         source_state_version=4,
         source_event_id="ev_turn_4_v4",
         state_call_sid=call_sid,
+        snapshot=snap_t4,
     )
     assert cdm_bound_4 is not None
     assert cdm_bound_4.primary_action == StrategicAction.CLARIFY
@@ -136,6 +166,7 @@ def test_point1_same_version_different_turns_within_same_call():
         source_state_version=4,
         source_event_id="ev_turn_5_v4",
         state_call_sid=call_sid,
+        snapshot=snap_t5,
     )
     assert cdm_bound_5 is not None
     assert cdm_bound_5.primary_action == StrategicAction.REFRAME
@@ -148,6 +179,7 @@ def test_point1_same_version_different_turns_within_same_call():
         source_state_version=4,
         source_event_id="ev_turn_4_v4",
         state_call_sid=call_sid,
+        snapshot=snap_t4,
     )
     assert valid_4_on_4 is True
 
@@ -158,6 +190,7 @@ def test_point1_same_version_different_turns_within_same_call():
         source_state_version=4,
         source_event_id="ev_turn_5_v4",
         state_call_sid=call_sid,
+        snapshot=snap_t5,
     )
     assert valid_4_on_5 is False
     assert "turn_id mismatch" in reason_4_5
@@ -204,6 +237,9 @@ def test_point1_same_version_different_calls():
     StrategicDecisionCache.put(call_sid=call_a, decision=dec_a, turn_id=1, source_event_id="ev_turn_1_v2")
     StrategicDecisionCache.put(call_sid=call_b, decision=dec_b, turn_id=1, source_event_id="ev_turn_1_v2")
 
+    snap_a = make_snap(call_a, version=2, turn_id=1)
+    snap_b = make_snap(call_b, version=2, turn_id=1)
+
     # Call Alpha lookup retrieves dec_a
     bound_a = StrategicDecisionCache.get_strictly_bound(
         call_sid=call_a,
@@ -211,6 +247,7 @@ def test_point1_same_version_different_calls():
         source_state_version=2,
         source_event_id="ev_turn_1_v2",
         state_call_sid=call_a,
+        snapshot=snap_a,
     )
     assert bound_a is not None
     assert bound_a.call_sid == call_a
@@ -223,6 +260,7 @@ def test_point1_same_version_different_calls():
         source_state_version=2,
         source_event_id="ev_turn_1_v2",
         state_call_sid=call_b,
+        snapshot=snap_b,
     )
     assert bound_b is not None
     assert bound_b.call_sid == call_b
@@ -236,6 +274,7 @@ def test_point1_same_version_different_calls():
         source_state_version=2,
         source_event_id="ev_turn_1_v2",
         state_call_sid=call_b,
+        snapshot=snap_b,
     )
     assert valid_cross is False
     assert "call_sid mismatch" in reason_cross
@@ -264,6 +303,8 @@ def test_point1_same_call_turn_version_different_event_id():
     )
     StrategicDecisionCache.put(call_sid=call_sid, decision=dec, turn_id=2, source_event_id="ev_turn_2_v3_attempt1")
 
+    snap_event = make_snap(call_sid, version=3, turn_id=2)
+
     # Querying with attempt2 fails
     assert StrategicDecisionCache.get_strictly_bound(
         call_sid=call_sid,
@@ -271,6 +312,7 @@ def test_point1_same_call_turn_version_different_event_id():
         source_state_version=3,
         source_event_id="ev_turn_2_v3_attempt2",
         state_call_sid=call_sid,
+        snapshot=snap_event,
     ) is None
 
     # Validating against attempt2 fails
@@ -281,6 +323,7 @@ def test_point1_same_call_turn_version_different_event_id():
         source_state_version=3,
         source_event_id="ev_turn_2_v3_attempt2",
         state_call_sid=call_sid,
+        snapshot=snap_event,
     )
     assert valid is False
     assert "source_event_id mismatch" in reason
@@ -460,6 +503,7 @@ def test_point1_end_to_end_replay_four_key_bound_on_all_steps():
             source_state_version=sa.state_version,
             source_event_id=expected_event_id,
             state_call_sid=call_sid,
+            snapshot=sa,
         )
         assert cached is not None
         assert cached.decision_id == sd.decision_id
@@ -472,6 +516,7 @@ def test_point1_end_to_end_replay_four_key_bound_on_all_steps():
             source_state_version=sa.state_version,
             source_event_id=expected_event_id,
             state_call_sid=call_sid,
+            snapshot=sa,
         )
         assert is_valid is True, f"Turn {step.turn_id} failed binding: {reason}"
 
@@ -498,6 +543,8 @@ def test_point1_missing_or_null_source_event_id_strictly_fails():
         confidence=0.8,
     )
 
+    snap_null = make_snap(call_sid, version=2, turn_id=1)
+
     # 1. Validating against a valid expected event fails because decision lacks source_event_id
     valid, reason = StrategicDecisionCache.validate_binding(
         dec_null_event,
@@ -506,6 +553,7 @@ def test_point1_missing_or_null_source_event_id_strictly_fails():
         source_state_version=2,
         source_event_id="ev_turn_1_v2",
         state_call_sid=call_sid,
+        snapshot=snap_null,
     )
     assert valid is False
     assert "Missing source_event_id" in reason
@@ -518,6 +566,7 @@ def test_point1_missing_or_null_source_event_id_strictly_fails():
         source_state_version=2,
         source_event_id="",
         state_call_sid=call_sid,
+        snapshot=snap_null,
     )
     assert valid_both_null is False
     assert "Missing source_event_id" in reason_both_null
@@ -529,6 +578,7 @@ def test_point1_missing_or_null_source_event_id_strictly_fails():
         source_state_version=2,
         source_event_id="",
         state_call_sid=call_sid,
+        snapshot=snap_null,
     ) is None
 
 
@@ -547,31 +597,32 @@ def test_point1_missing_or_null_other_keys_strictly_fails():
         primary_action=StrategicAction.QUESTION,
         confidence=0.8,
     )
+    snap_missing = make_snap(call_sid, version=2, turn_id=1)
 
     # Missing call_sid
     v_call, r_call = StrategicDecisionCache.validate_binding(
-        dec_valid, call_sid="", turn_id=1, source_state_version=2, source_event_id="ev_turn_1_v2", state_call_sid=call_sid
+        dec_valid, call_sid="", turn_id=1, source_state_version=2, source_event_id="ev_turn_1_v2", state_call_sid=call_sid, snapshot=snap_missing
     )
     assert v_call is False
     assert "call_sid" in r_call
 
     # Missing turn_id
     v_turn, r_turn = StrategicDecisionCache.validate_binding(
-        dec_valid, call_sid=call_sid, turn_id=None, source_state_version=2, source_event_id="ev_turn_1_v2", state_call_sid=call_sid
+        dec_valid, call_sid=call_sid, turn_id=None, source_state_version=2, source_event_id="ev_turn_1_v2", state_call_sid=call_sid, snapshot=snap_missing
     )
     assert v_turn is False
     assert "turn_id" in r_turn
 
     # Missing source_state_version
     v_ver, r_ver = StrategicDecisionCache.validate_binding(
-        dec_valid, call_sid=call_sid, turn_id=1, source_state_version=None, source_event_id="ev_turn_1_v2", state_call_sid=call_sid
+        dec_valid, call_sid=call_sid, turn_id=1, source_state_version=None, source_event_id="ev_turn_1_v2", state_call_sid=call_sid, snapshot=snap_missing
     )
     assert v_ver is False
     assert "source_state_version" in r_ver
 
     # Missing state_call_sid (Gap 2: fails closed, never fails open)
     v_state, r_state = StrategicDecisionCache.validate_binding(
-        dec_valid, call_sid=call_sid, turn_id=1, source_state_version=2, source_event_id="ev_turn_1_v2", state_call_sid=""
+        dec_valid, call_sid=call_sid, turn_id=1, source_state_version=2, source_event_id="ev_turn_1_v2", state_call_sid="", snapshot=snap_missing
     )
     assert v_state is False
     assert "Missing state_call_sid" in r_state
@@ -618,6 +669,9 @@ def test_point1_cross_call_source_state_ownership_rejection_in_cache():
     )
     StrategicDecisionCache.put(call_sid=call_sid, decision=dec, turn_id=4, source_event_id="ev_turn_4_v10")
 
+    snap_same = make_snap(call_sid, version=10, turn_id=4)
+    snap_diff = make_snap(other_call, version=10, turn_id=4)
+
     # 1. Matching state_call_sid passes
     valid_same, reason_same = StrategicDecisionCache.validate_binding(
         dec,
@@ -626,6 +680,7 @@ def test_point1_cross_call_source_state_ownership_rejection_in_cache():
         source_state_version=10,
         source_event_id="ev_turn_4_v10",
         state_call_sid=call_sid,
+        snapshot=snap_same,
     )
     assert valid_same is True
     assert "Valid 4-key binding" in reason_same
@@ -638,6 +693,7 @@ def test_point1_cross_call_source_state_ownership_rejection_in_cache():
         source_state_version=10,
         source_event_id="ev_turn_4_v10",
         state_call_sid=other_call,
+        snapshot=snap_diff,
     )
     assert valid_diff is False
     assert "Cross-call source state ownership mismatch" in reason_diff
@@ -650,6 +706,7 @@ def test_point1_cross_call_source_state_ownership_rejection_in_cache():
         source_state_version=10,
         source_event_id="ev_turn_4_v10",
         state_call_sid=other_call,
+        snapshot=snap_diff,
     ) is None
 
 
@@ -834,6 +891,7 @@ def test_point1_live_state_mutation_does_not_affect_frozen_decision():
         source_state_version=3,
         source_event_id=decision.source_event_id,
         state_call_sid=call_sid,
+        snapshot=snap,
     )
 
     # The cached decision and original decision instance remain completely unaffected
@@ -854,12 +912,14 @@ def test_point1_snapshot_missing_call_sid_fails_closed_in_cache_check():
     cdm = CoreDecisionManager(call_sid=call_sid)
 
     # 1. Direct cache check with empty state_call_sid returns None
+    snap_empty_call = ConversationStateSnapshot(call_sid="", state_version=1)
     assert StrategicDecisionCache.get_strictly_bound(
         call_sid=call_sid,
         turn_id=1,
         source_state_version=1,
         source_event_id="ev_turn_1_v1",
         state_call_sid="",
+        snapshot=snap_empty_call,
     ) is None
 
     # 2. Populate cache with a valid decision for turn 1
@@ -984,7 +1044,7 @@ def test_point1_second_fixture_canonical_live_replay(run_semantic: bool):
             continue
         sa = step.state_after
 
-        # Validate 4 keys + source state ownership
+        # Validate 4 keys + source state ownership + evidence consistency
         is_valid, reason = StrategicDecisionCache.validate_binding(
             decision=sd,
             call_sid=call_sid,
@@ -992,6 +1052,7 @@ def test_point1_second_fixture_canonical_live_replay(run_semantic: bool):
             source_state_version=sa.state_version,
             source_event_id=sd.source_event_id,
             state_call_sid=sa.call_sid,
+            snapshot=sa,
         )
         assert is_valid is True, f"Turn {step.turn_id} failed binding: {reason}"
 
@@ -1002,6 +1063,7 @@ def test_point1_second_fixture_canonical_live_replay(run_semantic: bool):
             source_state_version=sa.state_version,
             source_event_id=sd.source_event_id,
             state_call_sid=sa.call_sid,
+            snapshot=sa,
         )
         assert bound is not None
         assert bound.source_turn_id == step.turn_id

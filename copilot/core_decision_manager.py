@@ -63,23 +63,38 @@ class StrategicDecisionCache:
     def validate_evidence_consistency(
         cls,
         decision: Optional[StrategicDecision],
-        snapshot: Optional[Any],
+        snapshot: Any,
+        require_active: bool = True,
     ) -> Tuple[bool, str]:
         """Validates that all evidence references (facts, objections, stakeholders)
         in the StrategicDecision resolve strictly within the bound ConversationStateSnapshot (Client Feedback 141026).
+        Fails closed: if snapshot is None, returns (False, 'Missing snapshot: ...').
+        If require_active is True, referenced facts must have status == 'active', unless explicitly
+        annotated in reason_codes with 'ALLOW_SUPERSEDED_EVIDENCE'.
         """
         if decision is None:
             return False, "decision is None"
         if snapshot is None:
-            return True, "No snapshot provided for evidence consistency check"
+            return False, "Missing snapshot: snapshot is mandatory for evidence consistency validation"
+
+        allow_superseded = not require_active or ("ALLOW_SUPERSEDED_EVIDENCE" in getattr(decision, "reason_codes", []))
 
         # 1. Facts
-        state_fact_ids = {getattr(f, "fact_id", None) for f in getattr(snapshot, "facts", [])}
+        facts_by_id = {getattr(f, "fact_id", None): f for f in getattr(snapshot, "facts", [])}
         for fid in getattr(decision, "referenced_fact_ids", []):
-            if fid and fid not in state_fact_ids:
+            if not fid:
+                continue
+            if fid not in facts_by_id:
                 return (
                     False,
                     f"Evidence reference mismatch: referenced_fact_id '{fid}' not found in bound snapshot facts (state_version {getattr(snapshot, 'state_version', '?')})",
+                )
+            fact = facts_by_id[fid]
+            fact_status = getattr(fact, "status", "active")
+            if not allow_superseded and fact_status != "active":
+                return (
+                    False,
+                    f"Evidence reference to superseded fact '{fid}' is invalid for active decision without explicit annotation (superseded by '{getattr(fact, 'superseded_by_fact_id', None)}')",
                 )
 
         # 2. Objections
@@ -123,17 +138,20 @@ class StrategicDecisionCache:
         source_state_version: int,
         source_event_id: str,
         state_call_sid: str,
-        snapshot: Optional[Any] = None,
+        snapshot: Any,
+        require_active: bool = True,
     ) -> Optional[StrategicDecision]:
         """Validates all four keys together: call_sid + turn_id + source_state_version + source_event_id,
         enforces mandatory state_call_sid source state ownership (Point 1),
         and verifies that all evidence references resolve within the bound snapshot (Client Feedback 141026).
-        Rejects lookup if any key mismatches, is missing, if state_call_sid does not match call_sid,
-        or if referenced facts/objections do not exist in the snapshot.
+        Rejects lookup if any key mismatches, is missing, if snapshot is None,
+        if state_call_sid does not match call_sid, or if referenced facts/objections do not exist in the snapshot.
         """
         if not call_sid or turn_id is None or source_state_version is None or not source_event_id:
             return None
         if not state_call_sid or str(state_call_sid).strip() != str(call_sid).strip():
+            return None
+        if snapshot is None:
             return None
 
         key = (str(call_sid), int(turn_id), int(source_state_version), str(source_event_id))
@@ -153,10 +171,9 @@ class StrategicDecisionCache:
                 and actual_event
                 and actual_event == str(source_event_id)
             ):
-                if snapshot is not None:
-                    ev_valid, _ = cls.validate_evidence_consistency(dec, snapshot)
-                    if not ev_valid:
-                        return None
+                ev_valid, _ = cls.validate_evidence_consistency(dec, snapshot, require_active=require_active)
+                if not ev_valid:
+                    return None
                 return dec.model_copy(deep=True)
         return None
 
@@ -169,12 +186,13 @@ class StrategicDecisionCache:
         source_state_version: int,
         source_event_id: str,
         state_call_sid: str,
-        snapshot: Optional[Any] = None,
+        snapshot: Any,
+        require_active: bool = True,
     ) -> Tuple[bool, str]:
         """Validates that a decision strictly matches all 4 keys and resolves all evidence references
         within the bound snapshot (Client Feedback 141026).
         Fails if any key is missing or null on either side, if state_call_sid does not match (Point 1),
-        or if referenced facts/objections/stakeholders do not exist in the snapshot.
+        if snapshot is None (fail-closed), or if referenced facts/objections/stakeholders do not exist in the snapshot.
         """
         if decision is None:
             return False, "decision is None"
@@ -188,6 +206,8 @@ class StrategicDecisionCache:
             return False, "Missing source_event_id for binding validation"
         if not state_call_sid or not str(state_call_sid).strip():
             return False, "Missing state_call_sid: source state ownership validation is mandatory (Point 1)"
+        if snapshot is None:
+            return False, "Missing snapshot: bound ConversationStateSnapshot is mandatory for binding and evidence validation"
 
         state_call_str = str(state_call_sid).strip()
         if state_call_str != str(call_sid):
@@ -221,10 +241,9 @@ class StrategicDecisionCache:
             return False, f"source_event_id mismatch: expected '{expected_event}', got '{actual_event}'"
 
         # 5. Evidence Reference Consistency (Client Feedback 141026)
-        if snapshot is not None:
-            ev_ok, ev_reason = cls.validate_evidence_consistency(decision, snapshot)
-            if not ev_ok:
-                return False, ev_reason
+        ev_ok, ev_reason = cls.validate_evidence_consistency(decision, snapshot, require_active=require_active)
+        if not ev_ok:
+            return False, ev_reason
 
         return True, "Valid 4-key binding and evidence reference consistency"
 
@@ -237,6 +256,7 @@ class StrategicDecisionCache:
         source_event_id: Optional[str] = None,
         state_call_sid: Optional[str] = None,
         snapshot: Optional[Any] = None,
+        require_active: bool = True,
     ) -> Optional[StrategicDecision]:
         """Retrieves a cached decision. When turn_id and source_event_id are provided,
         strictly validates all 4 keys together (call_sid, turn_id, source_state_version, source_event_id),
@@ -248,6 +268,8 @@ class StrategicDecisionCache:
         if turn_id is not None and source_event_id is not None:
             if not state_call_sid:
                 return None
+            if snapshot is None:
+                return None
             return cls.get_strictly_bound(
                 call_sid=call_sid,
                 turn_id=turn_id,
@@ -255,6 +277,7 @@ class StrategicDecisionCache:
                 source_event_id=source_event_id,
                 state_call_sid=state_call_sid,
                 snapshot=snapshot,
+                require_active=require_active,
             )
 
         if turn_id is not None:
@@ -374,10 +397,19 @@ class CoreDecisionManager:
 
         # 4. Evidence reference consistency: Carried strategy's referenced facts and objections
         # must exist in the target snapshot (Client Feedback 141026).
-        state_fact_ids = {getattr(f, "fact_id", None) for f in getattr(snapshot, "facts", [])}
+        # A referenced fact may exist directly as active, or be superseded with a resolvable successor.
+        facts_by_id = {getattr(f, "fact_id", None): f for f in getattr(snapshot, "facts", [])}
         for fid in getattr(strategy, "referenced_fact_ids", []):
-            if fid and fid not in state_fact_ids:
+            if not fid:
+                continue
+            if fid not in facts_by_id:
                 return False, f"Cannot carry forward strategy: referenced_fact_id '{fid}' does not exist in target snapshot"
+            fact_obj = facts_by_id[fid]
+            if getattr(fact_obj, "status", "active") != "active":
+                succ_id = getattr(fact_obj, "superseded_by_fact_id", None)
+                if not succ_id or succ_id not in facts_by_id:
+                    return False, f"Cannot carry forward strategy: referenced_fact_id '{fid}' is superseded without a valid successor"
+
         state_obj_ids = {getattr(o, "objection_id", None) for o in getattr(snapshot, "objections", [])}
         for oid in getattr(strategy, "referenced_objection_ids", []):
             if oid and oid not in state_obj_ids:
@@ -393,6 +425,30 @@ class CoreDecisionManager:
             return False, f"Carried strategy violates core invariants: {err}"
 
         return True, None
+
+    def _refresh_evidence_references(self, decision: StrategicDecision, snapshot: Any) -> None:
+        """Refreshes carried decision evidence references against current snapshot (Client Feedback 141026 item 5).
+        If any referenced fact was superseded, follows the supersession chain to the active successor fact ID.
+        """
+        refreshed_fact_ids = []
+        snap_facts_by_id = {getattr(f, "fact_id", None): f for f in getattr(snapshot, "facts", [])}
+        for fid in getattr(decision, "referenced_fact_ids", []):
+            curr_fid = fid
+            visited = set()
+            while curr_fid in snap_facts_by_id and curr_fid not in visited:
+                visited.add(curr_fid)
+                f_item = snap_facts_by_id[curr_fid]
+                if getattr(f_item, "status", "active") == "superseded" and getattr(f_item, "superseded_by_fact_id", None):
+                    succ = f_item.superseded_by_fact_id
+                    if succ in snap_facts_by_id:
+                        curr_fid = succ
+                    else:
+                        break
+                else:
+                    break
+            if curr_fid and curr_fid in snap_facts_by_id and curr_fid not in refreshed_fact_ids:
+                refreshed_fact_ids.append(curr_fid)
+        decision.referenced_fact_ids = refreshed_fact_ids
 
     def evaluate_state(
         self,
@@ -511,6 +567,8 @@ class CoreDecisionManager:
                 if "HOLD_NON_MATERIAL_TURN" not in carried_dec.reason_codes:
                     carried_dec.reason_codes.append("HOLD_NON_MATERIAL_TURN")
                 carried_dec.strategic_objective = f"Carried forward from Turn {carried_dec.carried_forward_from_turn_id}: {prev_dec.strategic_objective}"
+                # Refresh evidence references against current snapshot (Client Feedback 141026 item 5)
+                self._refresh_evidence_references(carried_dec, snapshot)
 
                 # Recompute carried confidence dynamically from CURRENT snapshot (Gap 3)
                 self.engine._finalize_decision_confidence(
@@ -595,6 +653,8 @@ class CoreDecisionManager:
                 if "STRATEGY_CARRIED_FORWARD" not in carried_dec.reason_codes:
                     carried_dec.reason_codes.append("STRATEGY_CARRIED_FORWARD")
                 carried_dec.strategic_objective = f"Continuation from Turn {carried_dec.carried_forward_from_turn_id}: {prev_dec.strategic_objective}"
+                # Refresh evidence references against current snapshot (Client Feedback 141026 item 5)
+                self._refresh_evidence_references(carried_dec, snapshot)
                 # Point 1 Re-baseline: Rep continuations strictly carry the client turn's confidence
                 # and breakdown identically, avoiding unanchored recomputation drift
                 carried_dec.confidence = prev_dec.confidence
@@ -665,10 +725,13 @@ class CoreDecisionManager:
         source_state_version: int,
         source_event_id: str,
         state_call_sid: str,
+        snapshot: Any,
+        require_active: bool = True,
     ) -> Optional[StrategicDecision]:
         """Retrieves and validates a decision matching all four keys together:
         call_sid + turn_id + source_state_version + source_event_id,
-        with mandatory state_call_sid source state ownership verification (Point 1).
+        with mandatory state_call_sid source state ownership verification (Point 1)
+        and mandatory snapshot evidence reference consistency check (Client Feedback 141026).
         """
         if not state_call_sid or not str(state_call_sid).strip():
             return None
@@ -676,12 +739,16 @@ class CoreDecisionManager:
             return None
         if str(call_sid).strip() != self.call_sid:
             return None
+        if snapshot is None:
+            return None
         return StrategicDecisionCache.get_strictly_bound(
             call_sid=str(call_sid),
             turn_id=int(turn_id),
             source_state_version=int(source_state_version),
             source_event_id=str(source_event_id),
             state_call_sid=str(state_call_sid),
+            snapshot=snapshot,
+            require_active=require_active,
         )
 
 

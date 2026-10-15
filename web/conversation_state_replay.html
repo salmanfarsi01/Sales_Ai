@@ -1191,10 +1191,10 @@
       document.getElementById('kpiGate').innerHTML = gateHtml;
 
       // Push badge
-      const finalPushVal = conv.push_strength || (conv.pressure || '—');
-      const finalAlias = conv.legacy_strategy_alias || (finalState.push_strength ? finalState.push_strength.state : '');
-      const aliasBadge = finalAlias ? `<div style="font-size:10.5px;color:#64748B;margin-top:2px;font-weight:500;">Alias: ${escapeHtml(finalAlias)}</div>` : '';
-      document.getElementById('kpiPush').innerHTML = `<span class="badge badge-push">${escapeHtml(finalPushVal)}</span>${aliasBadge}`;
+      const finalPushVal = conv.pressure || (conv.selected_pressure || (conv.push_strength && conv.push_strength.pressure ? conv.push_strength.pressure : (typeof conv.push_strength === 'string' && ['none', 'low', 'moderate', 'high'].includes(conv.push_strength) ? conv.push_strength : (finalState.push_strength && finalState.push_strength.pressure ? finalState.push_strength.pressure : '—'))));
+      const finalAlias = conv.legacy_strategy_alias || (finalState.push_strength && finalState.push_strength.legacy_strategy_alias ? finalState.push_strength.legacy_strategy_alias : (finalState.push_strength && finalState.push_strength.state && finalState.push_strength.state !== finalPushVal ? finalState.push_strength.state : ''));
+      const aliasBadge = finalAlias ? `<div style="font-size:10.5px;color:#64748B;margin-top:2px;font-weight:500;">Legacy Alias: ${escapeHtml(finalAlias)}</div>` : '';
+      document.getElementById('kpiPush').innerHTML = `<span class="badge badge-push">Pressure: ${escapeHtml(finalPushVal || '—')}</span>${aliasBadge}`;
 
       // Momentum
       const momScore = formatNumber(conv.momentum_score, 0);
@@ -1318,7 +1318,8 @@
         const turnGate = sAfter.conversion_gate;
         const turnGateStatus = turnGate ? (turnGate.status || (turnGate.is_open ? 'open' : 'closed')) : 'closed';
         const turnGateOpen = turnGate ? turnGate.is_open : false;
-        const turnPush = sAfter.push_strength ? sAfter.push_strength.state : '—';
+        const turnPressure = sAfter.push_strength ? (sAfter.push_strength.pressure || sAfter.push_strength.selected_pressure || (['none', 'low', 'moderate', 'high'].includes(String(sAfter.push_strength)) ? String(sAfter.push_strength) : '—')) : '—';
+        const turnAlias = sAfter.push_strength ? (sAfter.push_strength.legacy_strategy_alias || (sAfter.push_strength.state && sAfter.push_strength.state !== turnPressure ? sAfter.push_strength.state : '')) : '';
         const turnStage = sAfter.conversation_stage || '—';
         const isRegression = turnStage === 'decision_resolution' && turnNum === 10;
         const stageBadgeClass = isRegression ? 'badge-closed' : (turnStage === 'commitment_confirmed' ? 'badge-open' : 'badge-material');
@@ -1333,7 +1334,7 @@
         pillsEl.innerHTML = `
           <span class="badge ${stageBadgeClass}" style="font-weight:600;">Stage: ${escapeHtml(String(turnStage).toUpperCase())}${isRegression ? ' (REGRESSION)' : ''}</span>
           <span class="badge ${turnMilestoneClass}">${escapeHtml(turnMilestone)}</span>
-          <span class="badge badge-push">Turn Push: ${escapeHtml(turnPush)}</span>
+          <span class="badge badge-push" ${turnAlias ? `title="Legacy Alias: ${escapeHtml(turnAlias)}"` : ''}>Turn Pressure: ${escapeHtml(turnPressure)}</span>
         `;
       }
 
@@ -1733,8 +1734,8 @@
               <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 6px; font-size: 11px; color: #1E293B;">
                 <div>Gate Status: <strong style="color:${sd.strategic_interpretation.meeting_gate_open ? '#16A34A' : '#DC2626'}">${sd.strategic_interpretation.meeting_gate_open ? 'OPEN' : 'CLOSED'}</strong></div>
                 <div>Decision Maker: <strong>${sd.strategic_interpretation.decision_maker_present ? 'Present' : 'Absent'}</strong></div>
-                <div>Strategy / Posture: <span class="badge badge-push" style="font-size:9.5px; padding:1px 5px;">${escapeHtml(sd.strategic_interpretation.strategy_posture || sd.strategic_posture || sd.strategic_interpretation.push_strength_state || '—')}</span></div>
-                <div>Selected Pressure: <strong class="mono" style="color:#0F172A; font-size:11px;">${escapeHtml(sd.strategic_interpretation.selected_pressure || (sd.push_strength && sd.push_strength.pressure ? sd.push_strength.pressure : String(sd.push_strength || 'none')))}</strong></div>
+                <div>Strategy / Posture: <strong style="color:#1E1B4B;">${escapeHtml(String(sd.primary_action || '—').toUpperCase())} / ${escapeHtml(sd.strategic_posture || '—')}</strong>${(sd.strategic_interpretation && (sd.strategic_interpretation.strategy_posture === 'confirm_and_protect' || sd.strategic_interpretation.push_strength_state === 'confirm_and_protect')) ? ` <span class="mono" style="font-size:9.5px; color:#64748B;">(legacy alias: confirm_and_protect)</span>` : ''}</div>
+                <div>Selected Pressure: <strong class="mono" style="color:#0F172A; font-size:11px;">${escapeHtml(sd.strategic_interpretation.selected_pressure || (sd.push_strength && sd.push_strength.pressure ? sd.push_strength.pressure : (['none', 'low', 'moderate', 'high'].includes(String(sd.push_strength)) ? String(sd.push_strength) : '—')))}</strong></div>
                 <div>Readiness Score: <strong>${(sd.strategic_interpretation.readiness_score !== null && sd.strategic_interpretation.readiness_score !== undefined) ? sd.strategic_interpretation.readiness_score + '%' : 'UNKNOWN (Insufficient Evidence)'}</strong></div>
                 <div>Boundary State: <strong style="color:${sd.strategic_interpretation.hard_boundary_active ? '#DC2626' : (sd.strategic_interpretation.boundary_suspected ? '#D97706' : '#16A34A')}">${sd.strategic_interpretation.hard_boundary_active ? 'CONFIRMED' : (sd.strategic_interpretation.boundary_suspected ? 'SUSPECTED' : 'CLEAR')}</strong></div>
                 <div>Active Objections: <strong>${(sd.strategic_interpretation.active_objections || []).length}</strong></div>
@@ -1874,15 +1875,15 @@
             <div style="display:flex; flex-direction:column; gap:4px;">
               <div style="font-size: 12px; color: #000000;">
                 <strong style="color:#000000;">Selected Pressure:</strong>
-                <span class="badge badge-push" style="font-size:11px;padding:2px 8px;margin-left:4px;">${escapeHtml(sd ? (sd.push_strength && sd.push_strength.pressure ? sd.push_strength.pressure : sd.push_strength) : (push.selected_pressure || push.pressure || '—'))}</span>
+                <span class="badge badge-push" style="font-size:11px;padding:2px 8px;margin-left:4px;">${escapeHtml(sd ? (sd.push_strength && sd.push_strength.pressure ? sd.push_strength.pressure : (['none', 'low', 'moderate', 'high'].includes(String(sd.push_strength)) ? String(sd.push_strength) : '—')) : (push.selected_pressure || push.pressure || '—'))}</span>
               </div>
               <div style="font-size: 12px; color: #000000;">
                 <strong style="color:#000000;">State Preliminary Ceiling:</strong>
-                <span class="mono" style="font-weight:600; color:#475569; margin-left:4px;">${escapeHtml(push.preliminary_ceiling || push.pressure || 'moderate')}</span>
+                <span class="mono" style="font-weight:600; color:#475569; margin-left:4px;">${escapeHtml(push.preliminary_ceiling || push.pressure || '—')}</span>
               </div>
               <div style="font-size: 11.5px; color: #475569;">
                 <strong style="color:#000000;">Preliminary Strategy Alias (Legacy):</strong>
-                <span class="mono" style="color:#475569; margin-left:4px;">${escapeHtml(push.legacy_strategy_alias || push.state || 'resolve_then_ask')}</span>
+                <span class="mono" style="color:#475569; margin-left:4px;">${escapeHtml(push.legacy_strategy_alias || push.state || '—')}</span>
               </div>
             </div>
             <div style="font-size: 12px; margin-top: 8px; color: #000000;">
