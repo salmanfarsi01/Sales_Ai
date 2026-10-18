@@ -42,6 +42,7 @@ class TurnReplayStep(BaseModel):
     source_event_id: Optional[str] = None
     strategic_decision: Optional[StrategicDecision] = None
     unclassified_material: bool = False
+    evidence_warnings: List[str] = Field(default_factory=list)
 
 
 class ConversationStateReplayReport(BaseModel):
@@ -180,6 +181,34 @@ class ConversationReplayEngine:
                 turn_id=bundle.turn_id,
             )
 
+            # Strict evidence consistency check across every decision (fresh and carried)
+            ev_ok, ev_err = StrategicDecisionCache.validate_evidence_consistency(
+                decision=eval_result.decision,
+                snapshot=state_after,
+                require_active=True,
+            )
+            step_evidence_warnings: List[str] = []
+            if not ev_ok:
+                LOGGER.warning(
+                    "Replay Turn %s decision evidence inconsistency against snapshot: %s. Falling back to fresh evaluation.",
+                    bundle.turn_id,
+                    ev_err,
+                )
+                step_evidence_warnings.append(f"EVIDENCE_INCONSISTENCY: {ev_err}")
+                # Clear stale decision from cache and latest_decision pointer to prevent carried stale state
+                StrategicDecisionCache.clear(call_sid)
+                decision_manager.latest_decision = None
+                eval_result = decision_manager.evaluate_state(
+                    snapshot=state_after,
+                    turn_speaker=bundle.speaker_id,
+                    turn_text=bundle.utterance_text,
+                    turn_timestamp_ms=bundle.timestamp_ms,
+                    turn_id=bundle.turn_id,
+                )
+                if eval_result.decision.reason_codes is None:
+                    eval_result.decision.reason_codes = []
+                eval_result.decision.reason_codes.append("EVIDENCE_CONSISTENCY_FALLBACK")
+
             # Surface the LLM Gateway's deterministic fallback stub in the offline replay trace
             gateway_stub = gateway._deterministic_fallback(eval_result.decision, snapshot=state_after)
             eval_result.decision.gateway_fallback_stub = gateway_stub
@@ -199,6 +228,7 @@ class ConversationReplayEngine:
                 state_after=state_after,
                 strategic_decision=eval_result.decision.model_copy(deep=True),
                 unclassified_material=bool(getattr(eval_result.decision, "unclassified_material", False) or getattr(state_after, "unclassified_material", False)),
+                evidence_warnings=step_evidence_warnings,
             )
             timeline.append(step)
             prior_bundle = bundle

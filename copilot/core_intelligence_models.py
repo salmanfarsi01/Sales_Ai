@@ -129,6 +129,7 @@ class StrategicDecision(BaseModel):
     carried_forward_from_decision_id: Optional[str] = Field(default=None, description="Decision ID when strategy is continued from prior turn (Point 13)")
     carried_forward_from_turn_id: Optional[int] = Field(default=None, description="Turn ID when strategy is continued from prior turn (Point 13)")
     referenced_fact_ids: List[str] = Field(default_factory=list, description="IDs of facts influencing this decision (Point 12)")
+    original_referenced_fact_ids: List[str] = Field(default_factory=list, description="Preserves original historical referenced fact IDs prior to carry-forward reference refreshes")
     referenced_objection_ids: List[str] = Field(default_factory=list, description="IDs of objections influencing this decision (Point 12)")
     referenced_stakeholder_ids: List[str] = Field(default_factory=list, description="IDs of stakeholders influencing this decision (Point 12)")
     reason_codes: List[str] = Field(default_factory=list)

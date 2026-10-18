@@ -1,12 +1,12 @@
 {
   "call_sid": "sim_mucj0p5s",
-  "run_id": "run_sim_mucj0p5s_1792043534",
-  "created_at": "2026-10-15T05:52:14.984081+00:00",
+  "run_id": "run_sim_mucj0p5s_1792291969",
+  "created_at": "2026-10-18T02:52:49.795449+00:00",
   "total_turns": 18,
   "runtime_inputs": [
     {
       "turn_id": 1,
-      "speaker": null,
+      "speaker": "salesperson",
       "utterance": "Hi, thanks for making time today \u2014 tell me a bit about what's going on with the house.",
       "source_state_version": 2,
       "source_event_id": "ev_turn_1_v2",
@@ -18,11 +18,16 @@
       },
       "conversion_confirmed": null,
       "readiness_score": null,
+      "readiness_partial": null,
       "dimensions": {
         "trust": 0.5,
+        "trust_measured": false,
         "tension": 0.2,
+        "tension_measured": false,
         "engagement": 0.5,
-        "momentum": 0.5
+        "engagement_measured": false,
+        "momentum": 0.5,
+        "momentum_measured": false
       },
       "unresolved_objection_ids": [],
       "active_fact_ids": [],
@@ -41,7 +46,7 @@
     },
     {
       "turn_id": 2,
-      "speaker": null,
+      "speaker": "client",
       "utterance": "I'm the one making this decision, no one else needs to sign off.",
       "source_state_version": 4,
       "source_event_id": "ev_turn_2_v4",
@@ -53,11 +58,16 @@
       },
       "conversion_confirmed": null,
       "readiness_score": null,
+      "readiness_partial": 90.0,
       "dimensions": {
         "trust": 0.5,
+        "trust_measured": false,
         "tension": 0.2,
+        "tension_measured": false,
         "engagement": 0.5,
-        "momentum": 0.5
+        "engagement_measured": false,
+        "momentum": 0.5,
+        "momentum_measured": false
       },
       "unresolved_objection_ids": [],
       "active_fact_ids": [],
@@ -76,7 +86,7 @@
     },
     {
       "turn_id": 3,
-      "speaker": null,
+      "speaker": "salesperson",
       "utterance": "Got it. What's driving the timing for you?",
       "source_state_version": 4,
       "source_event_id": "ev_turn_3_v4",
@@ -88,11 +98,16 @@
       },
       "conversion_confirmed": null,
       "readiness_score": null,
+      "readiness_partial": 90.0,
       "dimensions": {
         "trust": 0.5,
+        "trust_measured": false,
         "tension": 0.2,
+        "tension_measured": false,
         "engagement": 0.5,
-        "momentum": 0.5
+        "engagement_measured": false,
+        "momentum": 0.5,
+        "momentum_measured": false
       },
       "unresolved_objection_ids": [],
       "active_fact_ids": [],
@@ -112,7 +127,7 @@
     },
     {
       "turn_id": 4,
-      "speaker": null,
+      "speaker": "client",
       "utterance": "We might look at moving sometime next year, nothing urgent yet.",
       "source_state_version": 6,
       "source_event_id": "ev_turn_4_v6",
@@ -124,15 +139,20 @@
       },
       "conversion_confirmed": null,
       "readiness_score": null,
+      "readiness_partial": 90.0,
       "dimensions": {
         "trust": 0.5,
+        "trust_measured": false,
         "tension": 0.2,
+        "tension_measured": false,
         "engagement": 0.5,
-        "momentum": 0.5
+        "engagement_measured": false,
+        "momentum": 0.5,
+        "momentum_measured": false
       },
       "unresolved_objection_ids": [],
       "active_fact_ids": [
-        "fact_451df9dc"
+        "fact_e73177c7"
       ],
       "decision_output": {
         "primary_action": "question",
@@ -149,7 +169,7 @@
     },
     {
       "turn_id": 5,
-      "speaker": null,
+      "speaker": "client",
       "utterance": "Honestly, we're not sure this is the right time anymore.",
       "source_state_version": 8,
       "source_event_id": "ev_turn_5_v8",
@@ -161,17 +181,22 @@
       },
       "conversion_confirmed": null,
       "readiness_score": null,
+      "readiness_partial": 90.0,
       "dimensions": {
         "trust": 0.5,
+        "trust_measured": false,
         "tension": 0.2,
+        "tension_measured": false,
         "engagement": 0.5,
-        "momentum": 0.5
+        "engagement_measured": false,
+        "momentum": 0.5,
+        "momentum_measured": false
       },
       "unresolved_objection_ids": [
-        "obj_ea36a916"
+        "obj_b8e2cf12"
       ],
       "active_fact_ids": [
-        "fact_451df9dc"
+        "fact_e73177c7"
       ],
       "decision_output": {
         "primary_action": "validate",
@@ -180,7 +205,7 @@
         "carried_forward": false,
         "referenced_fact_ids": [],
         "referenced_objection_ids": [
-          "obj_ea36a916"
+          "obj_b8e2cf12"
         ],
         "reason_codes": [
           "OBJECTION_SURFACE_INITIAL",
@@ -191,7 +216,7 @@
     },
     {
       "turn_id": 6,
-      "speaker": null,
+      "speaker": "salesperson",
       "utterance": "That's fair \u2014 a lot of people feel that way before they see the actual numbers. Would it help to walk through what the market looks like right now?",
       "source_state_version": 9,
       "source_event_id": "ev_turn_6_v9",
@@ -203,17 +228,22 @@
       },
       "conversion_confirmed": null,
       "readiness_score": null,
+      "readiness_partial": 90.0,
       "dimensions": {
         "trust": 0.5,
+        "trust_measured": false,
         "tension": 0.2,
+        "tension_measured": false,
         "engagement": 0.5,
-        "momentum": 0.5
+        "engagement_measured": false,
+        "momentum": 0.5,
+        "momentum_measured": false
       },
       "unresolved_objection_ids": [
-        "obj_ea36a916"
+        "obj_b8e2cf12"
       ],
       "active_fact_ids": [
-        "fact_451df9dc"
+        "fact_e73177c7"
       ],
       "decision_output": {
         "primary_action": "validate",
@@ -222,7 +252,7 @@
         "carried_forward": true,
         "referenced_fact_ids": [],
         "referenced_objection_ids": [
-          "obj_ea36a916"
+          "obj_b8e2cf12"
         ],
         "reason_codes": [
           "OBJECTION_SURFACE_INITIAL",
@@ -234,7 +264,7 @@
     },
     {
       "turn_id": 7,
-      "speaker": null,
+      "speaker": "client",
       "utterance": "Okay, that makes sense, I guess timing isn't the biggest issue.",
       "source_state_version": 11,
       "source_event_id": "ev_turn_7_v11",
@@ -246,15 +276,20 @@
       },
       "conversion_confirmed": null,
       "readiness_score": null,
+      "readiness_partial": 90.0,
       "dimensions": {
         "trust": 0.5,
+        "trust_measured": false,
         "tension": 0.2,
+        "tension_measured": false,
         "engagement": 0.5,
-        "momentum": 0.5
+        "engagement_measured": false,
+        "momentum": 0.5,
+        "momentum_measured": false
       },
       "unresolved_objection_ids": [],
       "active_fact_ids": [
-        "fact_451df9dc"
+        "fact_e73177c7"
       ],
       "decision_output": {
         "primary_action": "question",
@@ -270,7 +305,7 @@
     },
     {
       "turn_id": 8,
-      "speaker": null,
+      "speaker": "salesperson",
       "utterance": "Great \u2014 would sometime next week work for a walkthrough?",
       "source_state_version": 14,
       "source_event_id": "ev_turn_8_v14",
@@ -282,15 +317,20 @@
       },
       "conversion_confirmed": null,
       "readiness_score": null,
+      "readiness_partial": 90.0,
       "dimensions": {
         "trust": 0.5,
+        "trust_measured": false,
         "tension": 0.2,
+        "tension_measured": false,
         "engagement": 0.5,
-        "momentum": 0.5
+        "engagement_measured": false,
+        "momentum": 0.5,
+        "momentum_measured": false
       },
       "unresolved_objection_ids": [],
       "active_fact_ids": [
-        "fact_451df9dc"
+        "fact_e73177c7"
       ],
       "decision_output": {
         "primary_action": "question",
@@ -307,7 +347,7 @@
     },
     {
       "turn_id": 9,
-      "speaker": null,
+      "speaker": "client",
       "utterance": "Maybe next week could work, let me think about it.",
       "source_state_version": 17,
       "source_event_id": "ev_turn_9_v17",
@@ -319,16 +359,21 @@
       },
       "conversion_confirmed": null,
       "readiness_score": 85.0,
+      "readiness_partial": 85.0,
       "dimensions": {
         "trust": 0.5,
+        "trust_measured": false,
         "tension": 0.2,
+        "tension_measured": false,
         "engagement": 0.5,
-        "momentum": 0.5
+        "engagement_measured": false,
+        "momentum": 0.5,
+        "momentum_measured": false
       },
       "unresolved_objection_ids": [],
       "active_fact_ids": [
-        "fact_451df9dc",
-        "fact_822445bb"
+        "fact_e73177c7",
+        "fact_e54762ed"
       ],
       "decision_output": {
         "primary_action": "question",
@@ -345,7 +390,7 @@
     },
     {
       "turn_id": 10,
-      "speaker": null,
+      "speaker": "client",
       "utterance": "Actually, my wife would really need to be part of this conversation before we go any further.",
       "source_state_version": 21,
       "source_event_id": "ev_turn_10_v21",
@@ -357,17 +402,22 @@
       },
       "conversion_confirmed": null,
       "readiness_score": 55.0,
+      "readiness_partial": 60.0,
       "dimensions": {
         "trust": 0.5,
+        "trust_measured": false,
         "tension": 0.2,
+        "tension_measured": false,
         "engagement": 0.5,
-        "momentum": 0.5
+        "engagement_measured": false,
+        "momentum": 0.5,
+        "momentum_measured": false
       },
       "unresolved_objection_ids": [],
       "active_fact_ids": [
-        "fact_451df9dc",
-        "fact_822445bb",
-        "fact_8e0020e0"
+        "fact_e73177c7",
+        "fact_e54762ed",
+        "fact_41179e4a"
       ],
       "decision_output": {
         "primary_action": "clarify",
@@ -385,7 +435,7 @@
     },
     {
       "turn_id": 11,
-      "speaker": null,
+      "speaker": "salesperson",
       "utterance": "Of course, happy to loop her in whenever works.",
       "source_state_version": 21,
       "source_event_id": "ev_turn_11_v21",
@@ -397,17 +447,22 @@
       },
       "conversion_confirmed": null,
       "readiness_score": 55.0,
+      "readiness_partial": 60.0,
       "dimensions": {
         "trust": 0.5,
+        "trust_measured": false,
         "tension": 0.2,
+        "tension_measured": false,
         "engagement": 0.5,
-        "momentum": 0.5
+        "engagement_measured": false,
+        "momentum": 0.5,
+        "momentum_measured": false
       },
       "unresolved_objection_ids": [],
       "active_fact_ids": [
-        "fact_451df9dc",
-        "fact_822445bb",
-        "fact_8e0020e0"
+        "fact_e73177c7",
+        "fact_e54762ed",
+        "fact_41179e4a"
       ],
       "decision_output": {
         "primary_action": "clarify",
@@ -426,7 +481,7 @@
     },
     {
       "turn_id": 12,
-      "speaker": null,
+      "speaker": "client",
       "utterance": "I guess I'm just worried this isn't really the right move for us financially with everything going on.",
       "source_state_version": 23,
       "source_event_id": "ev_turn_12_v23",
@@ -438,19 +493,24 @@
       },
       "conversion_confirmed": null,
       "readiness_score": 55.0,
+      "readiness_partial": 60.0,
       "dimensions": {
         "trust": 0.5,
+        "trust_measured": false,
         "tension": 0.2,
+        "tension_measured": false,
         "engagement": 0.5,
-        "momentum": 0.5
+        "engagement_measured": false,
+        "momentum": 0.5,
+        "momentum_measured": false
       },
       "unresolved_objection_ids": [
-        "obj_ea36a916"
+        "obj_b8e2cf12"
       ],
       "active_fact_ids": [
-        "fact_451df9dc",
-        "fact_822445bb",
-        "fact_8e0020e0"
+        "fact_e73177c7",
+        "fact_e54762ed",
+        "fact_41179e4a"
       ],
       "decision_output": {
         "primary_action": "mirror",
@@ -459,7 +519,7 @@
         "carried_forward": false,
         "referenced_fact_ids": [],
         "referenced_objection_ids": [
-          "obj_ea36a916"
+          "obj_b8e2cf12"
         ],
         "reason_codes": [
           "OBJECTION_UNDERLYING_DRIVER",
@@ -470,7 +530,7 @@
     },
     {
       "turn_id": 13,
-      "speaker": null,
+      "speaker": "salesperson",
       "utterance": "Totally understand \u2014 let's look at your net proceeds after all costs, so you can see the real picture.",
       "source_state_version": 25,
       "source_event_id": "ev_turn_13_v25",
@@ -482,19 +542,24 @@
       },
       "conversion_confirmed": null,
       "readiness_score": 55.0,
+      "readiness_partial": 60.0,
       "dimensions": {
         "trust": 0.5,
+        "trust_measured": false,
         "tension": 0.2,
+        "tension_measured": false,
         "engagement": 0.5,
-        "momentum": 0.5
+        "engagement_measured": false,
+        "momentum": 0.5,
+        "momentum_measured": false
       },
       "unresolved_objection_ids": [
-        "obj_ea36a916"
+        "obj_b8e2cf12"
       ],
       "active_fact_ids": [
-        "fact_451df9dc",
-        "fact_822445bb",
-        "fact_8e0020e0"
+        "fact_e73177c7",
+        "fact_e54762ed",
+        "fact_41179e4a"
       ],
       "decision_output": {
         "primary_action": "mirror",
@@ -503,7 +568,7 @@
         "carried_forward": true,
         "referenced_fact_ids": [],
         "referenced_objection_ids": [
-          "obj_ea36a916"
+          "obj_b8e2cf12"
         ],
         "reason_codes": [
           "OBJECTION_UNDERLYING_DRIVER",
@@ -515,7 +580,7 @@
     },
     {
       "turn_id": 14,
-      "speaker": null,
+      "speaker": "client",
       "utterance": "That's actually really helpful, tell me more \u2014 how does the marketing process work, what about staging, how long does listing usually take?",
       "source_state_version": 27,
       "source_event_id": "ev_turn_14_v27",
@@ -527,19 +592,24 @@
       },
       "conversion_confirmed": null,
       "readiness_score": 55.0,
+      "readiness_partial": 60.0,
       "dimensions": {
         "trust": 0.5,
+        "trust_measured": false,
         "tension": 0.2,
+        "tension_measured": false,
         "engagement": 0.5,
-        "momentum": 0.5
+        "engagement_measured": false,
+        "momentum": 0.5,
+        "momentum_measured": false
       },
       "unresolved_objection_ids": [
-        "obj_ea36a916"
+        "obj_b8e2cf12"
       ],
       "active_fact_ids": [
-        "fact_451df9dc",
-        "fact_822445bb",
-        "fact_8e0020e0"
+        "fact_e73177c7",
+        "fact_e54762ed",
+        "fact_41179e4a"
       ],
       "decision_output": {
         "primary_action": "educate",
@@ -556,7 +626,7 @@
     },
     {
       "turn_id": 15,
-      "speaker": null,
+      "speaker": "client",
       "utterance": "Please don't start texting me every day before we meet, by the way.",
       "source_state_version": 30,
       "source_event_id": "ev_turn_15_v30",
@@ -568,20 +638,25 @@
       },
       "conversion_confirmed": null,
       "readiness_score": 55.0,
+      "readiness_partial": 60.0,
       "dimensions": {
         "trust": 0.5,
+        "trust_measured": false,
         "tension": 0.2,
+        "tension_measured": false,
         "engagement": 0.5,
-        "momentum": 0.5
+        "engagement_measured": false,
+        "momentum": 0.5,
+        "momentum_measured": false
       },
       "unresolved_objection_ids": [
-        "obj_ea36a916"
+        "obj_b8e2cf12"
       ],
       "active_fact_ids": [
-        "fact_451df9dc",
-        "fact_822445bb",
-        "fact_8e0020e0",
-        "fact_93b5835f"
+        "fact_e73177c7",
+        "fact_e54762ed",
+        "fact_41179e4a",
+        "fact_d33be6e4"
       ],
       "decision_output": {
         "primary_action": "acknowledge",
@@ -589,7 +664,7 @@
         "push_pressure": "none",
         "carried_forward": false,
         "referenced_fact_ids": [
-          "fact_93b5835f"
+          "fact_d33be6e4"
         ],
         "referenced_objection_ids": [],
         "reason_codes": [
@@ -601,7 +676,7 @@
     },
     {
       "turn_id": 16,
-      "speaker": null,
+      "speaker": "client",
       "utterance": "Mornings don't really work for us either, just so you know.",
       "source_state_version": 32,
       "source_event_id": "ev_turn_16_v32",
@@ -613,21 +688,26 @@
       },
       "conversion_confirmed": null,
       "readiness_score": 52.5,
+      "readiness_partial": 52.5,
       "dimensions": {
         "trust": 0.5,
+        "trust_measured": false,
         "tension": 0.2,
+        "tension_measured": false,
         "engagement": 0.5,
-        "momentum": 0.5
+        "engagement_measured": false,
+        "momentum": 0.5,
+        "momentum_measured": false
       },
       "unresolved_objection_ids": [
-        "obj_ea36a916"
+        "obj_b8e2cf12"
       ],
       "active_fact_ids": [
-        "fact_451df9dc",
-        "fact_822445bb",
-        "fact_8e0020e0",
-        "fact_93b5835f",
-        "fact_3905fc34"
+        "fact_e73177c7",
+        "fact_e54762ed",
+        "fact_41179e4a",
+        "fact_d33be6e4",
+        "fact_f98a7e9c"
       ],
       "decision_output": {
         "primary_action": "question",
@@ -644,7 +724,7 @@
     },
     {
       "turn_id": 17,
-      "speaker": null,
+      "speaker": "salesperson",
       "utterance": "Noted on all of that. What day works best?",
       "source_state_version": 32,
       "source_event_id": "ev_turn_17_v32",
@@ -656,21 +736,26 @@
       },
       "conversion_confirmed": null,
       "readiness_score": 52.5,
+      "readiness_partial": 52.5,
       "dimensions": {
         "trust": 0.5,
+        "trust_measured": false,
         "tension": 0.2,
+        "tension_measured": false,
         "engagement": 0.5,
-        "momentum": 0.5
+        "engagement_measured": false,
+        "momentum": 0.5,
+        "momentum_measured": false
       },
       "unresolved_objection_ids": [
-        "obj_ea36a916"
+        "obj_b8e2cf12"
       ],
       "active_fact_ids": [
-        "fact_451df9dc",
-        "fact_822445bb",
-        "fact_8e0020e0",
-        "fact_93b5835f",
-        "fact_3905fc34"
+        "fact_e73177c7",
+        "fact_e54762ed",
+        "fact_41179e4a",
+        "fact_d33be6e4",
+        "fact_f98a7e9c"
       ],
       "decision_output": {
         "primary_action": "question",
@@ -688,7 +773,7 @@
     },
     {
       "turn_id": 18,
-      "speaker": null,
+      "speaker": "client",
       "utterance": "Thursday at 3 works, and my wife will be there.",
       "source_state_version": 38,
       "source_event_id": "ev_turn_18_v38",
@@ -700,22 +785,27 @@
       },
       "conversion_confirmed": null,
       "readiness_score": 90.0,
+      "readiness_partial": 90.0,
       "dimensions": {
         "trust": 0.5,
+        "trust_measured": false,
         "tension": 0.2,
+        "tension_measured": false,
         "engagement": 0.5,
-        "momentum": 0.5
+        "engagement_measured": false,
+        "momentum": 0.5,
+        "momentum_measured": false
       },
       "unresolved_objection_ids": [
-        "obj_ea36a916"
+        "obj_b8e2cf12"
       ],
       "active_fact_ids": [
-        "fact_451df9dc",
-        "fact_93b5835f",
-        "fact_3905fc34",
-        "fact_a4428428",
-        "fact_a9f97253",
-        "fact_61a9595d"
+        "fact_e73177c7",
+        "fact_d33be6e4",
+        "fact_f98a7e9c",
+        "fact_acb08fdd",
+        "fact_82f33594",
+        "fact_6d300a90"
       ],
       "decision_output": {
         "primary_action": "acknowledge",
@@ -723,7 +813,7 @@
         "push_pressure": "none",
         "carried_forward": false,
         "referenced_fact_ids": [
-          "fact_61a9595d"
+          "fact_6d300a90"
         ],
         "referenced_objection_ids": [],
         "reason_codes": [

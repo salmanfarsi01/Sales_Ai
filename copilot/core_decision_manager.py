@@ -428,8 +428,12 @@ class CoreDecisionManager:
 
     def _refresh_evidence_references(self, decision: StrategicDecision, snapshot: Any) -> None:
         """Refreshes carried decision evidence references against current snapshot (Client Feedback 141026 item 5).
+        Preserves original historical referenced fact IDs separately in original_referenced_fact_ids.
         If any referenced fact was superseded, follows the supersession chain to the active successor fact ID.
         """
+        if not getattr(decision, "original_referenced_fact_ids", None):
+            decision.original_referenced_fact_ids = list(getattr(decision, "referenced_fact_ids", []))
+
         refreshed_fact_ids = []
         snap_facts_by_id = {getattr(f, "fact_id", None): f for f in getattr(snapshot, "facts", [])}
         for fid in getattr(decision, "referenced_fact_ids", []):
