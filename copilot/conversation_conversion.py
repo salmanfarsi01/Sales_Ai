@@ -648,7 +648,7 @@ class MeetingConversionGateEngine:
             current_state.readiness and ("absent_decision_maker" in current_state.readiness.active_blocker_caps)
         )
         has_absent_stakeholder = any(
-            s.role in ("spouse", "partner", "co-owner", "co_owner", "attorney", "wife", "husband") and s.presence == "absent"
+            s.role in ("spouse", "partner", "co-owner", "co_owner", "attorney", "wife", "husband", "brother", "sister", "sibling") and s.presence == "absent"
             for s in dec.stakeholders
         )
         dm_facts = [f for f in current_state.facts if (f.category == "decision_maker" or f.fact_key in ("spouse_involvement", "decision_maker_authority", "sole_decision_maker", "decision_maker_role")) and f.status == "active"]
@@ -988,7 +988,7 @@ class MeetingConversionGateEngine:
         # If an appointment is tentative or unconfirmed, confirm_and_protect is strictly disallowed.
         is_appointment_target = target in ("appointment", "property_walkthrough", "initial_consultation", "meeting")
         is_dm_absent = (not current_state.decision_structure.decision_maker_present) or any(
-            s.role in ("spouse", "partner", "co-owner", "co_owner", "attorney", "wife", "husband") and s.presence == "absent"
+            s.role in ("spouse", "partner", "co-owner", "co_owner", "attorney", "wife", "husband", "brother", "sister", "sibling") and s.presence == "absent"
             for s in current_state.decision_structure.stakeholders
         )
         has_confirmed_event = (
@@ -1229,26 +1229,29 @@ class MeetingConversionGateEngine:
         base = ["Client", "Agent"]
         if current_state and current_state.decision_structure:
             for s in current_state.decision_structure.stakeholders:
-                label = s.role.title() if s.role else "Stakeholder"
-                if s.presence == "confirmed_attending" or (
-                    bundle and s.role and s.role.lower() in bundle.utterance_text.lower()
-                ):
+                label = s.name if s.name else (s.role.title() if s.role else "Stakeholder")
+                is_attending = (
+                    s.presence == "confirmed_attending"
+                    or (bundle and s.role and s.role.lower() in bundle.utterance_text.lower())
+                    or (bundle and s.name and s.name.lower() in bundle.utterance_text.lower())
+                )
+                if is_attending:
                     if label not in base:
                         base.append(label)
         if bundle and bundle.speaker_id == "client":
             t_lower = bundle.utterance_text.lower()
-            if "wife" in t_lower and any(w in t_lower for w in ["there", "attend", "join", "come", "with me", "both"]):
-                if "Wife" not in base:
-                    base.append("Wife")
-            elif "husband" in t_lower and any(w in t_lower for w in ["there", "attend", "join", "come", "with me", "both"]):
-                if "Husband" not in base:
-                    base.append("Husband")
-            elif "spouse" in t_lower and any(w in t_lower for w in ["there", "attend", "join", "come", "with me", "both"]):
-                if "Spouse" not in base:
-                    base.append("Spouse")
-            elif "partner" in t_lower and any(w in t_lower for w in ["there", "attend", "join", "come", "with me", "both"]):
-                if "Partner" not in base:
-                    base.append("Partner")
+            for role_word, role_label in [
+                ("wife", "Wife"),
+                ("husband", "Husband"),
+                ("spouse", "Spouse"),
+                ("partner", "Partner"),
+                ("brother", "Brother"),
+                ("sister", "Sister"),
+                ("co-owner", "Co-Owner"),
+            ]:
+                if role_word in t_lower and any(w in t_lower for w in ["there", "attend", "join", "come", "with me", "both"]):
+                    if role_label not in base:
+                        base.append(role_label)
         if previous_event and previous_event.participants:
             for p in previous_event.participants:
                 if p not in base:
@@ -1584,6 +1587,14 @@ class MeetingConversionGateEngine:
         # ---------------------------------------------------------------------
         if gate.is_open:
             if previous_event and previous_event.status in (ConversionEventStatus.CONFIRMED, ConversionEventStatus.TENTATIVE, ConversionEventStatus.PROPOSED):
+                if previous_event.status == ConversionEventStatus.CONFIRMED:
+                    resolved_participants = self._resolve_conversion_participants(current_state, bundle, previous_event)
+                    if resolved_participants != previous_event.participants:
+                        updated_event = previous_event.model_copy(deep=True)
+                        updated_event.participants = resolved_participants
+                        if bundle.turn_id not in updated_event.source_turn_ids:
+                            updated_event.source_turn_ids = sorted(list(set(updated_event.source_turn_ids + [bundle.turn_id])))
+                        return updated_event
                 return previous_event
             return ConversionEventObject(
                 event_id=previous_event.event_id if previous_event else f"conv_{uuid.uuid4().hex[:8]}",
@@ -1607,6 +1618,13 @@ class MeetingConversionGateEngine:
             # Point 4: Preserve confirmed appointment's identity and original commitment evidence.
             # Change its status only on relevant evidence (e.g. cancellation or reschedule).
             if previous_event.status == ConversionEventStatus.CONFIRMED:
+                resolved_participants = self._resolve_conversion_participants(current_state, bundle, previous_event)
+                if resolved_participants != previous_event.participants:
+                    updated_event = previous_event.model_copy(deep=True)
+                    updated_event.participants = resolved_participants
+                    if bundle.turn_id not in updated_event.source_turn_ids:
+                        updated_event.source_turn_ids = sorted(list(set(updated_event.source_turn_ids + [bundle.turn_id])))
+                    return updated_event
                 return previous_event
             # If previous event was TENTATIVE, PROPOSED, or ELIGIBLE and gate is closed:
             # Transition to BLOCKED because safety gate conditions are failing

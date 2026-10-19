@@ -1093,9 +1093,16 @@ class ConversationStateManager:
                         ev.superseded_by_event_id = conv_res.event_id
                         ev.superseded_at_turn_id = bundle.turn_id
 
-            if prev_conv is None or prev_conv.status != conv_res.status or prev_conv.event_id != conv_res.event_id:
+            if (
+                prev_conv is None
+                or prev_conv.status != conv_res.status
+                or prev_conv.event_id != conv_res.event_id
+                or prev_conv.participants != conv_res.participants
+                or prev_conv.start_at != conv_res.start_at
+            ):
                 next_version += 1
                 supersede_info = f" (supersedes {conv_res.supersedes_event_id}, reversal_reason: {conv_res.reversal_reason})" if conv_res.supersedes_event_id else ""
+                part_info = f", participants={conv_res.participants}" if prev_conv and prev_conv.participants != conv_res.participants else ""
                 changes.append(
                     StateChangeRecord(
                         state_version_before=next_version - 1,
@@ -1105,7 +1112,7 @@ class ConversationStateManager:
                         new_value=conv_res.model_dump(),
                         triggering_turn_id=bundle.turn_id,
                         evidence_ids=bundle.contributing_evidence_ids,
-                        reason=f"Conversion event updated: {conv_res.conversion_type} status={conv_res.status}{supersede_info}.",
+                        reason=f"Conversion event updated: {conv_res.conversion_type} status={conv_res.status}{supersede_info}{part_info}.",
                         confidence=conv_res.confirmation_confidence,
                         timestamp_ms=bundle.timestamp_ms,
                     )
@@ -1407,19 +1414,44 @@ class ConversationStateManager:
         text = bundle.utterance_text.lower().strip()
         result: Dict[str, Any] = {}
 
-        # 1. Direct presence confirmation of co-decision maker / spouse (Client Principle #1)
-        if any(re.search(pat, text) for pat in PRESENCE_CONFIRMATION_PATTERNS):
+        # 1. Direct presence confirmation of co-decision maker / spouse / co-owner (Client Principle #1)
+        is_presence_confirm = (
+            any(re.search(pat, text) for pat in PRESENCE_CONFIRMATION_PATTERNS)
+            or (
+                bool(self.current_state.decision_structure.stakeholders)
+                and any(
+                    ((s.name and s.name.lower() in text) or (s.role and s.role.lower() in text))
+                    for s in self.current_state.decision_structure.stakeholders
+                )
+                and any(w in text for w in ["join", "attend", "be there", "make it", "talk about it", "video", "call", "fine to talk"])
+            )
+        )
+        if is_presence_confirm:
             existing = list(self.current_state.decision_structure.stakeholders)
-            target_role = "wife" if "wife" in text else ("husband" if "husband" in text else ("spouse" if "spouse" in text else ("partner" if "partner" in text else None)))
+            target_role = (
+                "wife" if "wife" in text
+                else ("husband" if "husband" in text
+                else ("spouse" if "spouse" in text
+                else ("partner" if "partner" in text
+                else ("co_owner" if ("co-owner" in text or "co_owner" in text or "brother" in text or "sister" in text)
+                else None))))
+            )
 
             updated = False
             new_stakeholders = []
             for s in existing:
-                match_role = (
-                    (target_role and s.role in (target_role, "spouse", "partner", "co_decision_maker", "female_decision_maker" if target_role == "wife" else "male_decision_maker"))
-                    or (not target_role and s.is_decision_maker)
-                )
-                if match_role:
+                match = False
+                if s.name and s.name.lower() in text:
+                    match = True
+                elif target_role and s.role in (
+                    target_role, "spouse", "partner", "co_decision_maker", "co_owner", "brother", "sister",
+                    "female_decision_maker" if target_role == "wife" else "male_decision_maker"
+                ):
+                    match = True
+                elif not target_role and s.is_decision_maker and (s.presence == "absent" or any(w in text for w in ["both", "they", "he", "she"])):
+                    match = True
+
+                if match:
                     s_up = s.model_copy(deep=True)
                     s_up.presence = "confirmed_attending"
                     s_up.notes = f"Confirmed attending by client: '{bundle.utterance_text[:60]}'"
@@ -1428,11 +1460,14 @@ class ConversationStateManager:
                 else:
                     new_stakeholders.append(s.model_copy(deep=True))
 
-            if not updated and target_role:
+            if not updated and (target_role or any(s.name and s.name.lower() in text for s in existing)):
+                name_match = re.search(r"\b(?:brother|sister|sibling|partner|co-owner|co_owner|husband|wife)\s+([A-Z][a-z]+)\b", bundle.utterance_text)
+                found_name = name_match.group(1) if name_match else None
                 new_stakeholders.append(
                     DecisionStakeholder(
                         stakeholder_id=f"stk_{uuid.uuid4().hex[:6]}",
-                        role=target_role,
+                        name=found_name,
+                        role=target_role or "co_decision_maker",
                         is_decision_maker=True,
                         presence="confirmed_attending",
                         notes=f"Confirmed attending by client: '{bundle.utterance_text[:60]}'",
@@ -1446,11 +1481,17 @@ class ConversationStateManager:
             if not has_absent:
                 result["decision_maker_present"] = True
                 result["co_decision_required"] = True
-                result["primary_decision_maker"] = "sole decision maker, spouse confirmed attending"
+                if any(s.role in ("wife", "husband", "spouse") for s in new_stakeholders):
+                    result["primary_decision_maker"] = "sole decision maker, spouse confirmed attending"
+                elif any(s.role in ("co_owner", "brother", "sister") for s in new_stakeholders):
+                    result["primary_decision_maker"] = "sole decision maker, co-owner confirmed attending"
+                else:
+                    result["primary_decision_maker"] = "sole decision maker, stakeholder confirmed attending"
 
         # 2. Direct absent decision maker patterns
         elif any(re.search(pat, text) for pat in ABSENT_DECISION_MAKER_PATTERNS):
             role = "co_decision_maker"
+            name = None
             if "husband" in text:
                 role = "husband"
             elif "wife" in text:
@@ -1459,13 +1500,25 @@ class ConversationStateManager:
                 role = "partner"
             elif "attorney" in text or "lawyer" in text:
                 role = "attorney"
+            elif "brother" in text or "sister" in text or "co-owner" in text or "co_owner" in text:
+                role = "co_owner"
             elif "he" in text:
                 role = "male_decision_maker"
             elif "she" in text:
                 role = "female_decision_maker"
 
+            name_match = re.search(
+                r"\b(?:brother|sister|sibling|partner|co-owner|co_owner|husband|wife)\s+([A-Z][a-z]+)\b",
+                bundle.utterance_text,
+            )
+            if not name_match:
+                name_match = re.search(r"\bwith\s+my\s+(?:brother|sister|partner|co-owner)\s+([A-Z][a-z]+)\b", bundle.utterance_text, re.IGNORECASE)
+            if name_match:
+                name = name_match.group(1).title()
+
             stakeholder = DecisionStakeholder(
                 stakeholder_id=f"stk_{uuid.uuid4().hex[:6]}",
+                name=name,
                 role=role,
                 is_decision_maker=True,
                 presence="absent",
@@ -1474,13 +1527,18 @@ class ConversationStateManager:
             )
 
             existing = list(self.current_state.decision_structure.stakeholders)
-            if not any(s.role == role and s.presence == "absent" for s in existing):
+            if not any((s.role == role or (name and s.name == name)) and s.presence == "absent" for s in existing):
                 existing.append(stakeholder)
 
             result["decision_maker_present"] = False
             result["stakeholders"] = existing
             result["co_decision_required"] = True
-            result["primary_decision_maker"] = "sole decision maker, spouse required for final approval"
+            if role in ("wife", "husband", "spouse"):
+                result["primary_decision_maker"] = "sole decision maker, spouse required for final approval"
+            elif role in ("co_owner", "brother", "sister"):
+                result["primary_decision_maker"] = "sole decision maker, co-owner required for final approval"
+            else:
+                result["primary_decision_maker"] = "sole decision maker, co-decision maker required for final approval"
 
         # 2. Affirmative confirmation of prior salesperson inquiry about third-party stakeholder
         elif (

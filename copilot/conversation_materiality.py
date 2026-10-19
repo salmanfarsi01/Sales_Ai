@@ -17,28 +17,34 @@ LOGGER = logging.getLogger("copilot.conversation_materiality")
 ABSENT_DECISION_MAKER_PATTERNS: List[str] = [
     r"\b(?:he['’]?s|she['’]?s|they['’]?re)\s+not\s+going\s+to\s+make\s+a\s+decision\b",
     r"\b(?:won['’]?t|will\s+not|can['’]?t|cannot)\s+make\s+a\s+decision\s+unless\b",
-    r"\b(?:my\s+)?(?:business\s+)?(?:husband|wife|spouse|partner|boss|attorney|lawyer)\s+(?:is\s+not\s+here|is\s+out\s+of\s+town|handles?\s+all\s+(?:the\s+)?(?:financial\s+)?decisions?|makes?\s+all\s+(?:the\s+)?(?:financial\s+)?decisions?)\b",
-    r"\b(?:husband|wife|spouse|partner)\s+is\s+not\s+here\b",
-    r"\b(?:(?:my\s+)?(?:husband|wife|spouse|partner)|we)\b.*?\b(?:decide|make\s+(?:a\s+)?decision)\s+(?:everything\s+)?together\b",
-    r"\b(?:consult|check|talk|speak)\s+with\s+(?:my\s+)?(?:husband|wife|spouse|partner|boss|attorney|lawyer)\b",
-    r"\b(?:need|have)\s+to\s+(?:speak|talk|consult|check)\s+with\s+(?:my\s+)?(?:husband|wife|spouse|partner)\b",
-    r"\b(?:my\s+)?(?:husband|wife|spouse|partner)\b.*?\b(?:part\s+of\s+(?:this|the)\s+conversation|involved|loop(?:ed)?\s+in|present|here)\b",
-    r"\b(?:my\s+)?(?:husband|wife|spouse|partner)\b.*?\b(?:needs?|would\s+(?:really\s+)?need|has\s+to|must)\b.*?\b(?:conversation|decision|call|talk|meeting|input|present|here|further)\b",
-    r"\b(?:my\s+)?(?:husband|wife|spouse|partner)\b.*?\bbefore\s+(?:we|i)\s+(?:go\s+any\s+further|make\s+a\s+decision|proceed|move\s+forward)\b",
+    r"\b(?:my\s+)?(?:business\s+)?(?:husband|wife|spouse|partner|boss|attorney|lawyer|brother|sister|sibling|co-owner)\s+(?:is\s+not\s+here|is\s+out\s+of\s+town|lives?\s+abroad|handles?\s+all\s+(?:the\s+)?(?:financial\s+)?decisions?|makes?\s+all\s+(?:the\s+)?(?:financial\s+)?decisions?)\b",
+    r"\b(?:husband|wife|spouse|partner|brother|sister|sibling|co-owner)\s+is\s+not\s+here\b",
+    r"\b(?:(?:my\s+)?(?:husband|wife|spouse|partner|brother|sister|sibling|co-owner)|we)\b.*?\b(?:decide|make\s+(?:a\s+)?decision)\s+(?:everything\s+)?together\b",
+    r"\b(?:consult|check|talk|speak)\s+with\s+(?:my\s+)?(?:husband|wife|spouse|partner|boss|attorney|lawyer|brother|sister|sibling|co-owner)\b",
+    r"\b(?:need|have)\s+to\s+(?:speak|talk|consult|check)\s+with\s+(?:my\s+)?(?:husband|wife|spouse|partner|brother|sister|sibling|co-owner)\b",
+    r"\b(?:my\s+)?(?:husband|wife|spouse|partner|brother|sister|sibling|co-owner)\b.*?\b(?:part\s+of\s+(?:this|the)\s+conversation|involved|loop(?:ed)?\s+in|present|here)\b",
+    r"\b(?:my\s+)?(?:husband|wife|spouse|partner|brother|sister|sibling|co-owner)\b.*?\b(?:needs?|would\s+(?:really\s+)?need|has\s+to|must)\b.*?\b(?:conversation|decision|call|talk|meeting|input|present|here|further)\b",
+    r"\b(?:my\s+)?(?:husband|wife|spouse|partner|brother|sister|sibling|co-owner)\b.*?\bbefore\s+(?:we|i)\s+(?:go\s+any\s+further|make\s+a\s+decision|proceed|move\s+forward)\b",
     r"\b(?:our|my)\s+(?:attorney|lawyer)\s+(?:must|needs?\s+to)\s+review\b",
     r"\b(?:my\s+)?(?:wife|husband|spouse|partner)\s+(?:is|was|feels|seems)?\s*(?:really\s+|just\s+)?(?:thinks|believes|feels|says|told|warned|worried|concerned|skeptical|doubtful|wants|needs)\b",
     r"\b(?:my\s+)?(?:wife|husband|spouse|partner)\s+(?:told\s+me|warned\s+me)\b",
     r"\b(?:my\s+)?(?:wife|husband|spouse|partner)\s+wants\s+to\s+look\s+at\s+it\s+first\b",
     r"\b(?:my\s+)?(?:wife|husband|spouse|partner)\s+(?:is\s+)?(?:really\s+)?(?:skeptical|hesitant|worried)\b",
+    r"\b(?:own\s+(?:it|the\s+house|the\s+property)\s+with|co-own\s+with)\s+(?:my\s+)?(?:brother|sister|sibling|partner|co-owner)\b",
+    r"\b(?:my\s+)?(?:brother|sister|sibling|co-owner)\b.*?\b(?:lives?\s+abroad|out\s+of\s+town|not\s+here|decisions?\s+are\s+a\s+bit\s+complicated|need\s+to\s+consult|sign\s+off)\b",
 ]
 
 PRESENCE_CONFIRMATION_PATTERNS: List[str] = [
-    r"\b(?:my\s+)?(?:wife|husband|partner|spouse)\s+will\s+be\s+there\b",
+    r"\b(?:my\s+)?(?:wife|husband|partner|spouse|brother|sister|sibling|co-owner)\s+will\s+be\s+there\b",
     r"\b(?:both\s+of\s+us|we\s+will\s+both)\s+be\s+there\b",
     r"\b(?:she|he|they)\s+will\s+be\s+there\b",
-    r"\b(?:my\s+)?(?:wife|husband|partner|spouse)\s+(?:can|will)\s+(?:make\s+it|attend|join)\b",
-    r"\b(?:bringing|bring)\s+(?:my\s+)?(?:wife|husband|partner|spouse)\b",
-    r"\b(?:wife|husband|partner|spouse)\s+is\s+(?:on\s+board|aligned|agreed|available)\b",
+    r"\b(?:my\s+)?(?:wife|husband|partner|spouse|brother|sister|sibling|co-owner)\s+(?:can|will)\s+(?:make\s+it|attend|join)\b",
+    r"\b(?:bringing|bring)\s+(?:my\s+)?(?:wife|husband|partner|spouse|brother|sister|sibling|co-owner)\b",
+    r"\b(?:wife|husband|partner|spouse|brother|sister|sibling|co-owner)\s+is\s+(?:on\s+board|aligned|agreed|available)\b",
+    r"\b(?:daniel|brother|sister|co-owner|[A-Z][a-z]+)\s+will\s+join\b",
+    r"\b(?:will\s+join|joining)\s+by\s+video\b",
+    r"\b(?:can|will)\s+join\s+by\s+(?:video|phone|zoom|call)\b",
+    r"\bfine\s+to\s+talk\s+about\s+it\s+then\b",
 ]
 
 LOGISTICAL_SCHEDULING_PATTERNS: List[str] = [
@@ -351,7 +357,20 @@ class MaterialityFilter:
             forced_reasons.append("Deterministic Override: client timeline or scheduling availability disclosure.")
 
         # 5f. Stakeholder Presence Confirmation Overrides (Client Principle #1)
-        if bundle.speaker_id == "client" and any(re.search(p, bundle.utterance_text.lower()) for p in PRESENCE_CONFIRMATION_PATTERNS):
+        stakeholder_joining = bool(
+            current_state
+            and current_state.decision_structure
+            and any(
+                ((s.name and s.name.lower() in bundle.utterance_text.lower())
+                 or (s.role and s.role.lower() in bundle.utterance_text.lower()))
+                for s in current_state.decision_structure.stakeholders
+            )
+            and any(w in bundle.utterance_text.lower() for w in ["join", "attend", "be there", "make it", "talk about it", "video", "call", "fine to talk"])
+        )
+        if bundle.speaker_id == "client" and (
+            any(re.search(p, bundle.utterance_text.lower()) for p in PRESENCE_CONFIRMATION_PATTERNS)
+            or stakeholder_joining
+        ):
             forced_targets.update(["decision_structure", "facts"])
             forced_reasons.append("Deterministic Override: client confirmed stakeholder presence / attendance.")
 

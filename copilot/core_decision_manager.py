@@ -121,6 +121,9 @@ class StrategicDecisionCache:
                 if hasattr(s, "role") and s.role:
                     state_stk_ids.add(f"stakeholder_{s.role}")
                     state_stk_ids.add(s.role)
+                if hasattr(s, "name") and s.name:
+                    state_stk_ids.add(s.name)
+                    state_stk_ids.add(s.name.lower())
         for sid in getattr(decision, "referenced_stakeholder_ids", []):
             if sid and sid not in state_stk_ids:
                 return (

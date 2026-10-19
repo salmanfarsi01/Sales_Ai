@@ -940,7 +940,11 @@ class PitchProXCoreIntelligenceEngine:
     ) -> DecisionEvaluationResult:
         stakeholder_roles = [s.role for s in snapshot.decision_structure.stakeholders if s.presence != "on_call"]
         role_label = stakeholder_roles[0] if stakeholder_roles else "partner"
-        stakeholder_ids = [getattr(s, "stakeholder_id", f"stakeholder_{s.role}") for s in snapshot.decision_structure.stakeholders]
+        stakeholder_ids = [
+            (getattr(s, "stakeholder_id", None) or f"stakeholder_{s.role}")
+            for s in snapshot.decision_structure.stakeholders
+            if (getattr(s, "stakeholder_id", None) or getattr(s, "role", None))
+        ]
 
         # Point 7: Stop auto-mapping "decision-maker changed" to DE_RISK.
         # Classify reason into four distinct categories:

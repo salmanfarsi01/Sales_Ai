@@ -370,7 +370,7 @@ class ConversationScoringEngine:
 
         # D. Decision Readiness: Authority identified, present, aligned
         has_absent_spouse_or_stakeholder = any(
-            s.role in ("spouse", "partner", "co-owner", "co_owner", "attorney", "wife", "husband") and s.presence == "absent"
+            s.role in ("spouse", "partner", "co-owner", "co_owner", "attorney", "wife", "husband", "brother", "sister", "sibling") and s.presence == "absent"
             for s in dec.stakeholders
         )
         spouse_facts = [f for f in current_state.facts if f.fact_key in ("spouse_involvement", "decision_maker_authority") and f.status == "active"]
