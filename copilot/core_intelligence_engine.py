@@ -131,7 +131,7 @@ class PitchProXCoreIntelligenceEngine:
         # 3. Multi-Stakeholder and Absent Decision Maker Gate (Spec 09 §3)
         elif not context.decision_maker_present and (
             snapshot.conversation_stage == ConversationStage.DECISION_RESOLUTION
-            or any(w in (turn_text or "").lower() for w in ("wife", "husband", "spouse", "partner", "decision maker", "sign off", "alone", "both of us", "consult", "lawyer", "attorney", "divorce"))
+            or any(w in (turn_text or "").lower() for w in ("wife", "husband", "spouse", "partner", "brother", "sister", "sibling", "co-owner", "co_owner", "own it with", "co-own", "decision maker", "sign off", "alone", "both of us", "consult", "lawyer", "attorney", "divorce"))
             or (unresolved_objections and any(o.canonical_category == "spouse_authority" for o in unresolved_objections) and not any(o.canonical_category != "spouse_authority" and o.lifecycle_state in (ObjectionLifecycleState.ACTIVE, "active") for o in unresolved_objections))
             or (turn_id is None and not turn_text)
         ):

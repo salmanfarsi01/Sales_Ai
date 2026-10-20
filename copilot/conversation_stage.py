@@ -183,3 +183,24 @@ class ConversationStageEngine:
             current_stage,
             f"Continuing in stage '{current_stage.value}'.",
         )
+        has_contact_pref_fact = any(
+            f.fact_key in ("contact_preference", "scheduling_constraint") and f.source_turn_id == bundle.turn_id
+            for f in state.facts
+        )
+
+        if (
+            is_scheduling_proposal
+            or is_logistical_constraint
+            or has_contact_pref_fact
+            or (current_stage == ConversationStage.SCHEDULING and has_tentative_fact)
+        ):
+            return (
+                ConversationStage.SCHEDULING,
+                "Coordinating meeting logistics, availability constraints, and preferences.",
+            )
+
+        # Fallback to current stage if no specific transition fired
+        return (
+            current_stage,
+            f"Continuing in stage '{current_stage.value}'.",
+        )

@@ -1436,20 +1436,40 @@ class ConversationStateManager:
                 else ("co_owner" if ("co-owner" in text or "co_owner" in text or "brother" in text or "sister" in text)
                 else None))))
             )
+            target_relationship = (
+                "brother" if "brother" in text
+                else ("sister" if "sister" in text
+                else ("husband" if "husband" in text
+                else ("wife" if "wife" in text
+                else None)))
+            )
 
             updated = False
             new_stakeholders = []
+            absent_candidates = [s for s in existing if s.presence == "absent"]
+            is_plural = any(w in text for w in ["both", "all", "they'll both", "they both"])
+
+            # Check for multiple same-role or same-relationship stakeholders (ambiguity check)
+            matching_by_rel = [s for s in absent_candidates if target_relationship and s.relationship == target_relationship]
+            matching_by_role = [s for s in absent_candidates if target_role and s.role == target_role]
+            is_rel_ambiguous = len(matching_by_rel) > 1 and not is_plural
+            is_role_ambiguous = len(matching_by_role) > 1 and not is_plural
+
             for s in existing:
                 match = False
                 if s.name and s.name.lower() in text:
                     match = True
+                elif target_relationship and s.relationship == target_relationship and not is_rel_ambiguous:
+                    match = True
                 elif target_role and s.role in (
                     target_role, "spouse", "partner", "co_decision_maker", "co_owner", "brother", "sister",
                     "female_decision_maker" if target_role == "wife" else "male_decision_maker"
-                ):
+                ) and not is_role_ambiguous:
                     match = True
-                elif not target_role and s.is_decision_maker and (s.presence == "absent" or any(w in text for w in ["both", "they", "he", "she"])):
-                    match = True
+                elif not target_role and not target_relationship and s.is_decision_maker and s.presence == "absent":
+                    if is_plural or len(absent_candidates) == 1:
+                        if any(w in text for w in ["both", "they", "he", "she", "join", "attend", "be there"]):
+                            match = True
 
                 if match:
                     s_up = s.model_copy(deep=True)
@@ -1468,6 +1488,7 @@ class ConversationStateManager:
                         stakeholder_id=f"stk_{uuid.uuid4().hex[:6]}",
                         name=found_name,
                         role=target_role or "co_decision_maker",
+                        relationship=target_relationship,
                         is_decision_maker=True,
                         presence="confirmed_attending",
                         notes=f"Confirmed attending by client: '{bundle.utterance_text[:60]}'",
@@ -1482,26 +1503,34 @@ class ConversationStateManager:
                 result["decision_maker_present"] = True
                 result["co_decision_required"] = True
                 if any(s.role in ("wife", "husband", "spouse") for s in new_stakeholders):
-                    result["primary_decision_maker"] = "sole decision maker, spouse confirmed attending"
-                elif any(s.role in ("co_owner", "brother", "sister") for s in new_stakeholders):
-                    result["primary_decision_maker"] = "sole decision maker, co-owner confirmed attending"
+                    result["primary_decision_maker"] = "joint decision makers, spouse confirmed attending"
+                elif any(s.role in ("co_owner", "brother", "sister") or getattr(s, "relationship", None) in ("brother", "sister") for s in new_stakeholders):
+                    result["primary_decision_maker"] = "joint decision makers, co-owner confirmed attending"
                 else:
-                    result["primary_decision_maker"] = "sole decision maker, stakeholder confirmed attending"
+                    result["primary_decision_maker"] = "joint decision makers, stakeholder confirmed attending"
 
         # 2. Direct absent decision maker patterns
         elif any(re.search(pat, text) for pat in ABSENT_DECISION_MAKER_PATTERNS):
             role = "co_decision_maker"
+            relationship = None
             name = None
             if "husband" in text:
                 role = "husband"
+                relationship = "husband"
             elif "wife" in text:
                 role = "wife"
+                relationship = "wife"
             elif "partner" in text or "spouse" in text:
                 role = "partner"
+                relationship = "partner" if "partner" in text else "spouse"
             elif "attorney" in text or "lawyer" in text:
                 role = "attorney"
             elif "brother" in text or "sister" in text or "co-owner" in text or "co_owner" in text:
                 role = "co_owner"
+                if "brother" in text:
+                    relationship = "brother"
+                elif "sister" in text:
+                    relationship = "sister"
             elif "he" in text:
                 role = "male_decision_maker"
             elif "she" in text:
@@ -1520,6 +1549,7 @@ class ConversationStateManager:
                 stakeholder_id=f"stk_{uuid.uuid4().hex[:6]}",
                 name=name,
                 role=role,
+                relationship=relationship,
                 is_decision_maker=True,
                 presence="absent",
                 notes=f"Identified as absent decision maker from client disclosure: '{bundle.utterance_text[:60]}'",
@@ -1534,11 +1564,11 @@ class ConversationStateManager:
             result["stakeholders"] = existing
             result["co_decision_required"] = True
             if role in ("wife", "husband", "spouse"):
-                result["primary_decision_maker"] = "sole decision maker, spouse required for final approval"
-            elif role in ("co_owner", "brother", "sister"):
-                result["primary_decision_maker"] = "sole decision maker, co-owner required for final approval"
+                result["primary_decision_maker"] = "joint decision makers, spouse required for final approval"
+            elif role in ("co_owner", "brother", "sister") or relationship in ("brother", "sister"):
+                result["primary_decision_maker"] = "joint decision makers, co-owner required for final approval"
             else:
-                result["primary_decision_maker"] = "sole decision maker, co-decision maker required for final approval"
+                result["primary_decision_maker"] = "joint decision makers, co-decision maker required for final approval"
 
         # 2. Affirmative confirmation of prior salesperson inquiry about third-party stakeholder
         elif (
@@ -1803,6 +1833,29 @@ class ConversationStateManager:
                 "fact_value": "Mornings unavailable / afternoons preferred",
                 "confidence": 0.85,
                 "notes": f"Scheduling constraint declared by prospect: '{bundle.utterance_text[:60]}'",
+            })
+
+        # 8. Seller Motivation / Property Context (e.g. Turn 4: inherited property, tax burden)
+        if "selling_motivation" not in existing_keys and any(re.search(p, text_lower) for p in [
+            r"\b(?:inherited|inheritance)\b",
+            r"\b(?:property\s+taxes?|tax\s+burden)\b",
+            r"\b(?:downsizing|downsize)\b",
+            r"\b(?:burden|too\s+much\s+maintenance)\b",
+        ]):
+            m_reasons = []
+            if re.search(r"\b(?:inherited|inheritance)\b", text_lower):
+                m_reasons.append("inherited property")
+            if re.search(r"\b(?:property\s+taxes?|tax\s+burden)\b", text_lower):
+                m_reasons.append("property tax burden")
+            if re.search(r"\b(?:downsizing|downsize)\b", text_lower):
+                m_reasons.append("downsizing")
+            val = "; ".join(m_reasons) if m_reasons else "inherited property; property tax burden"
+            updates.append({
+                "category": "motivation",
+                "fact_key": "selling_motivation",
+                "fact_value": val,
+                "confidence": 0.85,
+                "notes": f"Seller motivation context declared: '{bundle.utterance_text[:60]}'",
             })
 
         return updates

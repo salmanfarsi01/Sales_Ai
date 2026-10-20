@@ -665,7 +665,10 @@ class MeetingConversionGateEngine:
         elif dec.primary_decision_maker or dm_facts or any(f.category == "property" and f.status == "active" for f in current_state.facts):
             cond5_status = "met"
             cond5_ev = dm_fact_turns if dm_fact_turns else ([2] if (2 in prospect_turns and "sole" in str(dec.primary_decision_maker).lower()) else ([bundle.turn_id] if bundle.speaker_id == "client" else (prospect_turns[-1:] if prospect_turns else [])))
-            reason5 = f"Decision authority present and aligned ({dec.primary_decision_maker or 'self-authorized'})"
+            if any(s.presence == "confirmed_attending" for s in dec.stakeholders):
+                reason5 = f"All required stakeholders confirmed present or attending consultation ({dec.primary_decision_maker or 'procedural alignment for walkthrough'})"
+            else:
+                reason5 = f"Decision authority present and aligned ({dec.primary_decision_maker or 'self-authorized'})"
         else:
             cond5_status = "unknown"
             cond5_ev = []
@@ -1644,5 +1647,4 @@ class MeetingConversionGateEngine:
                     superseded_by_event_id=previous_event.superseded_by_event_id,
                     reversal_reason=previous_event.reversal_reason,
                 )
-
         return None

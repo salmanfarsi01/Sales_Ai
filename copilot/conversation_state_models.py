@@ -88,6 +88,7 @@ PersistentFactCategory = Literal[
     "preference",
     "financial",
     "property",
+    "motivation",
     "general",
 ]
 
@@ -96,6 +97,7 @@ class DecisionStakeholder(BaseModel):
     stakeholder_id: Optional[str] = None
     name: Optional[str] = None
     role: str = Field(..., description="e.g. spouse, business_partner, attorney, co_owner")
+    relationship: Optional[str] = Field(None, description="e.g. brother, sister, husband, wife")
     is_decision_maker: bool = True
     presence: Literal["on_call", "absent", "confirmed_attending", "unknown"] = "unknown"
     notes: Optional[str] = None
