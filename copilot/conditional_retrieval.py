@@ -16,6 +16,8 @@ from .conditional_retrieval_models import (
     GateDecisionLog,
     KnowledgeClass,
     KnowledgeRecord,
+    RankingWeights,
+    RetrievalConfig,
     RetrievalNeed,
     RetrievalRequest,
     RetrievalResult,
@@ -371,14 +373,18 @@ class KnowledgeStore:
         user_id: str,
         target_classes: Optional[List[str]] = None,
         lead_type: Optional[str] = None,
+        prospect_type: Optional[str] = None,
         topic_tags: Optional[List[str]] = None,
         allow_confidential: bool = False,
+        time_sensitive: bool = False,
         top_k: int = 10,
         min_score: float = 0.0,
+        weights: Optional[RankingWeights] = None,
     ) -> List[Tuple[KnowledgeRecord, float]]:
         """Executes candidate retrieval with strict hard pre-filters applied inside query (Step 4 & 5)."""
         now_utc = datetime.now(timezone.utc)
         query_tokens = _tokenize(query)
+        w = weights or RankingWeights()
 
         scored_candidates: List[Tuple[KnowledgeRecord, float]] = []
 
@@ -430,7 +436,7 @@ class KnowledgeStore:
                 if lead_type not in rec.lead_type_tags:
                     continue
 
-            # --- Similarity & Match Scoring ---
+            # --- Similarity & Match Scoring with Doc 02 §7 Ranking Factors ---
             doc_text = f"{rec.text} {' '.join(rec.topic_tags)}"
             doc_tokens = _tokenize(doc_text)
             if not doc_tokens:
@@ -442,21 +448,49 @@ class KnowledgeStore:
                 tag_match = any(t.casefold() in query.casefold() for t in rec.topic_tags) if rec.topic_tags else False
                 if not tag_match:
                     continue
-                score = 0.35
+                base_semantic = 0.35
             else:
                 precision = len(overlap) / math.sqrt(max(1, len(doc_tokens)))
                 coverage = len(overlap) / max(1, len(query_tokens))
-                score = (precision + coverage) / 2.0
+                base_semantic = (precision + coverage) / 2.0
 
-            # Boost for matching target knowledge class
-            if target_classes and rec.knowledge_class in target_classes:
-                score += 0.15
+            # 1. Semantic relevance weight (Doc 02 §7)
+            score = base_semantic * w.semantic_weight
 
-            # Boost for matching topic tags
+            # 2. Lead/prospect type relevance boost (Doc 02 §7)
+            if rec.lead_type_tags and lead_type and lead_type in rec.lead_type_tags:
+                score += w.lead_type_boost
+            if rec.prospect_type_tags and prospect_type and prospect_type in rec.prospect_type_tags:
+                score += w.prospect_type_boost
+
+            # 3. Recency / effective date boost: only applied when time_sensitive=True (Doc 02 §7)
+            if time_sensitive:
+                try:
+                    uploaded_dt = datetime.fromisoformat(rec.uploaded_at.replace("Z", "+00:00"))
+                    if uploaded_dt.tzinfo is None:
+                        uploaded_dt = uploaded_dt.replace(tzinfo=timezone.utc)
+                    age_days = (now_utc - uploaded_dt).total_seconds() / 86400.0
+                    if age_days <= 90:
+                        score += w.recency_boost
+                except Exception:
+                    pass
+
+            # 4. Verification/approval status boost (Doc 02 §7)
+            # company approved / system validated > user supplied > unverified
+            if rec.verification_status in ("company_approved", "system_validated"):
+                score += w.verification_boost
+            elif rec.verification_status == "user_supplied":
+                score += 0.5 * w.verification_boost
+
+            # 5. Specificity to the current prospect/question (topic tags overlap & narrower chunks)
             if topic_tags and rec.topic_tags:
                 tag_overlap = set(t.casefold() for t in topic_tags) & set(t.casefold() for t in rec.topic_tags)
                 if tag_overlap:
-                    score += 0.10
+                    score += w.specificity_boost
+
+            # Target knowledge class alignment boost
+            if target_classes and rec.knowledge_class in target_classes:
+                score += 0.10
 
             score = min(round(score, 3), 1.0)
             if score >= min_score:
@@ -489,18 +523,234 @@ class ConditionalRetrievalEngine:
         self.default_tenant_id = default_tenant_id
         self.default_user_id = default_user_id
 
+    def _parse_version(self, version_str: str) -> Tuple[int, ...]:
+        """Parses version strings like '1.0', '2.1', 'v2.0' into numeric tuples for comparison."""
+        cleaned = re.sub(r"^[^\d]*", "", str(version_str))
+        try:
+            return tuple(int(p) for p in cleaned.split(".") if p.isdigit())
+        except Exception:
+            return (1, 0)
+
+    def _extract_key_metric(self, text: str) -> Optional[str]:
+        """Extracts key quantitative assertion like '5%', '$500', '3 days' from chunk text."""
+        # Check percentage
+        m = re.search(r"(\d+(?:\.\d+)?\s*%)", text)
+        if m:
+            return m.group(1).replace(" ", "")
+        # Check dollar
+        m = re.search(r"(\$\s*\d+(?:,\d+)*(?:\.\d+)?)", text)
+        if m:
+            return m.group(1).replace(" ", "")
+        return None
+
+    def _detect_contradiction(self, rec1: KnowledgeRecord, rec2: KnowledgeRecord) -> bool:
+        """Determines if two candidate records contradict each other on the same subject."""
+        # 1. Must share knowledge class
+        if rec1.knowledge_class != rec2.knowledge_class:
+            return False
+
+        # 2. Must share at least one topic tag or similar title
+        overlap_tags = set(t.casefold() for t in rec1.topic_tags) & set(t.casefold() for t in rec2.topic_tags)
+        same_title = (rec1.source_title.casefold() == rec2.source_title.casefold())
+        if not overlap_tags and not same_title:
+            return False
+
+        # 3. Check for differing key quantitative metrics (e.g. 5% vs 6%)
+        m1 = self._extract_key_metric(rec1.text)
+        m2 = self._extract_key_metric(rec2.text)
+        if m1 and m2 and m1 != m2:
+            return True
+
+        # 4. Check for opposing factual assertions
+        text1 = rec1.text.casefold()
+        text2 = rec2.text.casefold()
+
+        # Free / zero-cost vs fee / charge / penalty
+        free_markers = ["free", "no fee", "zero fee", "no charge", "without fee", "at no cost"]
+        fee_markers = ["fee required", "administrative fee", "charge required", "penalty", "cancellation fee", "termination fee"]
+        has_free_1 = any(m in text1 for m in free_markers)
+        has_fee_1 = any(m in text1 for m in fee_markers)
+        has_free_2 = any(m in text2 for m in free_markers)
+        has_fee_2 = any(m in text2 for m in fee_markers)
+
+        if (has_free_1 and has_fee_2) or (has_free_2 and has_fee_1):
+            return True
+
+        opposing_pairs = [
+            ("free", "charge"),
+            ("free", "fee"),
+            ("no fee", "fee"),
+            ("no upfront", "upfront"),
+            ("exclusive", "non-exclusive"),
+            ("guarantee", "no guarantee"),
+            ("allowed", "prohibited"),
+            ("permitted", "forbidden"),
+        ]
+        for term1, term2 in opposing_pairs:
+            pattern1 = rf"\b{re.escape(term1)}\b"
+            pattern2 = rf"\b{re.escape(term2)}\b"
+            if (re.search(pattern1, text1) and re.search(pattern2, text2)) or (
+                re.search(pattern2, text1) and re.search(pattern1, text2)
+            ):
+                return True
+
+        return False
+
+    def _resolve_candidate_conflicts(
+        self,
+        candidates: List[Tuple[KnowledgeRecord, float]],
+    ) -> Tuple[List[RetrievedFact], List[WithheldFact], bool]:
+        """Executes Doc 02 §8 Conflict Resolution table & Guardrails on ranked candidates."""
+        withheld: List[WithheldFact] = []
+        eligible: List[Tuple[KnowledgeRecord, float]] = []
+
+        # Pass 1: Individual chunk guardrails (unverified performance claims & sensitivity)
+        for rec, score in candidates:
+            # Rule 1: Performance / past sales claims lack verification (Doc 02 §8 / §9)
+            if rec.knowledge_class in (
+                KnowledgeClass.PERFORMANCE_PAST_SALES.value,
+                "performance_past_sales",
+            ) and rec.verification_status == "user_supplied":
+                withheld.append(
+                    WithheldFact(
+                        knowledge_id=rec.knowledge_id,
+                        reason="unverified",
+                        details="Performance and past sales claims require company approval or system validation.",
+                    )
+                )
+                continue
+
+            # Rule 2: Sensitivity guardrail
+            if rec.sensitivity == "restricted":
+                withheld.append(
+                    WithheldFact(
+                        knowledge_id=rec.knowledge_id,
+                        reason="restricted",
+                        details="Restricted content cannot be provided in prompt context.",
+                    )
+                )
+                continue
+
+            eligible.append((rec, score))
+
+        # Pass 2: Supersession & version coexistence (Doc 02 §8)
+        # Group by (knowledge_class, source_title)
+        stale_ids: Set[str] = set()
+        for i, (rec_i, _) in enumerate(eligible):
+            for j, (rec_j, _) in enumerate(eligible):
+                if i >= j:
+                    continue
+                if rec_i.source_title.casefold() == rec_j.source_title.casefold() and rec_i.knowledge_class == rec_j.knowledge_class:
+                    v_i = self._parse_version(rec_i.source_version)
+                    v_j = self._parse_version(rec_j.source_version)
+                    if v_i > v_j:
+                        stale_ids.add(rec_j.knowledge_id)
+                        withheld.append(
+                            WithheldFact(
+                                knowledge_id=rec_j.knowledge_id,
+                                reason="stale",
+                                details=f"Superseded by newer source version {rec_i.source_version} of '{rec_i.source_title}'.",
+                            )
+                        )
+                    elif v_j > v_i:
+                        stale_ids.add(rec_i.knowledge_id)
+                        withheld.append(
+                            WithheldFact(
+                                knowledge_id=rec_i.knowledge_id,
+                                reason="stale",
+                                details=f"Superseded by newer source version {rec_j.source_version} of '{rec_j.source_title}'.",
+                            )
+                        )
+
+        active_eligible = [c for c in eligible if c[0].knowledge_id not in stale_ids]
+
+        # Pass 3: Contradiction resolution between documents (Doc 02 §8)
+        # Prefer current / approved / effective content.
+        # If unresolved tie -> do not assert disputed fact.
+        disputed_ids: Set[str] = set()
+        had_unresolved_conflict = False
+
+        for i, (rec_i, _) in enumerate(active_eligible):
+            for j, (rec_j, _) in enumerate(active_eligible):
+                if i >= j:
+                    continue
+                if rec_i.knowledge_id in disputed_ids or rec_j.knowledge_id in disputed_ids:
+                    continue
+
+                if self._detect_contradiction(rec_i, rec_j):
+                    auth_i = 3 if rec_i.verification_status in ("company_approved", "system_validated") else 1
+                    auth_j = 3 if rec_j.verification_status in ("company_approved", "system_validated") else 1
+
+                    if auth_i > auth_j:
+                        disputed_ids.add(rec_j.knowledge_id)
+                        withheld.append(
+                            WithheldFact(
+                                knowledge_id=rec_j.knowledge_id,
+                                reason="disputed",
+                                details=f"Contradicts higher authority approved source '{rec_i.source_title}'.",
+                            )
+                        )
+                    elif auth_j > auth_i:
+                        disputed_ids.add(rec_i.knowledge_id)
+                        withheld.append(
+                            WithheldFact(
+                                knowledge_id=rec_i.knowledge_id,
+                                reason="disputed",
+                                details=f"Contradicts higher authority approved source '{rec_j.source_title}'.",
+                            )
+                        )
+                    else:
+                        # Genuine authority tie: DO NOT ASSERT DISPUTED FACT!
+                        disputed_ids.add(rec_i.knowledge_id)
+                        disputed_ids.add(rec_j.knowledge_id)
+                        had_unresolved_conflict = True
+                        withheld.append(
+                            WithheldFact(
+                                knowledge_id=rec_i.knowledge_id,
+                                reason="disputed",
+                                details=f"Contradictory facts detected between '{rec_i.source_title}' and '{rec_j.source_title}'. Withheld on unresolved authority tie.",
+                            )
+                        )
+                        withheld.append(
+                            WithheldFact(
+                                knowledge_id=rec_j.knowledge_id,
+                                reason="disputed",
+                                details=f"Contradictory facts detected between '{rec_i.source_title}' and '{rec_j.source_title}'. Withheld on unresolved authority tie.",
+                            )
+                        )
+
+        # Convert remaining undisputed candidates to RetrievedFact
+        accepted_facts: List[RetrievedFact] = []
+        for rec, score in active_eligible:
+            if rec.knowledge_id not in disputed_ids:
+                fact = RetrievedFact(
+                    knowledge_id=rec.knowledge_id,
+                    text=rec.text,
+                    knowledge_class=rec.knowledge_class,
+                    verification_status=rec.verification_status,
+                    source_title=rec.source_title,
+                    source_version=rec.source_version,
+                    confidence=score,
+                )
+                accepted_facts.append(fact)
+
+        return accepted_facts, withheld, had_unresolved_conflict
+
     # --------------------------------------------------------------------------
-    # Phase 1 & 2 Execution: Core Request -> Retrieval Gate -> Safe Store Search
+    # Phase 1, 2 & 3 Execution: Core Request -> Gate -> Search -> Quality & Conflict Check
     # --------------------------------------------------------------------------
 
     def retrieve_for_request(
         self,
         request: RetrievalRequest,
         allow_confidential: bool = False,
-        relevance_floor: float = 0.20,
+        relevance_floor: Optional[float] = None,
+        config: Optional[RetrievalConfig] = None,
     ) -> RetrievalResult:
         """Executes retrieval workflow per Doc 02 and Client Implementation Contract."""
         start_time = time.perf_counter()
+        cfg = config or RetrievalConfig()
+        floor = relevance_floor if relevance_floor is not None else cfg.relevance_floor
 
         # Step 1: Retrieval Gate check (Doc 02 §6)
         gate_passed, status, fallback_hint, reason = self.gate.evaluate(
@@ -524,6 +774,7 @@ class ConditionalRetrievalEngine:
         # Step 2: Query Builder (Doc 02 §6 & Step 3)
         query_text, target_classes = QueryBuilder.build_query(request)
         topic_tags = request.retrieval_need.topic_tags if request.retrieval_need else []
+        time_sensitive = request.retrieval_need.time_sensitive if request.retrieval_need else False
 
         # Step 3: Candidate search with hard pre-filters applied in-query (Step 4 & 5)
         candidates = self.store.search_candidates(
@@ -531,16 +782,19 @@ class ConditionalRetrievalEngine:
             user_id=request.user_id,
             target_classes=target_classes,
             lead_type=request.lead_type,
+            prospect_type=request.prospect_type,
             topic_tags=topic_tags,
             allow_confidential=allow_confidential,
-            top_k=5,
-            min_score=relevance_floor,
+            time_sensitive=time_sensitive,
+            top_k=10,
+            min_score=floor,
+            weights=cfg.weights,
         )
 
         elapsed_ms = (time.perf_counter() - start_time) * 1000.0
+        trigger_val = str(getattr(request.retrieval_need.trigger, "value", request.retrieval_need.trigger)).lower() if request.retrieval_need else ""
 
         if not candidates:
-            trigger_val = str(getattr(request.retrieval_need.trigger, "value", request.retrieval_need.trigger)).lower() if request.retrieval_need else ""
             fallback = RetrievalGate.resolve_fallback_hint(request.strategic_action, trigger_val)
             return RetrievalResult(
                 request_id=request.request_id,
@@ -552,27 +806,47 @@ class ConditionalRetrievalEngine:
                 latency_ms=round(elapsed_ms, 2),
             )
 
-        # Step 4: Package facts (cap at top 3 per Doc 02 §7)
-        retrieved_facts: List[RetrievedFact] = []
-        for rec, score in candidates[:3]:
-            fact = RetrievedFact(
-                knowledge_id=rec.knowledge_id,
-                text=rec.text,
-                knowledge_class=rec.knowledge_class,
-                verification_status=rec.verification_status,
-                source_title=rec.source_title,
-                source_version=rec.source_version,
-                confidence=score,
+        # Step 4: Conflict Resolution and Guardrail checking (Doc 02 §8 & §9, Step 6)
+        accepted_facts, withheld_facts, had_unresolved_conflict = self._resolve_candidate_conflicts(candidates)
+
+        if not accepted_facts:
+            if had_unresolved_conflict:
+                status = "conflict_unresolved"
+                fallback = "use_generic_truthful"
+            else:
+                status = "none_found"
+                fallback = RetrievalGate.resolve_fallback_hint(request.strategic_action, trigger_val)
+            return RetrievalResult(
+                request_id=request.request_id,
+                state_version=request.state_version,
+                status=status,
+                facts=[],
+                withheld=withheld_facts,
+                fallback_hint=fallback,
+                latency_ms=round(elapsed_ms, 2),
             )
-            retrieved_facts.append(fact)
+
+        # Step 5: Check marginal threshold & Cap facts (Doc 02 §7)
+        top_score = max(f.confidence for f in accepted_facts)
+        if top_score < cfg.marginal_threshold:
+            status = "low_confidence"
+            if trigger_val in ("factual_question", "prior_claim_reference"):
+                fallback_hint = "ask_clarifying_question"
+            else:
+                fallback_hint = "use_generic_truthful"
+        else:
+            status = "retrieved"
+            fallback_hint = None
+
+        final_facts = accepted_facts[:cfg.max_facts]
 
         return RetrievalResult(
             request_id=request.request_id,
             state_version=request.state_version,
-            status="retrieved",
-            facts=retrieved_facts,
-            withheld=[],
-            fallback_hint=None,
+            status=status,
+            facts=final_facts,
+            withheld=withheld_facts,
+            fallback_hint=fallback_hint,
             latency_ms=round(elapsed_ms, 2),
         )
 
@@ -664,12 +938,14 @@ class ConditionalRetrievalEngine:
                 for f in res.facts
             ]
             queries = [f"{t} proof" for t in request.retrieval_need.topic_tags] if request.retrieval_need else []
+            disputed = [w.knowledge_id for w in res.withheld if w.reason == "disputed"]
             return RetrievalExecutionReport(
                 retrieval_needed=True,
                 decision_id=decision.decision_id,
                 source_state_version=decision.source_state_version,
                 queries_executed=queries,
                 facts=legacy_facts,
+                disputed_topics=disputed,
                 status=res.status,
                 fallback_hint=res.fallback_hint,
                 latency_ms=round((time.perf_counter() - start_time) * 1000.0, 2),

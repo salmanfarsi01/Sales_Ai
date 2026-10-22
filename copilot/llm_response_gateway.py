@@ -5,14 +5,64 @@ import os
 import re
 import uuid
 from datetime import datetime, timezone
-from typing import Any, Callable, Dict, List, Literal, Optional
+from typing import Any, Callable, Dict, List, Literal, Optional, Tuple, Union
 from pydantic import BaseModel, Field
 
 from .core_intelligence_models import StrategicAction, StrategicDecision
 from .conversation_state_models import ConversationStateSnapshot
 from .conditional_retrieval import RetrievedFactResult
+from .conditional_retrieval_models import RetrievedFact
 
 LOGGER = logging.getLogger("copilot.llm_response_gateway")
+
+
+def validate_prompt_hallucinations(
+    prompt_text: str,
+    facts: List[Union[RetrievedFact, RetrievedFactResult]],
+) -> Tuple[bool, List[str]]:
+    """Scans prompt for ungrounded quantitative claims, numbers, statistics, or guarantees (Doc 02 §9).
+
+    Returns (is_valid, list_of_violations).
+    """
+    violations: List[str] = []
+    text_clean = prompt_text.strip()
+
+    # Extract all text from verified facts to check grounding
+    facts_combined = " ".join([getattr(f, "text", "") for f in facts]).casefold()
+
+    # 1. Check percentages (e.g. 98%, 5%, 4.5%)
+    for pct in re.findall(r"\b\d+(?:\.\d+)?%", text_clean):
+        if pct.casefold() not in facts_combined:
+            violations.append(f"Ungrounded percentage: '{pct}'")
+
+    # 2. Check dollar amounts (e.g. $5,000, $500)
+    for dl in re.findall(r"\$\s*\d+(?:,\d+)*(?:\.\d+)?", text_clean):
+        dl_clean = dl.replace(" ", "").casefold()
+        if dl_clean not in facts_combined.replace(" ", ""):
+            violations.append(f"Ungrounded dollar figure: '{dl}'")
+
+    # 3. Check specific performance numbers and transaction volumes (e.g. '50 homes', '120 clients', '3000 buyers')
+    vol_matches = re.findall(
+        r"\b(\d+(?:,\d+)*)\s+(homes|clients|properties|sales|transactions|listings|deals|buyers|reviews)\b",
+        text_clean,
+        flags=re.IGNORECASE,
+    )
+    for num, noun in vol_matches:
+        if num not in facts_combined:
+            violations.append(f"Ungrounded volume metric: '{num} {noun}'")
+
+    # 4. Check guarantee claims
+    if re.search(r"\b(guarantee|guaranteed|guarantees)\b", text_clean, flags=re.IGNORECASE):
+        if "guarantee" not in facts_combined:
+            violations.append("Unsupported guarantee assertion")
+
+    # 5. Check certifications/awards (e.g. 'certified', 'award-winning', 'soc 2')
+    for cert in ["certified", "award-winning", "soc 2", "top producer", "number one"]:
+        if re.search(rf"\b{re.escape(cert)}\b", text_clean, flags=re.IGNORECASE):
+            if cert not in facts_combined:
+                violations.append(f"Unsupported credential/award claim: '{cert}'")
+
+    return (len(violations) == 0, violations)
 
 
 class Prompt(BaseModel):
@@ -163,8 +213,17 @@ class LLMResponseGateway:
             "CRITICAL RULES:\n"
             "1. Output ONLY the spoken response. Do not wrap in quotes.\n"
             "2. Do NOT include coaching labels like 'Acknowledge:' or 'Tip:'.\n"
-            "3. Do NOT invent unverified facts, credentials, or numbers.\n"
-            f"4. Maximum length is {decision.max_prompt_words} words.\n"
+            "3. Do NOT invent unverified facts, credentials, statistics, volume, or numbers. Use only verified facts from Block 3.\n"
+            "4. If Block 3 has no verified facts, produce a truthful response focusing on the prospect's situation without citing external claims.\n"
+            "5. Priority hierarchy when directives conflict (Doc 01 §10):\n"
+            "   Priority 1: Safety/compliance\n"
+            "   Priority 2: Core strategic intent & conversation integrity\n"
+            "   Priority 3: Live conversation truth & prospect state\n"
+            "   Priority 4: Playbook sales methodology\n"
+            "   Priority 5: Relevant retrieved facts (AI Training - never overrides strategy or live state)\n"
+            "   Priority 6: Calibration delivery profile\n"
+            "   Priority 7: Stylistic polish\n"
+            f"6. Maximum length is {decision.max_prompt_words} words.\n"
             f"{fallback_directive}"
             f"{contact_pref_directive}"
             f"{prohibited_line}"
@@ -176,12 +235,15 @@ class LLMResponseGateway:
         self,
         decision: StrategicDecision,
         snapshot: ConversationStateSnapshot,
-        facts: List[RetrievedFactResult],
+        facts: List[Union[RetrievedFact, RetrievedFactResult]],
         recent_turns: Optional[List[Dict[str, str]]] = None,
     ) -> Prompt:
         """Executes LLM language construction adhering to the strategic decision contract."""
         working_decision = decision
-        verified_facts = [f for f in facts if f.verification_status == "verified"]
+        verified_facts = [
+            f for f in facts
+            if getattr(f, "verification_status", "") in ("verified", "company_approved", "system_validated")
+        ]
 
         # Spec 01 §9: Social proof requires credible verified evidence; never fabricated.
         # If no verified evidence exists, reroute away from SOCIAL_PROOF to avoid false claims.
@@ -223,6 +285,16 @@ class LLMResponseGateway:
             raw_text = self._call_llm(context, working_decision, snapshot=snapshot)
 
         cleaned_text = self._clean_and_truncate(raw_text, working_decision.max_prompt_words)
+
+        # Post-generation Hallucination Guardrail Check (Doc 02 §9)
+        is_grounded, violations = validate_prompt_hallucinations(cleaned_text, facts)
+        if not is_grounded:
+            LOGGER.warning(
+                "Hallucination guardrail triggered on prompt: violations=%s. Replacing with prospect-focused truthful fallback.",
+                violations,
+            )
+            cleaned_text = self._deterministic_fallback(working_decision, snapshot=snapshot)
+            cleaned_text = self._clean_and_truncate(cleaned_text, working_decision.max_prompt_words)
 
         return Prompt(
             decision_id=working_decision.decision_id,

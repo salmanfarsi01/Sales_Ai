@@ -138,6 +138,25 @@ class KnowledgeRecord(BaseModel):
         return values
 
 
+class RankingWeights(BaseModel):
+    """Configurable scoring weights for Doc 02 §7 ranking factors (tunable, no hardcoded spec assumptions)."""
+    semantic_weight: float = Field(default=0.50, description="Cosine / token overlap similarity weight")
+    lead_type_boost: float = Field(default=0.15, description="Boost for matching lead_type_tags")
+    prospect_type_boost: float = Field(default=0.10, description="Boost for matching prospect_type_tags")
+    verification_boost: float = Field(default=0.15, description="Boost for company_approved / system_validated")
+    specificity_boost: float = Field(default=0.10, description="Boost for narrow topic tag overlap")
+    recency_boost: float = Field(default=0.10, description="Boost for recency when time_sensitive=True")
+    conflict_penalty: float = Field(default=0.30, description="Penalty for conflicting or stale chunks")
+
+
+class RetrievalConfig(BaseModel):
+    """Runtime configuration for Phase 3 ranking thresholds and caps (Doc 02 §7)."""
+    relevance_floor: float = Field(default=0.35, description="Minimum similarity floor; below this is dropped")
+    marginal_threshold: float = Field(default=0.50, description="Threshold between low_confidence and retrieved")
+    max_facts: int = Field(default=3, description="Maximum number of facts returned to LLM context (1-3)")
+    weights: RankingWeights = Field(default_factory=RankingWeights)
+
+
 class GateDecisionLog(BaseModel):
     """Audit entry recording the exact Gate evaluation reason for compliance & observability."""
     timestamp: str = Field(default_factory=lambda: datetime.now(timezone.utc).isoformat())
