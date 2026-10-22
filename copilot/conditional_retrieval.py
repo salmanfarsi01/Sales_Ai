@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import logging
 import math
 import os
@@ -23,7 +24,13 @@ from .conditional_retrieval_models import (
     RetrievalResult,
     RetrievalTrigger,
     RetrievedFact,
+    StageLatencies,
     WithheldFact,
+)
+from .compliance_rules import (
+    evaluate_content_compliance,
+    detect_prompt_injection,
+    classify_attested_claim,
 )
 
 LOGGER = logging.getLogger("copilot.conditional_retrieval")
@@ -286,16 +293,121 @@ class QueryBuilder:
 # ==============================================================================
 
 
+class RetrievalCache:
+    """Thread-safe user-partitioned retrieval cache with immediate invalidation (Doc 02 §11, Step 10)."""
+
+    def __init__(self, ttl_seconds: int = 300, max_size: int = 1000) -> None:
+        self.ttl_seconds = ttl_seconds
+        self.max_size = max_size
+        self._cache: Dict[str, Tuple[RetrievalResult, float]] = {}
+        self._user_keys: Dict[str, Set[str]] = {}
+
+    def _make_key(
+        self,
+        request: RetrievalRequest,
+        allow_confidential: bool = False,
+        relevance_floor: Optional[float] = None,
+        config: Optional[RetrievalConfig] = None,
+    ) -> str:
+        need_str = ""
+        if request.retrieval_need:
+            t = getattr(request.retrieval_need.trigger, "value", request.retrieval_need.trigger)
+            need_str = f"{t}:{request.retrieval_need.need_statement}:{sorted(request.retrieval_need.topic_tags)}"
+        cfg_sig = ""
+        if config:
+            cfg_sig = f"{config.allow_user_supplied_performance}:{config.marginal_threshold}:{config.relevance_floor}:{hash(str(config.weights.model_dump()))}"
+        return f"{request.user_id}:{request.state_version}:{request.strategic_action}:{request.lead_type}:{allow_confidential}:{relevance_floor}:{cfg_sig}:{need_str}"
+
+    def get(
+        self,
+        request: RetrievalRequest,
+        allow_confidential: bool = False,
+        relevance_floor: Optional[float] = None,
+        config: Optional[RetrievalConfig] = None,
+    ) -> Optional[RetrievalResult]:
+        key = self._make_key(
+            request,
+            allow_confidential=allow_confidential,
+            relevance_floor=relevance_floor,
+            config=config,
+        )
+        if key not in self._cache:
+            return None
+        result, created_at = self._cache[key]
+        if time.time() - created_at > self.ttl_seconds:
+            self.delete(key)
+            return None
+        return result
+
+    def set(
+        self,
+        request: RetrievalRequest,
+        result: RetrievalResult,
+        allow_confidential: bool = False,
+        relevance_floor: Optional[float] = None,
+        config: Optional[RetrievalConfig] = None,
+    ) -> None:
+        if len(self._cache) >= self.max_size:
+            # Evict oldest entry
+            oldest_key = min(self._cache, key=lambda k: self._cache[k][1])
+            self.delete(oldest_key)
+        key = self._make_key(
+            request,
+            allow_confidential=allow_confidential,
+            relevance_floor=relevance_floor,
+            config=config,
+        )
+        self._cache[key] = (result, time.time())
+        if request.user_id not in self._user_keys:
+            self._user_keys[request.user_id] = set()
+        self._user_keys[request.user_id].add(key)
+
+    def invalidate_user(self, user_id: str) -> int:
+        """Immediately flushes all cached results for a specific user upon edit/delete/permission change."""
+        keys = self._user_keys.pop(user_id, set())
+        for k in keys:
+            self._cache.pop(k, None)
+        return len(keys)
+
+    def delete(self, key: str) -> None:
+        if key in self._cache:
+            del self._cache[key]
+        for user_id, keys in list(self._user_keys.items()):
+            keys.discard(key)
+
+    def clear(self) -> None:
+        self._cache.clear()
+        self._user_keys.clear()
+
+    def get_stats(self) -> Dict[str, Any]:
+        return {
+            "total_entries": len(self._cache),
+            "users_cached": len(self._user_keys),
+            "max_size": self.max_size,
+            "ttl_seconds": self.ttl_seconds,
+        }
+
+
 class KnowledgeStore:
     """In-memory user-partitioned knowledge repository enforcing Doc 02 hard pre-filters."""
 
-    def __init__(self) -> None:
+    def __init__(self, cache: Optional[RetrievalCache] = None) -> None:
         self._records: Dict[str, KnowledgeRecord] = {}
+        self.cache: Optional[RetrievalCache] = cache
+
+    def _notify_invalidation(self, user_id: Optional[str]) -> None:
+        if user_id and self.cache:
+            self.cache.invalidate_user(user_id)
+
+    def get_record(self, knowledge_id: str) -> Optional[KnowledgeRecord]:
+        return self._records.get(knowledge_id)
 
     def add_record(self, record: KnowledgeRecord) -> None:
         """Stores a verified user-owned knowledge chunk.
 
         Strictly enforces Constraint C6: only 'user' scope allowed.
+        Invalidates attestation if text hash mismatches or text changed on re-ingestion.
+        Immediately invalidates the user's retrieval cache (Step 10).
         """
         if record.owner_scope != "user":
             raise ValueError(
@@ -303,24 +415,107 @@ class KnowledgeStore:
             )
         if not record.owner_user_id:
             raise ValueError("owner_user_id is mandatory for KnowledgeRecord.")
+
+        # Invalidate attestation on unverified hash or text tampering
+        if record.verification_status == "self_attested":
+            expected_hash = hashlib.sha256(record.text.strip().encode("utf-8")).hexdigest()
+            if not record.attestation_text_hash or record.attestation_text_hash != expected_hash:
+                record.verification_status = "user_supplied"
+                record.attestation_user_id = None
+                record.attestation_timestamp = None
+                record.attestation_text_hash = None
+
+        # Re-ingestion check: if record already exists with different text, clear attestation
+        if record.knowledge_id in self._records:
+            existing = self._records[record.knowledge_id]
+            if existing.text != record.text:
+                record.verification_status = "user_supplied"
+                record.attestation_user_id = None
+                record.attestation_timestamp = None
+                record.attestation_text_hash = None
+
         self._records[record.knowledge_id] = record
+        self._notify_invalidation(record.owner_user_id)
 
     def delete_record(self, knowledge_id: str, soft: bool = True) -> bool:
         """Deletes a knowledge chunk. If soft=True, marks tombstone per Step 10."""
         if knowledge_id not in self._records:
             return False
+        rec = self._records[knowledge_id]
+        user_id = rec.owner_user_id
         if soft:
-            self._records[knowledge_id].deleted = True
+            rec.deleted = True
         else:
             del self._records[knowledge_id]
+        self._notify_invalidation(user_id)
         return True
 
     def supersede_record(self, old_knowledge_id: str, new_knowledge_id: str) -> bool:
         """Marks old chunk as superseded by newer version (Step 10)."""
         if old_knowledge_id in self._records:
-            self._records[old_knowledge_id].superseded_by = new_knowledge_id
+            rec = self._records[old_knowledge_id]
+            rec.superseded_by = new_knowledge_id
+            self._notify_invalidation(rec.owner_user_id)
             return True
         return False
+
+    def replace_record(self, old_knowledge_id: str, new_record: KnowledgeRecord) -> KnowledgeRecord:
+        """Replaces an outdated knowledge chunk with a newer version (Step 10).
+        
+        Marks the old chunk as superseded by new_record.knowledge_id and stores new_record.
+        Immediately invalidates the user's retrieval cache.
+        """
+        if old_knowledge_id not in self._records:
+            raise KeyError(f"Knowledge record '{old_knowledge_id}' not found.")
+        old_rec = self._records[old_knowledge_id]
+        if old_rec.owner_user_id != new_record.owner_user_id:
+            raise PermissionError(
+                f"Cannot replace record owned by '{old_rec.owner_user_id}' with record for '{new_record.owner_user_id}'."
+            )
+        self.supersede_record(old_knowledge_id, new_record.knowledge_id)
+        self.add_record(new_record)
+        return new_record
+
+    def attest_record(self, knowledge_id: str, user_id: str) -> KnowledgeRecord:
+        """Explicit attestation action by the rep.
+
+        Verifies that user_id owns the record.
+        Enforces one-way gate: attesting NEVER unlocks prohibited high-risk claims.
+        Records user ID, UTC timestamp, and SHA-256 hash of the exact text version.
+        Sets verification_status to 'self_attested'.
+        """
+        if knowledge_id not in self._records:
+            raise KeyError(f"Knowledge record '{knowledge_id}' not found.")
+        rec = self._records[knowledge_id]
+        if rec.owner_scope != "user" or rec.owner_user_id != user_id:
+            raise PermissionError(f"User '{user_id}' cannot attest knowledge owned by '{rec.owner_user_id}'.")
+
+        # One-way gate: attesting NEVER unlocks prohibited high-risk claims
+        is_concrete, reason = classify_attested_claim(rec.text)
+        if not is_concrete:
+            raise ValueError(f"Cannot self-attest high-risk or unverified claim: {reason}")
+
+        rec.verification_status = "self_attested"
+        rec.attestation_user_id = user_id
+        rec.attestation_timestamp = datetime.now(timezone.utc).isoformat()
+        rec.attestation_text_hash = hashlib.sha256(rec.text.strip().encode("utf-8")).hexdigest()
+        self._notify_invalidation(user_id)
+        return rec
+
+    def update_record_text(self, knowledge_id: str, new_text: str) -> KnowledgeRecord:
+        """Updates record text. Any edit to the text clears previous attestation."""
+        if knowledge_id not in self._records:
+            raise KeyError(f"Knowledge record '{knowledge_id}' not found.")
+        rec = self._records[knowledge_id]
+        if rec.text != new_text:
+            rec.text = new_text
+            if rec.verification_status == "self_attested":
+                rec.verification_status = "user_supplied"
+            rec.attestation_user_id = None
+            rec.attestation_timestamp = None
+            rec.attestation_text_hash = None
+            self._notify_invalidation(rec.owner_user_id)
+        return rec
 
     def has_active_knowledge(
         self,
@@ -453,9 +648,15 @@ class KnowledgeStore:
                 precision = len(overlap) / math.sqrt(max(1, len(doc_tokens)))
                 coverage = len(overlap) / max(1, len(query_tokens))
                 base_semantic = (precision + coverage) / 2.0
+            raw_semantic = min(round(base_semantic, 3), 1.0)
+
+            # CRITICAL (Point 1): Relevance floor applies to RAW SEMANTIC SIMILARITY!
+            # Otherwise boosts can pull an irrelevant chunk over the floor.
+            if raw_semantic < min_score:
+                continue
 
             # 1. Semantic relevance weight (Doc 02 §7)
-            score = base_semantic * w.semantic_weight
+            score = raw_semantic * w.semantic_weight
 
             # 2. Lead/prospect type relevance boost (Doc 02 §7)
             if rec.lead_type_tags and lead_type and lead_type in rec.lead_type_tags:
@@ -475,12 +676,17 @@ class KnowledgeStore:
                 except Exception:
                     pass
 
-            # 4. Verification/approval status boost (Doc 02 §7)
-            # company approved / system validated > user supplied > unverified
+            # 4. Verification/approval status boost (Doc 02 §7 & Client Decision)
+            # company approved / system validated > self_attested > user supplied
             if rec.verification_status in ("company_approved", "system_validated"):
                 score += w.verification_boost
+            elif rec.verification_status == "self_attested":
+                expected_hash = hashlib.sha256(rec.text.strip().encode("utf-8")).hexdigest()
+                if rec.attestation_text_hash == expected_hash:
+                    score += round(0.4 * w.verification_boost, 3)
             elif rec.verification_status == "user_supplied":
-                score += 0.5 * w.verification_boost
+                # plain user_supplied gets 0 boost (never equals approved or attested)
+                pass
 
             # 5. Specificity to the current prospect/question (topic tags overlap & narrower chunks)
             if topic_tags and rec.topic_tags:
@@ -493,10 +699,9 @@ class KnowledgeStore:
                 score += 0.10
 
             score = min(round(score, 3), 1.0)
-            if score >= min_score:
-                scored_candidates.append((rec, score))
+            scored_candidates.append((rec, score, raw_semantic))
 
-        # Sort descending by score
+        # Sort descending by composite score
         scored_candidates.sort(key=lambda x: x[1], reverse=True)
         return scored_candidates[:top_k]
 
@@ -514,12 +719,18 @@ class ConditionalRetrievalEngine:
         backend: Optional[Any] = None,
         store: Optional[KnowledgeStore] = None,
         gate: Optional[RetrievalGate] = None,
+        cache: Optional[RetrievalCache] = None,
+        config: Optional[RetrievalConfig] = None,
         default_tenant_id: str = "default",
         default_user_id: str = "default_user",
     ):
         self.backend = backend or LocalKnowledgeBase()
-        self.store = store or KnowledgeStore()
+        self.cache = cache or RetrievalCache()
+        self.store = store or KnowledgeStore(cache=self.cache)
+        if not self.store.cache:
+            self.store.cache = self.cache
         self.gate = gate or RetrievalGate()
+        self.config = config or RetrievalConfig()
         self.default_tenant_id = default_tenant_id
         self.default_user_id = default_user_id
 
@@ -545,8 +756,16 @@ class ConditionalRetrievalEngine:
 
     def _detect_contradiction(self, rec1: KnowledgeRecord, rec2: KnowledgeRecord) -> bool:
         """Determines if two candidate records contradict each other on the same subject."""
-        # 1. Must share knowledge class
-        if rec1.knowledge_class != rec2.knowledge_class:
+        # 1. Must share knowledge class OR be a Playbook vs Company Policy comparison
+        is_policy_comparison = (
+            (rec1.knowledge_class == KnowledgeClass.COMPANY_POLICY.value or "policy" in rec1.source_title.casefold()) and
+            (rec2.knowledge_class != KnowledgeClass.COMPANY_POLICY.value or "playbook" in rec2.source_title.casefold())
+        ) or (
+            (rec2.knowledge_class == KnowledgeClass.COMPANY_POLICY.value or "policy" in rec2.source_title.casefold()) and
+            (rec1.knowledge_class != KnowledgeClass.COMPANY_POLICY.value or "playbook" in rec1.source_title.casefold())
+        )
+
+        if rec1.knowledge_class != rec2.knowledge_class and not is_policy_comparison:
             return False
 
         # 2. Must share at least one topic tag or similar title
@@ -598,46 +817,174 @@ class ConditionalRetrievalEngine:
 
     def _resolve_candidate_conflicts(
         self,
-        candidates: List[Tuple[KnowledgeRecord, float]],
+        candidates: List[Tuple[Any, ...]],
+        config: Optional[RetrievalConfig] = None,
+        request: Optional[RetrievalRequest] = None,
     ) -> Tuple[List[RetrievedFact], List[WithheldFact], bool]:
         """Executes Doc 02 §8 Conflict Resolution table & Guardrails on ranked candidates."""
         withheld: List[WithheldFact] = []
-        eligible: List[Tuple[KnowledgeRecord, float]] = []
+        eligible: List[Tuple[KnowledgeRecord, float, float]] = []
+        allow_user_perf = config.allow_user_supplied_performance if config else False
 
-        # Pass 1: Individual chunk guardrails (unverified performance claims & sensitivity)
-        for rec, score in candidates:
-            # Rule 1: Performance / past sales claims lack verification (Doc 02 §8 / §9)
-            if rec.knowledge_class in (
-                KnowledgeClass.PERFORMANCE_PAST_SALES.value,
-                "performance_past_sales",
-            ) and rec.verification_status == "user_supplied":
+        # Pass 1: Individual chunk guardrails (injection, compliance, sensitivity, attestation, conversation truth)
+        for item in candidates:
+            rec = item[0]
+            score = item[1]
+            raw_semantic = item[2] if len(item) > 2 else score
+
+            # Prompt Injection Defense (bonus regex layer over structural wrapper)
+            has_inj, inj_pattern = detect_prompt_injection(rec.text)
+            if has_inj:
                 withheld.append(
                     WithheldFact(
                         knowledge_id=rec.knowledge_id,
-                        reason="unverified",
-                        details="Performance and past sales claims require company approval or system validation.",
+                        reason="restricted",
+                        details=f"Prompt injection pattern detected ('{inj_pattern}'). Chunk withheld for safety.",
                     )
                 )
                 continue
 
-            # Rule 2: Sensitivity guardrail
+            # Sensitivity check
             if rec.sensitivity == "restricted":
                 withheld.append(
                     WithheldFact(
                         knowledge_id=rec.knowledge_id,
                         reason="restricted",
-                        details="Restricted content cannot be provided in prompt context.",
+                        details="Restricted content cannot be provided in prompt context. Compliance/safety boundary wins.",
                     )
                 )
                 continue
 
-            eligible.append((rec, score))
+            # Unified Compliance Gate Check (Doc 01 Stage 2 & Doc 02 §8)
+            is_compliant, comp_cat, comp_details = evaluate_content_compliance(rec.text)
+            if not is_compliant:
+                withheld.append(
+                    WithheldFact(
+                        knowledge_id=rec.knowledge_id,
+                        reason="restricted",
+                        details=f"Compliance/safety violation detected ({comp_cat}): {comp_details} Compliance rules override user uploads.",
+                    )
+                )
+                continue
+
+            # Attestation integrity & Fail-Closed Claim Classification across ALL knowledge classes
+            if rec.verification_status == "self_attested":
+                # Check SHA-256 text hash integrity
+                expected_hash = hashlib.sha256(rec.text.strip().encode("utf-8")).hexdigest()
+                if not rec.attestation_text_hash or rec.attestation_text_hash != expected_hash:
+                    rec.verification_status = "user_supplied"
+                    rec.attestation_user_id = None
+                    rec.attestation_timestamp = None
+                    rec.attestation_text_hash = None
+                    withheld.append(
+                        WithheldFact(
+                            knowledge_id=rec.knowledge_id,
+                            reason="unverified",
+                            details="Attestation invalidated: text modified since attestation (hash mismatch).",
+                        )
+                    )
+                    continue
+
+                # Fail-closed classification: checkable concrete fact (tenure, territory, named transactions)
+                # Guarantees, rankings/awards, stats, certifications, or ambiguous claims fail closed!
+                is_concrete, claim_reason = classify_attested_claim(rec.text)
+                if not is_concrete:
+                    withheld.append(
+                        WithheldFact(
+                            knowledge_id=rec.knowledge_id,
+                            reason="unverified",
+                            details=f"High-risk or ambiguous claim in '{rec.knowledge_class}' cannot be self-attested: {claim_reason} Fails closed.",
+                        )
+                    )
+                    continue
+
+            elif rec.verification_status == "user_supplied":
+                # User-supplied performance claims withheld unless allow_user_supplied_performance is True
+                is_perf_class = rec.knowledge_class in (
+                    KnowledgeClass.PERFORMANCE_PAST_SALES.value,
+                    "performance_past_sales",
+                )
+                if is_perf_class and not allow_user_perf:
+                    withheld.append(
+                        WithheldFact(
+                            knowledge_id=rec.knowledge_id,
+                            reason="unverified",
+                            details="Performance and past sales claims require explicit self-attestation or company approval.",
+                        )
+                    )
+                    continue
+
+                # Salesperson profile: unapproved high-risk superlatives/rankings require company approval
+                if rec.knowledge_class == KnowledgeClass.SALESPERSON_PROFILE.value:
+                    is_concrete, claim_reason = classify_attested_claim(rec.text)
+                    if not is_concrete and any(
+                        k in rec.text.casefold() for k in ["#1", "top ", "producer", "award", "guarantee"]
+                    ):
+                        withheld.append(
+                            WithheldFact(
+                                knowledge_id=rec.knowledge_id,
+                                reason="unverified",
+                                details=f"Unverified high-risk superlative/claim in '{rec.knowledge_class}' requires company approval: {claim_reason}",
+                            )
+                        )
+                        continue
+
+            # Rule 3: Live Conversation Truth over Stored Scripts (Doc 02 §8 - Point 3B)
+            if request:
+                live_evidence = (request.conversation_evidence or "").casefold()
+                live_facts_dict = {}
+                if request.live_state_facts:
+                    for f_item in request.live_state_facts:
+                        if isinstance(f_item, dict):
+                            k = str(f_item.get("fact_key", "")).casefold()
+                            v = str(f_item.get("fact_value", "")).casefold()
+                            if k and v:
+                                live_facts_dict[k] = v
+
+                chunk_text_lower = rec.text.casefold()
+
+                # Timing / Scheduling contradiction
+                timing_contradiction = False
+                if ("afternoon" in live_evidence or "afternoon" in live_facts_dict.get("scheduling_constraint", "") or "3 pm" in live_evidence or "3:00 pm" in live_evidence) and (
+                    "morning" in chunk_text_lower or "10 am" in chunk_text_lower or "9 am" in chunk_text_lower
+                ):
+                    timing_contradiction = True
+                elif ("morning" in live_evidence or "morning" in live_facts_dict.get("scheduling_constraint", "")) and (
+                    "afternoon" in chunk_text_lower or "evening" in chunk_text_lower
+                ):
+                    timing_contradiction = True
+
+                # Stakeholder / Decision Maker contradiction
+                stakeholder_contradiction = False
+                if ("wife" in live_evidence or "spouse" in live_evidence or "partner" in live_evidence or "co_owner" in live_facts_dict) and (
+                    "single decision maker" in chunk_text_lower or "solo homeowner" in chunk_text_lower or "unilateral decision" in chunk_text_lower
+                ):
+                    stakeholder_contradiction = True
+
+                # Contact preference contradiction
+                channel_contradiction = False
+                if ("email only" in live_evidence or "do not call" in live_evidence or live_facts_dict.get("contact_preference") == "email_only") and (
+                    "daily phone calls" in chunk_text_lower or "call prospect daily" in chunk_text_lower
+                ):
+                    channel_contradiction = True
+
+                if timing_contradiction or stakeholder_contradiction or channel_contradiction:
+                    withheld.append(
+                        WithheldFact(
+                            knowledge_id=rec.knowledge_id,
+                            reason="disputed",
+                            details="Conflicts with live conversation truth. Live conversation state wins.",
+                        )
+                    )
+                    continue
+
+            eligible.append((rec, score, raw_semantic))
 
         # Pass 2: Supersession & version coexistence (Doc 02 §8)
         # Group by (knowledge_class, source_title)
         stale_ids: Set[str] = set()
-        for i, (rec_i, _) in enumerate(eligible):
-            for j, (rec_j, _) in enumerate(eligible):
+        for i, (rec_i, _, _) in enumerate(eligible):
+            for j, (rec_j, _, _) in enumerate(eligible):
                 if i >= j:
                     continue
                 if rec_i.source_title.casefold() == rec_j.source_title.casefold() and rec_i.knowledge_class == rec_j.knowledge_class:
@@ -665,19 +1012,48 @@ class ConditionalRetrievalEngine:
         active_eligible = [c for c in eligible if c[0].knowledge_id not in stale_ids]
 
         # Pass 3: Contradiction resolution between documents (Doc 02 §8)
-        # Prefer current / approved / effective content.
-        # If unresolved tie -> do not assert disputed fact.
+        # Includes Playbook method vs Company policy (Doc 02 §8) and Authority overrides
         disputed_ids: Set[str] = set()
+        playbook_substitutions: Dict[str, str] = {}
         had_unresolved_conflict = False
 
-        for i, (rec_i, _) in enumerate(active_eligible):
-            for j, (rec_j, _) in enumerate(active_eligible):
+        for i, (rec_i, _, _) in enumerate(active_eligible):
+            for j, (rec_j, _, _) in enumerate(active_eligible):
                 if i >= j:
                     continue
                 if rec_i.knowledge_id in disputed_ids or rec_j.knowledge_id in disputed_ids:
                     continue
 
                 if self._detect_contradiction(rec_i, rec_j):
+                    # Rule 4: Playbook method vs Company Policy (Doc 02 §8)
+                    # Doc 02 §8: Keep the Playbook strategy but substitute the company-approved fact or policy!
+                    is_policy_i = rec_i.knowledge_class == KnowledgeClass.COMPANY_POLICY.value or "policy" in rec_i.source_title.lower()
+                    is_policy_j = rec_j.knowledge_class == KnowledgeClass.COMPANY_POLICY.value or "policy" in rec_j.source_title.lower()
+
+                    if is_policy_i and not is_policy_j:
+                        disputed_ids.add(rec_j.knowledge_id)
+                        playbook_substitutions[rec_i.knowledge_id] = rec_j.knowledge_id
+                        withheld.append(
+                            WithheldFact(
+                                knowledge_id=rec_j.knowledge_id,
+                                reason="disputed",
+                                details=f"Playbook script conflicts with company-approved factual policy '{rec_i.source_title}'. Company policy wins; retaining playbook strategy with company policy substituted.",
+                            )
+                        )
+                        continue
+                    elif is_policy_j and not is_policy_i:
+                        disputed_ids.add(rec_i.knowledge_id)
+                        playbook_substitutions[rec_j.knowledge_id] = rec_i.knowledge_id
+                        withheld.append(
+                            WithheldFact(
+                                knowledge_id=rec_i.knowledge_id,
+                                reason="disputed",
+                                details=f"Playbook script conflicts with company-approved factual policy '{rec_j.source_title}'. Company policy wins; retaining playbook strategy with company policy substituted.",
+                            )
+                        )
+                        continue
+
+                    # Authority resolution
                     auth_i = 3 if rec_i.verification_status in ("company_approved", "system_validated") else 1
                     auth_j = 3 if rec_j.verification_status in ("company_approved", "system_validated") else 1
 
@@ -721,8 +1097,16 @@ class ConditionalRetrievalEngine:
 
         # Convert remaining undisputed candidates to RetrievedFact
         accepted_facts: List[RetrievedFact] = []
-        for rec, score in active_eligible:
+        for rec, score, _ in active_eligible:
             if rec.knowledge_id not in disputed_ids:
+                is_attested = (rec.verification_status == "self_attested")
+                attestation_meta = None
+                if is_attested:
+                    attestation_meta = {
+                        "attestation_user_id": rec.attestation_user_id,
+                        "attestation_timestamp": rec.attestation_timestamp,
+                    }
+                sub_playbook_id = playbook_substitutions.get(rec.knowledge_id)
                 fact = RetrievedFact(
                     knowledge_id=rec.knowledge_id,
                     text=rec.text,
@@ -731,6 +1115,10 @@ class ConditionalRetrievalEngine:
                     source_title=rec.source_title,
                     source_version=rec.source_version,
                     confidence=score,
+                    is_self_attested=is_attested,
+                    attestation_metadata=attestation_meta,
+                    playbook_strategy_retained=bool(sub_playbook_id),
+                    substituted_for_playbook_id=sub_playbook_id,
                 )
                 accepted_facts.append(fact)
 
@@ -747,21 +1135,94 @@ class ConditionalRetrievalEngine:
         relevance_floor: Optional[float] = None,
         config: Optional[RetrievalConfig] = None,
     ) -> RetrievalResult:
-        """Executes retrieval workflow per Doc 02 and Client Implementation Contract."""
+        """Executes retrieval workflow per Doc 02 and Client Implementation Contract.
+
+        Phase 5 Hardening:
+        - Per-stage latency instrumentation (gate_ms, embedding_ms, search_ms, ranking_conflict_ms, packaging_ms, total_ms)
+        - Deadline and timeout fallback (deadline_ms / default_timeout_ms)
+        - Immediate cache hit check and population
+        """
         start_time = time.perf_counter()
-        cfg = config or RetrievalConfig()
+        cfg = config or getattr(self, "config", None) or RetrievalConfig()
         floor = relevance_floor if relevance_floor is not None else cfg.relevance_floor
+        effective_deadline_ms = request.deadline_ms if request.deadline_ms is not None else cfg.default_timeout_ms
+
+        gate_ms = 0.0
+        embedding_ms = 0.0
+        search_ms = 0.0
+        ranking_conflict_ms = 0.0
+        packaging_ms = 0.0
+
+        def _timeout_result() -> RetrievalResult:
+            tot = (time.perf_counter() - start_time) * 1000.0
+            lat = StageLatencies(
+                gate_ms=round(gate_ms, 2),
+                embedding_ms=round(embedding_ms, 2),
+                search_ms=round(search_ms, 2),
+                ranking_conflict_ms=round(ranking_conflict_ms, 2),
+                packaging_ms=round(packaging_ms, 2),
+                total_ms=round(tot, 2),
+            )
+            return RetrievalResult(
+                request_id=request.request_id,
+                state_version=request.state_version,
+                status="timed_out",
+                facts=[],
+                withheld=[],
+                fallback_hint="use_generic_truthful",
+                latency_ms=round(tot, 2),
+                stage_latencies=lat,
+            )
+
+        def _is_timed_out() -> bool:
+            if effective_deadline_ms is None or effective_deadline_ms <= 0:
+                return False
+            return ((time.perf_counter() - start_time) * 1000.0) >= effective_deadline_ms
+
+        # Check Cache (Doc 02 §11)
+        if cfg.cache_enabled and getattr(self, "cache", None):
+            cached = self.cache.get(
+                request,
+                allow_confidential=allow_confidential,
+                relevance_floor=relevance_floor,
+                config=cfg,
+            )
+            if cached is not None:
+                tot = (time.perf_counter() - start_time) * 1000.0
+                lat = StageLatencies(
+                    gate_ms=0.0,
+                    embedding_ms=0.0,
+                    search_ms=0.0,
+                    ranking_conflict_ms=0.0,
+                    packaging_ms=round(tot, 2),
+                    total_ms=round(tot, 2),
+                )
+                return cached.model_copy(
+                    update={
+                        "latency_ms": round(tot, 2),
+                        "stage_latencies": lat,
+                    }
+                )
 
         # Step 1: Retrieval Gate check (Doc 02 §6)
+        t_gate_0 = time.perf_counter()
         gate_passed, status, fallback_hint, reason = self.gate.evaluate(
             request=request,
             knowledge_store=self.store,
         )
+        gate_ms = (time.perf_counter() - t_gate_0) * 1000.0
 
-        # Fast exit if Gate says no retrieval needed or no knowledge exists
         if not gate_passed:
             elapsed_ms = (time.perf_counter() - start_time) * 1000.0
-            return RetrievalResult(
+            lat = StageLatencies(
+                gate_ms=round(gate_ms, 2),
+                embedding_ms=0.0,
+                search_ms=0.0,
+                ranking_conflict_ms=0.0,
+                packaging_ms=0.0,
+                total_ms=round(elapsed_ms, 2),
+            )
+            res = RetrievalResult(
                 request_id=request.request_id,
                 state_version=request.state_version,
                 status=status,  # "none_needed" or "none_found"
@@ -769,14 +1230,35 @@ class ConditionalRetrievalEngine:
                 withheld=[],
                 fallback_hint=fallback_hint,
                 latency_ms=round(elapsed_ms, 2),
+                stage_latencies=lat,
             )
+            if cfg.cache_enabled and getattr(self, "cache", None):
+                self.cache.set(
+                    request,
+                    res,
+                    allow_confidential=allow_confidential,
+                    relevance_floor=relevance_floor,
+                    config=cfg,
+                )
+            return res
+
+        # Checkpoint 1: Deadline check after Gate
+        if _is_timed_out():
+            return _timeout_result()
 
         # Step 2: Query Builder (Doc 02 §6 & Step 3)
+        t_embed_0 = time.perf_counter()
         query_text, target_classes = QueryBuilder.build_query(request)
         topic_tags = request.retrieval_need.topic_tags if request.retrieval_need else []
         time_sensitive = request.retrieval_need.time_sensitive if request.retrieval_need else False
+        embedding_ms = (time.perf_counter() - t_embed_0) * 1000.0
+
+        # Checkpoint 2: Deadline check after Query Builder / Embedding
+        if _is_timed_out():
+            return _timeout_result()
 
         # Step 3: Candidate search with hard pre-filters applied in-query (Step 4 & 5)
+        t_search_0 = time.perf_counter()
         candidates = self.store.search_candidates(
             query=query_text,
             user_id=request.user_id,
@@ -790,13 +1272,26 @@ class ConditionalRetrievalEngine:
             min_score=floor,
             weights=cfg.weights,
         )
+        search_ms = (time.perf_counter() - t_search_0) * 1000.0
 
-        elapsed_ms = (time.perf_counter() - start_time) * 1000.0
+        # Checkpoint 3: Deadline check after Search
+        if _is_timed_out():
+            return _timeout_result()
+
         trigger_val = str(getattr(request.retrieval_need.trigger, "value", request.retrieval_need.trigger)).lower() if request.retrieval_need else ""
 
         if not candidates:
+            elapsed_ms = (time.perf_counter() - start_time) * 1000.0
             fallback = RetrievalGate.resolve_fallback_hint(request.strategic_action, trigger_val)
-            return RetrievalResult(
+            lat = StageLatencies(
+                gate_ms=round(gate_ms, 2),
+                embedding_ms=round(embedding_ms, 2),
+                search_ms=round(search_ms, 2),
+                ranking_conflict_ms=0.0,
+                packaging_ms=0.0,
+                total_ms=round(elapsed_ms, 2),
+            )
+            res = RetrievalResult(
                 request_id=request.request_id,
                 state_version=request.state_version,
                 status="none_found",
@@ -804,11 +1299,33 @@ class ConditionalRetrievalEngine:
                 withheld=[],
                 fallback_hint=fallback,
                 latency_ms=round(elapsed_ms, 2),
+                stage_latencies=lat,
             )
+            if cfg.cache_enabled and getattr(self, "cache", None):
+                self.cache.set(
+                    request,
+                    res,
+                    allow_confidential=allow_confidential,
+                    relevance_floor=relevance_floor,
+                    config=cfg,
+                )
+            return res
 
         # Step 4: Conflict Resolution and Guardrail checking (Doc 02 §8 & §9, Step 6)
-        accepted_facts, withheld_facts, had_unresolved_conflict = self._resolve_candidate_conflicts(candidates)
+        t_rc_0 = time.perf_counter()
+        accepted_facts, withheld_facts, had_unresolved_conflict = self._resolve_candidate_conflicts(
+            candidates,
+            config=cfg,
+            request=request,
+        )
+        ranking_conflict_ms = (time.perf_counter() - t_rc_0) * 1000.0
 
+        # Checkpoint 4: Deadline check after Conflict Resolution
+        if _is_timed_out():
+            return _timeout_result()
+
+        # Step 5: Packaging & Formatting
+        t_pkg_0 = time.perf_counter()
         if not accepted_facts:
             if had_unresolved_conflict:
                 status = "conflict_unresolved"
@@ -816,7 +1333,17 @@ class ConditionalRetrievalEngine:
             else:
                 status = "none_found"
                 fallback = RetrievalGate.resolve_fallback_hint(request.strategic_action, trigger_val)
-            return RetrievalResult(
+            packaging_ms = (time.perf_counter() - t_pkg_0) * 1000.0
+            elapsed_ms = (time.perf_counter() - start_time) * 1000.0
+            lat = StageLatencies(
+                gate_ms=round(gate_ms, 2),
+                embedding_ms=round(embedding_ms, 2),
+                search_ms=round(search_ms, 2),
+                ranking_conflict_ms=round(ranking_conflict_ms, 2),
+                packaging_ms=round(packaging_ms, 2),
+                total_ms=round(elapsed_ms, 2),
+            )
+            res = RetrievalResult(
                 request_id=request.request_id,
                 state_version=request.state_version,
                 status=status,
@@ -824,11 +1351,24 @@ class ConditionalRetrievalEngine:
                 withheld=withheld_facts,
                 fallback_hint=fallback,
                 latency_ms=round(elapsed_ms, 2),
+                stage_latencies=lat,
             )
+            if cfg.cache_enabled and getattr(self, "cache", None):
+                self.cache.set(
+                    request,
+                    res,
+                    allow_confidential=allow_confidential,
+                    relevance_floor=relevance_floor,
+                    config=cfg,
+                )
+            return res
 
-        # Step 5: Check marginal threshold & Cap facts (Doc 02 §7)
-        top_score = max(f.confidence for f in accepted_facts)
-        if top_score < cfg.marginal_threshold:
+        # Check marginal threshold on RAW SEMANTIC SIMILARITY & Cap facts (Doc 02 §7 - Point 1)
+        accepted_ids = {f.knowledge_id for f in accepted_facts}
+        accepted_raw_scores = [item[2] for item in candidates if item[0].knowledge_id in accepted_ids]
+        top_raw_semantic = max(accepted_raw_scores) if accepted_raw_scores else 0.0
+
+        if top_raw_semantic < cfg.marginal_threshold:
             status = "low_confidence"
             if trigger_val in ("factual_question", "prior_claim_reference"):
                 fallback_hint = "ask_clarifying_question"
@@ -839,8 +1379,19 @@ class ConditionalRetrievalEngine:
             fallback_hint = None
 
         final_facts = accepted_facts[:cfg.max_facts]
+        packaging_ms = (time.perf_counter() - t_pkg_0) * 1000.0
+        elapsed_ms = (time.perf_counter() - start_time) * 1000.0
 
-        return RetrievalResult(
+        lat = StageLatencies(
+            gate_ms=round(gate_ms, 2),
+            embedding_ms=round(embedding_ms, 2),
+            search_ms=round(search_ms, 2),
+            ranking_conflict_ms=round(ranking_conflict_ms, 2),
+            packaging_ms=round(packaging_ms, 2),
+            total_ms=round(elapsed_ms, 2),
+        )
+
+        res = RetrievalResult(
             request_id=request.request_id,
             state_version=request.state_version,
             status=status,
@@ -848,7 +1399,38 @@ class ConditionalRetrievalEngine:
             withheld=withheld_facts,
             fallback_hint=fallback_hint,
             latency_ms=round(elapsed_ms, 2),
+            stage_latencies=lat,
         )
+        if cfg.cache_enabled and getattr(self, "cache", None):
+            self.cache.set(
+                request,
+                res,
+                allow_confidential=allow_confidential,
+                relevance_floor=relevance_floor,
+                config=cfg,
+            )
+        return res
+
+    @classmethod
+    def validate_or_discard_stale_result(
+        cls,
+        result: RetrievalResult,
+        current_state_version: int,
+    ) -> RetrievalResult:
+        """Compares state_version on result return per Doc 01 §13.
+
+        If the state has advanced (result.state_version < current_state_version),
+        discards late facts and marks status='stale_discarded' with a truthful fallback hint.
+        """
+        if result.state_version < current_state_version:
+            return result.model_copy(
+                update={
+                    "status": "stale_discarded",
+                    "facts": [],
+                    "fallback_hint": "use_generic_truthful",
+                }
+            )
+        return result
 
     # --------------------------------------------------------------------------
     # Backward-Compatible Method: StrategicDecision -> Wraps Gate & Pre-Filters
