@@ -1502,7 +1502,10 @@ class ConversationStateManager:
             if not has_absent:
                 result["decision_maker_present"] = True
                 result["co_decision_required"] = True
-                if any(s.role in ("wife", "husband", "spouse") for s in new_stakeholders):
+                prior_pdm = getattr(self.current_state.decision_structure, "primary_decision_maker", "")
+                if prior_pdm in ("sole_decision_maker", "sole decision maker, spouse required for final approval") and any(s.role in ("wife", "husband", "spouse") for s in new_stakeholders):
+                    result["primary_decision_maker"] = "sole decision maker, spouse confirmed attending"
+                elif any(s.role in ("wife", "husband", "spouse") for s in new_stakeholders):
                     result["primary_decision_maker"] = "joint decision makers, spouse confirmed attending"
                 elif any(s.role in ("co_owner", "brother", "sister") or getattr(s, "relationship", None) in ("brother", "sister") for s in new_stakeholders):
                     result["primary_decision_maker"] = "joint decision makers, co-owner confirmed attending"
@@ -1563,7 +1566,10 @@ class ConversationStateManager:
             result["decision_maker_present"] = False
             result["stakeholders"] = existing
             result["co_decision_required"] = True
-            if role in ("wife", "husband", "spouse"):
+            prior_pdm = getattr(self.current_state.decision_structure, "primary_decision_maker", "")
+            if prior_pdm == "sole_decision_maker" and role in ("wife", "husband", "spouse"):
+                result["primary_decision_maker"] = "sole decision maker, spouse required for final approval"
+            elif role in ("wife", "husband", "spouse"):
                 result["primary_decision_maker"] = "joint decision makers, spouse required for final approval"
             elif role in ("co_owner", "brother", "sister") or relationship in ("brother", "sister"):
                 result["primary_decision_maker"] = "joint decision makers, co-owner required for final approval"

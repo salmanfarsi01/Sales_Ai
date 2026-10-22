@@ -83,9 +83,15 @@ class LLMResponseGateway:
         )
 
         # Block 3: Verified Knowledge Facts (Spec 11 §8)
-        verified_facts = [f for f in facts if f.verification_status == "verified"]
+        verified_facts = [
+            f for f in facts
+            if getattr(f, "verification_status", "") in ("verified", "company_approved", "system_validated")
+        ]
         if verified_facts:
-            facts_lines = [f"- [{f.source_id}] {f.topic}: {f.text} (Authority: {f.authority_level})" for f in verified_facts]
+            facts_lines = [
+                f"- [{getattr(f, 'source_id', getattr(f, 'knowledge_id', 'fact'))}] {getattr(f, 'topic', getattr(f, 'knowledge_class', 'general'))}: {f.text} (Authority: {getattr(f, 'authority_level', 3)})"
+                for f in verified_facts
+            ]
             facts_text = "\n".join(facts_lines)
         else:
             facts_text = "- No verified external facts available for this conversational moment."
