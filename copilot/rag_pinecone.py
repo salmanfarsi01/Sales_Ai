@@ -81,11 +81,12 @@ class PineconeRAG:
         
         return self.pc.Index(self.index_name)
 
-    def _get_embedding(self, text: str) -> list[float]:
-        """Get OpenAI embedding for text."""
+    def _get_embedding(self, text: str, timeout: float = 5.0) -> list[float]:
+        """Get OpenAI embedding for text with hard timeout."""
         response = self.openai_client.embeddings.create(
             model=EMBEDDING_MODEL,
-            input=text
+            input=text,
+            timeout=timeout,
         )
         return response.data[0].embedding
 
@@ -149,6 +150,7 @@ class PineconeRAG:
             chunk_id = self._generate_chunk_id(tenant_id, file_name, chunk_idx)
             embedding = self._get_embedding(chunk_text)
             
+            # Align metadata keys: write both (owner_id, owner_user_id) and (scope, owner_scope)
             vectors_to_upsert.append((
                 chunk_id,
                 embedding,
@@ -160,7 +162,9 @@ class PineconeRAG:
                     "chunk_index": chunk_idx,
                     "total_chunks": len(chunks),
                     "scope": scope,
+                    "owner_scope": scope,
                     "owner_id": owner_id or "",
+                    "owner_user_id": owner_id or "",
                     **extracted.metadata,
                 }
             ))
@@ -192,6 +196,7 @@ class PineconeRAG:
         min_score: float = 0.5,
         scope: Optional[str] = None,
         owner_id: Optional[str] = None,
+        timeout: float = 5.0,
     ) -> list[RAGChunk]:
         """Search for relevant chunks using vector similarity.
         
@@ -202,12 +207,13 @@ class PineconeRAG:
             min_score: Minimum similarity score (0-1)
             scope: Optional metadata scope filter
             owner_id: Optional metadata owner filter
+            timeout: Network call timeout in seconds
             
         Returns:
             List of relevant RAG chunks
         """
         try:
-            query_embedding = self._get_embedding(query)
+            query_embedding = self._get_embedding(query, timeout=timeout)
         except Exception as e:
             LOGGER.error(f"Failed to embed query: {e}")
             return []
@@ -236,6 +242,13 @@ class PineconeRAG:
             text_snippet = metadata.get("text", "").replace("\n", " ")[:100]
             LOGGER.info("  [%s] Score: %.4f | Source: %s | Snippet: %s...", match["id"], match["score"], source, text_snippet)
             
+            # Post-query exclusion: unmigrated vectors lacking owner keys or mismatching owner_id are excluded
+            if owner_id:
+                chunk_owner = metadata.get("owner_id") or metadata.get("owner_user_id")
+                if not chunk_owner or (chunk_owner != owner_id and chunk_owner != "admin"):
+                    LOGGER.warning("Excluding unmigrated or cross-user chunk '%s' lacking matching owner metadata.", match["id"])
+                    continue
+
             if match["score"] < min_score:
                 LOGGER.info("     (Skipped: score %.4f below min_score %.4f)", match["score"], min_score)
                 continue
@@ -252,6 +265,51 @@ class PineconeRAG:
             ))
         
         return chunks
+
+    def migrate_metadata_keys(self, tenant_id: str, batch_size: int = 100) -> dict[str, int]:
+        """Migration utility ensuring vectors in a tenant namespace contain both owner_id and owner_user_id, scope and owner_scope."""
+        migrated = 0
+        total_inspected = 0
+        try:
+            # Check vectors in namespace
+            dummy_vec = [0.0] * EMBEDDING_DIMENSION
+            sample = self.index.query(
+                vector=dummy_vec,
+                top_k=min(batch_size, 100),
+                namespace=tenant_id,
+                include_metadata=True,
+                include_values=False,
+            )
+            matches = sample.get("matches", [])
+            total_inspected = len(matches)
+            for m in matches:
+                meta = m.get("metadata", {})
+                needs_update = False
+                updated_meta = dict(meta)
+                if "owner_id" in meta and "owner_user_id" not in meta:
+                    updated_meta["owner_user_id"] = meta["owner_id"]
+                    needs_update = True
+                elif "owner_user_id" in meta and "owner_id" not in meta:
+                    updated_meta["owner_id"] = meta["owner_user_id"]
+                    needs_update = True
+                if "scope" in meta and "owner_scope" not in meta:
+                    updated_meta["owner_scope"] = meta["scope"]
+                    needs_update = True
+                elif "owner_scope" in meta and "scope" not in meta:
+                    updated_meta["scope"] = meta["owner_scope"]
+                    needs_update = True
+
+                if needs_update:
+                    self.index.update(
+                        id=m["id"],
+                        set_metadata=updated_meta,
+                        namespace=tenant_id,
+                    )
+                    migrated += 1
+        except Exception as e:
+            LOGGER.warning("Metadata migration check encountered: %s", e)
+
+        return {"inspected": total_inspected, "migrated": migrated}
 
     def delete_tenant_data(self, tenant_id: str) -> dict[str, int]:
         """Delete all data for a tenant.

@@ -39,11 +39,12 @@ LOGGER = logging.getLogger("copilot.conditional_retrieval")
 PINNED_EMBEDDING_MODEL: str = os.getenv("EMBEDDING_MODEL", "text-embedding-3-small")
 PINNED_EMBEDDING_DIMENSION: int = 1536
 
-WORD_REGEX = re.compile(r"[a-zA-Z0-9][a-zA-Z0-9_'-]+")
+WORD_REGEX = re.compile(r"[a-zA-Z0-9][a-zA-Z0-9'-]+")
 
 
 def _tokenize(text: str) -> Set[str]:
-    return {w.casefold() for w in WORD_REGEX.findall(text) if len(w) > 2}
+    clean = text.replace("_", " ")
+    return {w.casefold() for w in WORD_REGEX.findall(clean) if len(w) > 2}
 
 
 # ==============================================================================
@@ -308,6 +309,7 @@ class RetrievalCache:
         allow_confidential: bool = False,
         relevance_floor: Optional[float] = None,
         config: Optional[RetrievalConfig] = None,
+        user_knowledge_version: int = 1,
     ) -> str:
         need_str = ""
         if request.retrieval_need:
@@ -316,7 +318,7 @@ class RetrievalCache:
         cfg_sig = ""
         if config:
             cfg_sig = f"{config.allow_user_supplied_performance}:{config.marginal_threshold}:{config.relevance_floor}:{hash(str(config.weights.model_dump()))}"
-        return f"{request.user_id}:{request.state_version}:{request.strategic_action}:{request.lead_type}:{allow_confidential}:{relevance_floor}:{cfg_sig}:{need_str}"
+        return f"{request.user_id}:v{user_knowledge_version}:{request.state_version}:{request.strategic_action}:{request.lead_type}:{allow_confidential}:{relevance_floor}:{cfg_sig}:{need_str}"
 
     def get(
         self,
@@ -324,12 +326,14 @@ class RetrievalCache:
         allow_confidential: bool = False,
         relevance_floor: Optional[float] = None,
         config: Optional[RetrievalConfig] = None,
+        user_knowledge_version: int = 1,
     ) -> Optional[RetrievalResult]:
         key = self._make_key(
             request,
             allow_confidential=allow_confidential,
             relevance_floor=relevance_floor,
             config=config,
+            user_knowledge_version=user_knowledge_version,
         )
         if key not in self._cache:
             return None
@@ -346,6 +350,7 @@ class RetrievalCache:
         allow_confidential: bool = False,
         relevance_floor: Optional[float] = None,
         config: Optional[RetrievalConfig] = None,
+        user_knowledge_version: int = 1,
     ) -> None:
         if len(self._cache) >= self.max_size:
             # Evict oldest entry
@@ -356,6 +361,7 @@ class RetrievalCache:
             allow_confidential=allow_confidential,
             relevance_floor=relevance_floor,
             config=config,
+            user_knowledge_version=user_knowledge_version,
         )
         self._cache[key] = (result, time.time())
         if request.user_id not in self._user_keys:
@@ -393,11 +399,22 @@ class KnowledgeStore:
 
     def __init__(self, cache: Optional[RetrievalCache] = None) -> None:
         self._records: Dict[str, KnowledgeRecord] = {}
+        self._user_knowledge_versions: Dict[str, int] = {}
         self.cache: Optional[RetrievalCache] = cache
 
+    def get_user_knowledge_version(self, user_id: str) -> int:
+        return self._user_knowledge_versions.get(user_id, 1)
+
+    def _bump_user_knowledge_version(self, user_id: str) -> int:
+        new_v = self._user_knowledge_versions.get(user_id, 1) + 1
+        self._user_knowledge_versions[user_id] = new_v
+        return new_v
+
     def _notify_invalidation(self, user_id: Optional[str]) -> None:
-        if user_id and self.cache:
-            self.cache.invalidate_user(user_id)
+        if user_id:
+            self._bump_user_knowledge_version(user_id)
+            if self.cache:
+                self.cache.invalidate_user(user_id)
 
     def get_record(self, knowledge_id: str) -> Optional[KnowledgeRecord]:
         return self._records.get(knowledge_id)
@@ -707,6 +724,95 @@ class KnowledgeStore:
 
 
 # ==============================================================================
+# Latency Metrics Aggregation (Stage Percentiles & Deadline Hit Alerting)
+# ==============================================================================
+
+
+class LatencyMetricsAggregator:
+    """Aggregates per-stage latencies, computes p50/p95/p99 quantiles, and alerts on frequent deadline hits."""
+
+    def __init__(
+        self,
+        window_size: int = 100,
+        deadline_hit_alert_threshold: float = 0.15,
+        min_samples_for_alert: int = 5,
+    ) -> None:
+        self.window_size = window_size
+        self.deadline_hit_alert_threshold = deadline_hit_alert_threshold
+        self.min_samples_for_alert = min_samples_for_alert
+        self.history: List[Dict[str, Any]] = []
+        self._alert_active: bool = False
+        self._alert_message: Optional[str] = None
+
+    def record(self, result: RetrievalResult) -> None:
+        """Records a retrieval execution result."""
+        lat = result.stage_latencies or StageLatencies(total_ms=result.latency_ms)
+        entry = {
+            "timestamp": time.time(),
+            "status": result.status,
+            "timed_out": (result.status == "timed_out"),
+            "gate_ms": lat.gate_ms,
+            "embedding_ms": lat.embedding_ms,
+            "search_ms": lat.search_ms,
+            "ranking_conflict_ms": lat.ranking_conflict_ms,
+            "packaging_ms": lat.packaging_ms,
+            "total_ms": lat.total_ms,
+        }
+        self.history.append(entry)
+        if len(self.history) > self.window_size:
+            self.history.pop(0)
+
+        # Check deadline hit frequency
+        recent = self.history[-self.window_size:]
+        if len(recent) >= self.min_samples_for_alert:
+            timeouts = sum(1 for e in recent if e["timed_out"])
+            rate = timeouts / len(recent)
+            if rate >= self.deadline_hit_alert_threshold:
+                self._alert_active = True
+                self._alert_message = (
+                    f"CRITICAL LATENCY ALERT: Frequent retrieval deadline hits detected! "
+                    f"{timeouts}/{len(recent)} requests ({rate*100:.1f}%) timed out."
+                )
+                LOGGER.error(self._alert_message)
+            else:
+                self._alert_active = False
+                self._alert_message = None
+
+    @staticmethod
+    def _percentile(values: List[float], p: float) -> float:
+        if not values:
+            return 0.0
+        sorted_vals = sorted(values)
+        idx = int(round(p * (len(sorted_vals) - 1)))
+        return round(sorted_vals[idx], 2)
+
+    def get_stage_percentiles(self) -> Dict[str, Dict[str, float]]:
+        """Returns p50, p95, p99 for each stage."""
+        stages = ["gate_ms", "embedding_ms", "search_ms", "ranking_conflict_ms", "packaging_ms", "total_ms"]
+        stats: Dict[str, Dict[str, float]] = {}
+        for stage in stages:
+            vals = [e[stage] for e in self.history if stage in e]
+            stats[stage] = {
+                "p50": self._percentile(vals, 0.50),
+                "p95": self._percentile(vals, 0.95),
+                "p99": self._percentile(vals, 0.99),
+            }
+        return stats
+
+    def get_summary(self) -> Dict[str, Any]:
+        """Provides full metrics summary including sample count, percentiles, and alert status."""
+        timeouts = sum(1 for e in self.history if e["timed_out"])
+        return {
+            "total_recorded": len(self.history),
+            "timed_out_count": timeouts,
+            "timeout_rate": round(timeouts / max(1, len(self.history)), 4),
+            "alert_active": self._alert_active,
+            "alert_message": self._alert_message,
+            "stage_percentiles": self.get_stage_percentiles(),
+        }
+
+
+# ==============================================================================
 # Conditional Retrieval Engine (Adapter for Phase 1, Phase 2, and Spec 11)
 # ==============================================================================
 
@@ -721,6 +827,7 @@ class ConditionalRetrievalEngine:
         gate: Optional[RetrievalGate] = None,
         cache: Optional[RetrievalCache] = None,
         config: Optional[RetrievalConfig] = None,
+        latency_aggregator: Optional[LatencyMetricsAggregator] = None,
         default_tenant_id: str = "default",
         default_user_id: str = "default_user",
     ):
@@ -731,8 +838,13 @@ class ConditionalRetrievalEngine:
             self.store.cache = self.cache
         self.gate = gate or RetrievalGate()
         self.config = config or RetrievalConfig()
+        self.latency_aggregator = latency_aggregator or LatencyMetricsAggregator()
         self.default_tenant_id = default_tenant_id
         self.default_user_id = default_user_id
+
+    def get_latency_metrics(self) -> Dict[str, Any]:
+        """Returns latency metrics aggregation including p50/p95/p99 and deadline alerts."""
+        return self.latency_aggregator.get_summary()
 
     def _parse_version(self, version_str: str) -> Tuple[int, ...]:
         """Parses version strings like '1.0', '2.1', 'v2.0' into numeric tuples for comparison."""
@@ -755,7 +867,11 @@ class ConditionalRetrievalEngine:
         return None
 
     def _detect_contradiction(self, rec1: KnowledgeRecord, rec2: KnowledgeRecord) -> bool:
-        """Determines if two candidate records contradict each other on the same subject."""
+        """Determines if two candidate records contradict each other on the same subject.
+        
+        Doc 02 §8: When two chunks make divergent or contradictory assertions on the same
+        topic, the system must default to withholding when unsure.
+        """
         # 1. Must share knowledge class OR be a Playbook vs Company Policy comparison
         is_policy_comparison = (
             (rec1.knowledge_class == KnowledgeClass.COMPANY_POLICY.value or "policy" in rec1.source_title.casefold()) and
@@ -768,19 +884,24 @@ class ConditionalRetrievalEngine:
         if rec1.knowledge_class != rec2.knowledge_class and not is_policy_comparison:
             return False
 
-        # 2. Must share at least one topic tag or similar title
+        # 2. Must share at least one topic tag or similar title or high token overlap
         overlap_tags = set(t.casefold() for t in rec1.topic_tags) & set(t.casefold() for t in rec2.topic_tags)
         same_title = (rec1.source_title.casefold() == rec2.source_title.casefold())
-        if not overlap_tags and not same_title:
+        tokens1 = _tokenize(rec1.text)
+        tokens2 = _tokenize(rec2.text)
+        common_tokens = tokens1 & tokens2
+        high_topic_overlap = len(common_tokens) >= 3 and (len(common_tokens) / max(1, min(len(tokens1), len(tokens2)))) >= 0.35
+
+        if not overlap_tags and not same_title and not high_topic_overlap:
             return False
 
-        # 3. Check for differing key quantitative metrics (e.g. 5% vs 6%)
+        # 3. Check for differing key quantitative metrics (e.g. 5% vs 6%, $500 vs $600)
         m1 = self._extract_key_metric(rec1.text)
         m2 = self._extract_key_metric(rec2.text)
         if m1 and m2 and m1 != m2:
             return True
 
-        # 4. Check for opposing factual assertions
+        # 4. Check for opposing factual assertions and polarities
         text1 = rec1.text.casefold()
         text2 = rec2.text.casefold()
 
@@ -804,6 +925,10 @@ class ConditionalRetrievalEngine:
             ("guarantee", "no guarantee"),
             ("allowed", "prohibited"),
             ("permitted", "forbidden"),
+            ("required", "optional"),
+            ("mandatory", "voluntary"),
+            ("unlimited", "limited"),
+            ("direct", "indirect"),
         ]
         for term1, term2 in opposing_pairs:
             pattern1 = rf"\b{re.escape(term1)}\b"
@@ -811,6 +936,16 @@ class ConditionalRetrievalEngine:
             if (re.search(pattern1, text1) and re.search(pattern2, text2)) or (
                 re.search(pattern2, text1) and re.search(pattern1, text2)
             ):
+                return True
+
+        # 5. Direct polarity negation conflict on the same topic:
+        # e.g. "pre-approval required" vs "no pre-approval required"
+        negation_terms = {"not", "never", "cannot", "neither", "no", "prohibited", "disallowed", "without"}
+        has_neg1 = bool(set(text1.split()) & negation_terms)
+        has_neg2 = bool(set(text2.split()) & negation_terms)
+        if has_neg1 != has_neg2 and (same_title or len(overlap_tags) >= 2 or high_topic_overlap):
+            substantive_common = common_tokens - {"with", "from", "that", "this", "have", "your", "more", "number", "point"}
+            if len(substantive_common) >= 2:
                 return True
 
         return False
@@ -1146,6 +1281,7 @@ class ConditionalRetrievalEngine:
         cfg = config or getattr(self, "config", None) or RetrievalConfig()
         floor = relevance_floor if relevance_floor is not None else cfg.relevance_floor
         effective_deadline_ms = request.deadline_ms if request.deadline_ms is not None else cfg.default_timeout_ms
+        user_kv = self.store.get_user_knowledge_version(request.user_id) if hasattr(self, "store") and hasattr(self.store, "get_user_knowledge_version") else 1
 
         gate_ms = 0.0
         embedding_ms = 0.0
@@ -1163,7 +1299,7 @@ class ConditionalRetrievalEngine:
                 packaging_ms=round(packaging_ms, 2),
                 total_ms=round(tot, 2),
             )
-            return RetrievalResult(
+            r = RetrievalResult(
                 request_id=request.request_id,
                 state_version=request.state_version,
                 status="timed_out",
@@ -1173,19 +1309,37 @@ class ConditionalRetrievalEngine:
                 latency_ms=round(tot, 2),
                 stage_latencies=lat,
             )
+            if hasattr(self, "latency_aggregator") and self.latency_aggregator:
+                self.latency_aggregator.record(r)
+            return r
 
         def _is_timed_out() -> bool:
             if effective_deadline_ms is None or effective_deadline_ms <= 0:
                 return False
             return ((time.perf_counter() - start_time) * 1000.0) >= effective_deadline_ms
 
-        # Check Cache (Doc 02 §11)
+        def _finish(res_obj: RetrievalResult) -> RetrievalResult:
+            if cfg.cache_enabled and getattr(self, "cache", None):
+                self.cache.set(
+                    request,
+                    res_obj,
+                    allow_confidential=allow_confidential,
+                    relevance_floor=relevance_floor,
+                    config=cfg,
+                    user_knowledge_version=user_kv,
+                )
+            if hasattr(self, "latency_aggregator") and self.latency_aggregator:
+                self.latency_aggregator.record(res_obj)
+            return res_obj
+
+        # Check Cache with multi-instance knowledge versioning (Doc 02 §11)
         if cfg.cache_enabled and getattr(self, "cache", None):
             cached = self.cache.get(
                 request,
                 allow_confidential=allow_confidential,
                 relevance_floor=relevance_floor,
                 config=cfg,
+                user_knowledge_version=user_kv,
             )
             if cached is not None:
                 tot = (time.perf_counter() - start_time) * 1000.0
@@ -1197,12 +1351,15 @@ class ConditionalRetrievalEngine:
                     packaging_ms=round(tot, 2),
                     total_ms=round(tot, 2),
                 )
-                return cached.model_copy(
+                hit_res = cached.model_copy(
                     update={
                         "latency_ms": round(tot, 2),
                         "stage_latencies": lat,
                     }
                 )
+                if hasattr(self, "latency_aggregator") and self.latency_aggregator:
+                    self.latency_aggregator.record(hit_res)
+                return hit_res
 
         # Step 1: Retrieval Gate check (Doc 02 §6)
         t_gate_0 = time.perf_counter()
@@ -1232,15 +1389,7 @@ class ConditionalRetrievalEngine:
                 latency_ms=round(elapsed_ms, 2),
                 stage_latencies=lat,
             )
-            if cfg.cache_enabled and getattr(self, "cache", None):
-                self.cache.set(
-                    request,
-                    res,
-                    allow_confidential=allow_confidential,
-                    relevance_floor=relevance_floor,
-                    config=cfg,
-                )
-            return res
+            return _finish(res)
 
         # Checkpoint 1: Deadline check after Gate
         if _is_timed_out():
@@ -1274,6 +1423,50 @@ class ConditionalRetrievalEngine:
         )
         search_ms = (time.perf_counter() - t_search_0) * 1000.0
 
+        # Step 3b: Authoritative store re-verification (Doc 02 §11, Eventual Consistency Defense):
+        # Pinecone/vector store deletions and supersessions may experience eventual consistency latency.
+        # Re-verify each candidate against the authoritative store: exclude deleted chunks, superseded
+        # chunks, or chunks where self-attestation text hash was invalidated.
+        verified_candidates: List[Tuple[KnowledgeRecord, float, float]] = []
+        withheld_pre: List[WithheldFact] = []
+        for cand in candidates:
+            cand_rec = cand[0]
+            cand_score = cand[1]
+            cand_raw = cand[2] if len(cand) > 2 else cand_score
+
+            if hasattr(self.store, "get_record"):
+                auth_rec = self.store.get_record(cand_rec.knowledge_id)
+                if auth_rec is None or auth_rec.deleted or auth_rec.superseded_by is not None:
+                    LOGGER.debug("Authoritative store re-check: candidate '%s' is deleted or superseded; excluded.", cand_rec.knowledge_id)
+                    withheld_pre.append(
+                        WithheldFact(
+                            knowledge_id=cand_rec.knowledge_id,
+                            reason="stale",
+                            details="Deleted or superseded in authoritative store.",
+                        )
+                    )
+                    continue
+                if auth_rec.verification_status == "self_attested":
+                    expected_hash = hashlib.sha256(auth_rec.text.strip().encode("utf-8")).hexdigest()
+                    if auth_rec.attestation_text_hash != expected_hash:
+                        LOGGER.warning("Authoritative store re-check: candidate '%s' attestation hash mismatch; excluded.", cand_rec.knowledge_id)
+                        auth_rec.verification_status = "user_supplied"
+                        auth_rec.attestation_user_id = None
+                        auth_rec.attestation_timestamp = None
+                        auth_rec.attestation_text_hash = None
+                        withheld_pre.append(
+                            WithheldFact(
+                                knowledge_id=cand_rec.knowledge_id,
+                                reason="unverified",
+                                details="Attestation invalidated: text hash mismatch in authoritative store.",
+                            )
+                        )
+                        continue
+                verified_candidates.append((auth_rec, cand_score, cand_raw))
+            else:
+                verified_candidates.append(cand)
+        candidates = verified_candidates
+
         # Checkpoint 3: Deadline check after Search
         if _is_timed_out():
             return _timeout_result()
@@ -1296,20 +1489,12 @@ class ConditionalRetrievalEngine:
                 state_version=request.state_version,
                 status="none_found",
                 facts=[],
-                withheld=[],
+                withheld=withheld_pre,
                 fallback_hint=fallback,
                 latency_ms=round(elapsed_ms, 2),
                 stage_latencies=lat,
             )
-            if cfg.cache_enabled and getattr(self, "cache", None):
-                self.cache.set(
-                    request,
-                    res,
-                    allow_confidential=allow_confidential,
-                    relevance_floor=relevance_floor,
-                    config=cfg,
-                )
-            return res
+            return _finish(res)
 
         # Step 4: Conflict Resolution and Guardrail checking (Doc 02 §8 & §9, Step 6)
         t_rc_0 = time.perf_counter()
@@ -1318,6 +1503,7 @@ class ConditionalRetrievalEngine:
             config=cfg,
             request=request,
         )
+        withheld_facts = withheld_pre + withheld_facts
         ranking_conflict_ms = (time.perf_counter() - t_rc_0) * 1000.0
 
         # Checkpoint 4: Deadline check after Conflict Resolution
@@ -1353,15 +1539,7 @@ class ConditionalRetrievalEngine:
                 latency_ms=round(elapsed_ms, 2),
                 stage_latencies=lat,
             )
-            if cfg.cache_enabled and getattr(self, "cache", None):
-                self.cache.set(
-                    request,
-                    res,
-                    allow_confidential=allow_confidential,
-                    relevance_floor=relevance_floor,
-                    config=cfg,
-                )
-            return res
+            return _finish(res)
 
         # Check marginal threshold on RAW SEMANTIC SIMILARITY & Cap facts (Doc 02 §7 - Point 1)
         accepted_ids = {f.knowledge_id for f in accepted_facts}
@@ -1401,15 +1579,7 @@ class ConditionalRetrievalEngine:
             latency_ms=round(elapsed_ms, 2),
             stage_latencies=lat,
         )
-        if cfg.cache_enabled and getattr(self, "cache", None):
-            self.cache.set(
-                request,
-                res,
-                allow_confidential=allow_confidential,
-                relevance_floor=relevance_floor,
-                config=cfg,
-            )
-        return res
+        return _finish(res)
 
     @classmethod
     def validate_or_discard_stale_result(
@@ -1419,10 +1589,10 @@ class ConditionalRetrievalEngine:
     ) -> RetrievalResult:
         """Compares state_version on result return per Doc 01 §13.
 
-        If the state has advanced (result.state_version < current_state_version),
+        If the state has diverged (result.state_version != current_state_version),
         discards late facts and marks status='stale_discarded' with a truthful fallback hint.
         """
-        if result.state_version < current_state_version:
+        if result.state_version != current_state_version:
             return result.model_copy(
                 update={
                     "status": "stale_discarded",
@@ -1449,7 +1619,22 @@ class ConditionalRetrievalEngine:
             user_id
             or getattr(decision, "user_id", None)
             or (decision.metadata.get("user_id") if hasattr(decision, "metadata") and isinstance(decision.metadata, dict) else None)
+            or self.default_user_id
         )
+
+        # Legacy path fails closed when user_id is missing per Constraint C6
+        if not active_user:
+            LOGGER.warning("retrieve_for_decision rejected: missing user_id (fails closed per Constraint C6).")
+            return RetrievalExecutionReport(
+                retrieval_needed=False,
+                decision_id=decision.decision_id,
+                source_state_version=decision.source_state_version,
+                queries_executed=[],
+                facts=[],
+                status="none_needed",
+                fallback_hint="use_generic_truthful",
+                latency_ms=round((time.perf_counter() - start_time) * 1000.0, 2),
+            )
 
         action_str = str(getattr(decision.primary_action, "value", decision.primary_action)).lower()
 
@@ -1479,7 +1664,7 @@ class ConditionalRetrievalEngine:
             request_id=f"req_{decision.decision_id}",
             call_id=decision.call_sid or decision.call_id,
             state_version=decision.source_state_version,
-            user_id=active_user or "default_user",
+            user_id=active_user,
             strategic_action=action_str,
             retrieval_need=retrieval_need,
             conversation_evidence=decision.evidence_considered[0] if decision.evidence_considered else None,
@@ -1747,7 +1932,7 @@ class ConditionalRetrievalEngine:
 
                     # In-query hard pre-filter for dictionary backend:
                     # Chunks owned by a different user are excluded immediately
-                    if owner_id and user_id and owner_id != user_id and owner_id != "admin":
+                    if owner_id and user_id and user_id != "default_user" and owner_id != user_id and owner_id != "admin":
                         continue
 
                     if score >= min_score:

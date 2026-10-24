@@ -222,7 +222,7 @@ class Prompt(BaseModel):
     strategic_objective: str
     generated_at: str = Field(default_factory=lambda: datetime.now(timezone.utc).isoformat())
     displayed_at: Optional[str] = None
-    status: Literal["generated", "displayed", "consumed", "skipped", "cancelled", "stale"] = "generated"
+    status: Literal["generated", "displayed", "consumed", "skipped", "cancelled", "stale", "stale_discarded"] = "generated"
     cancellation_reason: Optional[str] = None
     expires_at: Optional[str] = None
     max_prompt_words: int = 24
@@ -257,7 +257,7 @@ class LLMResponseGateway:
         is_stale = False
         is_timed_out = False
         if retrieval_result is not None:
-            if retrieval_result.status == "stale_discarded" or retrieval_result.state_version < snapshot.state_version:
+            if retrieval_result.status == "stale_discarded" or retrieval_result.state_version != snapshot.state_version:
                 is_stale = True
                 facts = []
             elif retrieval_result.status == "timed_out":
@@ -466,6 +466,7 @@ class LLMResponseGateway:
         facts: Optional[List[Union[RetrievedFact, RetrievedFactResult]]] = None,
         recent_turns: Optional[List[Dict[str, str]]] = None,
         retrieval_result: Optional[RetrievalResult] = None,
+        post_generation_state_version: Optional[int] = None,
     ) -> Prompt:
         """Executes LLM language construction adhering to the strategic decision contract."""
         working_decision = decision
@@ -473,7 +474,7 @@ class LLMResponseGateway:
             facts = []
 
         if retrieval_result is not None:
-            if retrieval_result.status in ("stale_discarded", "timed_out") or retrieval_result.state_version < snapshot.state_version:
+            if retrieval_result.status in ("stale_discarded", "timed_out") or retrieval_result.state_version != snapshot.state_version:
                 facts = []
             elif not facts and retrieval_result.facts:
                 facts = list(retrieval_result.facts)
@@ -542,6 +543,27 @@ class LLMResponseGateway:
             )
             cleaned_text = self._deterministic_fallback(working_decision, snapshot=snapshot)
             cleaned_text = self._clean_and_truncate(cleaned_text, working_decision.max_prompt_words)
+
+        # Checkpoint: Stale discard right before teleprompter delivery (Doc 01 §13 & Item 8)
+        # If conversation state advanced while LLM was formulating the response (post_generation_state_version != snapshot.state_version),
+        # discard the response immediately to prevent uttering an obsolete line.
+        effective_post_version = post_generation_state_version if post_generation_state_version is not None else snapshot.state_version
+        if effective_post_version != snapshot.state_version:
+            LOGGER.warning(
+                "Conversation state advanced during response generation (v%s != v%s); discarding prompt before teleprompter delivery.",
+                effective_post_version,
+                snapshot.state_version,
+            )
+            return Prompt(
+                decision_id=working_decision.decision_id,
+                source_state_version=effective_post_version,
+                text="",
+                strategic_action=working_decision.primary_action,
+                strategic_objective=working_decision.strategic_objective,
+                max_prompt_words=working_decision.max_prompt_words,
+                confidence=working_decision.confidence,
+                status="stale_discarded",
+            )
 
         return Prompt(
             decision_id=working_decision.decision_id,
