@@ -551,6 +551,14 @@ class FastAPICopilot:
                 raise HTTPException(status_code=404, detail="Behavioral test UI file not found")
             return FileResponse(test_file)
 
+        @app.get("/conditional-test")
+        @app.get("/conditional-retrieval")
+        async def conditional_retrieval_dashboard():
+            ui_file = STATIC / "conditional_retrieval_test.html"
+            if not ui_file.exists():
+                raise HTTPException(status_code=404, detail="Conditional retrieval test UI file not found")
+            return FileResponse(ui_file)
+
 
         @app.get("/health")
         async def health():
@@ -1488,6 +1496,12 @@ class FastAPICopilot:
         # -------------------------------------------------------------
         from copilot.conversation_replay import get_conversation_replay_router
         app.include_router(get_conversation_replay_router(html_file_path=STATIC / "conversation_state_replay.html"))
+
+        # -------------------------------------------------------------
+        # Conditional Knowledge Retrieval Inspection & Testing Router
+        # -------------------------------------------------------------
+        from copilot.conditional_retrieval_router import get_conditional_retrieval_router
+        app.include_router(get_conditional_retrieval_router(html_file_path=STATIC / "conditional_retrieval_test.html"))
 
         return app
 

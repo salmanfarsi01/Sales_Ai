@@ -410,6 +410,11 @@ class KnowledgeStore:
         self._user_knowledge_versions[user_id] = new_v
         return new_v
 
+    def bump_user_knowledge_version(self, user_id: str) -> int:
+        """Public method to increment user knowledge version and invalidate cache."""
+        self._notify_invalidation(user_id)
+        return self.get_user_knowledge_version(user_id)
+
     def _notify_invalidation(self, user_id: Optional[str]) -> None:
         if user_id:
             self._bump_user_knowledge_version(user_id)
