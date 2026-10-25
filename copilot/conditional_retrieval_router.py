@@ -565,19 +565,51 @@ def get_conditional_retrieval_router(
         """Runs the entire conditional retrieval and prompt generation pipeline."""
         start_sim_time = time.monotonic()
 
-        # Step 1: Map trigger & need
-        retrieval_need = None
-        if req.trigger and req.trigger.lower() not in ("none", "null", ""):
-            try:
-                trig_enum = RetrievalTrigger(req.trigger.lower())
-                retrieval_need = RetrievalNeed(
-                    trigger=trig_enum,
-                    need_statement=req.need_statement or "retrieval need statement",
-                    topic_tags=req.topic_tags or [],
-                    time_sensitive=req.time_sensitive,
-                )
-            except ValueError:
-                retrieval_need = None
+        # Step 1: Map trigger & need (supports Autonomous Core Decision mode)
+        core_decision_info = None
+        action_to_use = req.strategic_action
+
+        if req.trigger and req.trigger.lower() in ("auto", "core_autonomous", "core_decides"):
+            from copilot.core_intelligence_engine import PitchProXCoreIntelligenceEngine
+            core_engine_instance = PitchProXCoreIntelligenceEngine()
+            eval_snapshot = ConversationStateSnapshot(
+                call_sid=req.call_id,
+                call_id=req.call_id,
+                state_version=req.state_version,
+                conversation_stage=ConversationStage.OBJECTION_HANDLING if any(w in req.conversation_evidence.lower() for w in ("experience", "fee", "rate", "cost", "how long")) else ConversationStage.DISCOVERY,
+                decision_structure=DecisionStructure(decision_maker_present=True),
+                unresolved_objections=[],
+            )
+            eval_res = core_engine_instance.evaluate(
+                eval_snapshot,
+                turn_speaker="prospect",
+                turn_text=req.conversation_evidence,
+            )
+            core_dec = eval_res.decision
+            action_to_use = str(getattr(core_dec.primary_action, "value", core_dec.primary_action)).lower()
+            retrieval_need = core_dec.retrieval_need
+            core_decision_info = {
+                "autonomous": True,
+                "primary_action": action_to_use,
+                "retrieval_needed": core_dec.retrieval_needed,
+                "trigger_chosen": core_dec.retrieval_need.trigger.value if core_dec.retrieval_need else None,
+                "need_statement": core_dec.retrieval_need.need_statement if core_dec.retrieval_need else "none",
+                "topic_tags": core_dec.retrieval_need.topic_tags if core_dec.retrieval_need else [],
+                "strategic_posture": core_dec.strategic_posture,
+            }
+        else:
+            retrieval_need = None
+            if req.trigger and req.trigger.lower() not in ("none", "null", ""):
+                try:
+                    trig_enum = RetrievalTrigger(req.trigger.lower())
+                    retrieval_need = RetrievalNeed(
+                        trigger=trig_enum,
+                        need_statement=req.need_statement or "retrieval need statement",
+                        topic_tags=req.topic_tags or [],
+                        time_sensitive=req.time_sensitive,
+                    )
+                except ValueError:
+                    retrieval_need = None
 
         retrieval_request = RetrievalRequest(
             call_id=req.call_id,
@@ -585,7 +617,7 @@ def get_conditional_retrieval_router(
             user_id=req.user_id,
             lead_type=req.lead_type,
             prospect_type=req.prospect_type,
-            strategic_action=req.strategic_action,
+            strategic_action=action_to_use,
             retrieval_need=retrieval_need,
             conversation_evidence=req.conversation_evidence,
             deadline_ms=req.deadline_ms,
@@ -632,7 +664,7 @@ def get_conditional_retrieval_router(
 
         # Step 5: Construct Snapshot and StrategicDecision for LLM Response Gateway
         try:
-            strat_action_enum = StrategicAction(req.strategic_action.lower())
+            strat_action_enum = StrategicAction(action_to_use.lower())
         except ValueError:
             strat_action_enum = StrategicAction.DIFFERENTIATE
 
@@ -687,6 +719,7 @@ def get_conditional_retrieval_router(
         total_sim_ms = round((time.monotonic() - start_sim_time) * 1000, 2)
 
         return {
+            "core_decision": core_decision_info,
             "request": retrieval_request.model_dump(),
             "gate_evaluation": {
                 "decision": "proceed" if gate_passed else gate_status,

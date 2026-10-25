@@ -138,6 +138,7 @@ class StrategicDecision(BaseModel):
     question_allowed: bool = True
     required_facts: List[Union[str, RequiredFactScope]] = Field(default_factory=list)
     retrieval_needed: bool = False
+    retrieval_need: Optional[Any] = Field(default=None, description="Autonomous retrieval need declared by Core Intelligence")
     playbook_influence: Optional[Dict[str, Any]] = None
     calibration_influence: Optional[Dict[str, Any]] = None
     urgency: Literal["immediate", "moderate", "wait"] = "immediate"

@@ -450,7 +450,7 @@ class KnowledgeStore:
         # Re-ingestion check: if record already exists with different text, clear attestation
         if record.knowledge_id in self._records:
             existing = self._records[record.knowledge_id]
-            if existing.text != record.text:
+            if existing.text != record.text and record.verification_status == "self_attested":
                 record.verification_status = "user_supplied"
                 record.attestation_user_id = None
                 record.attestation_timestamp = None
@@ -1216,24 +1216,45 @@ class ConditionalRetrievalEngine:
                             )
                         )
                     else:
-                        # Genuine authority tie: DO NOT ASSERT DISPUTED FACT!
-                        disputed_ids.add(rec_i.knowledge_id)
-                        disputed_ids.add(rec_j.knowledge_id)
-                        had_unresolved_conflict = True
-                        withheld.append(
-                            WithheldFact(
-                                knowledge_id=rec_i.knowledge_id,
-                                reason="disputed",
-                                details=f"Contradictory facts detected between '{rec_i.source_title}' and '{rec_j.source_title}'. Withheld on unresolved authority tie.",
+                        v_i = self._parse_version(rec_i.source_version)
+                        v_j = self._parse_version(rec_j.source_version)
+                        if v_i > v_j:
+                            disputed_ids.add(rec_j.knowledge_id)
+                            withheld.append(
+                                WithheldFact(
+                                    knowledge_id=rec_j.knowledge_id,
+                                    reason="disputed",
+                                    details=f"Superseded by newer source version {rec_i.source_version} ('{rec_i.source_title}').",
+                                )
                             )
-                        )
-                        withheld.append(
-                            WithheldFact(
-                                knowledge_id=rec_j.knowledge_id,
-                                reason="disputed",
-                                details=f"Contradictory facts detected between '{rec_i.source_title}' and '{rec_j.source_title}'. Withheld on unresolved authority tie.",
+                        elif v_j > v_i:
+                            disputed_ids.add(rec_i.knowledge_id)
+                            withheld.append(
+                                WithheldFact(
+                                    knowledge_id=rec_i.knowledge_id,
+                                    reason="disputed",
+                                    details=f"Superseded by newer source version {rec_j.source_version} ('{rec_j.source_title}').",
+                                )
                             )
-                        )
+                        else:
+                            # Genuine authority tie: DO NOT ASSERT DISPUTED FACT!
+                            disputed_ids.add(rec_i.knowledge_id)
+                            disputed_ids.add(rec_j.knowledge_id)
+                            had_unresolved_conflict = True
+                            withheld.append(
+                                WithheldFact(
+                                    knowledge_id=rec_i.knowledge_id,
+                                    reason="disputed",
+                                    details=f"Contradictory facts detected between '{rec_i.source_title}' and '{rec_j.source_title}'. Withheld on unresolved authority tie.",
+                                )
+                            )
+                            withheld.append(
+                                WithheldFact(
+                                    knowledge_id=rec_j.knowledge_id,
+                                    reason="disputed",
+                                    details=f"Contradictory facts detected between '{rec_i.source_title}' and '{rec_j.source_title}'. Withheld on unresolved authority tie.",
+                                )
+                            )
 
         # Convert remaining undisputed candidates to RetrievedFact
         accepted_facts: List[RetrievedFact] = []
@@ -1644,7 +1665,11 @@ class ConditionalRetrievalEngine:
         action_str = str(getattr(decision.primary_action, "value", decision.primary_action)).lower()
 
         # Build RetrievalNeed from decision properties
-        if not decision.retrieval_needed or not decision.required_facts:
+        if not decision.retrieval_needed:
+            retrieval_need = None
+        elif getattr(decision, "retrieval_need", None) is not None:
+            retrieval_need = decision.retrieval_need
+        elif not decision.required_facts:
             retrieval_need = None
         else:
             # Map strategic action to canonical trigger

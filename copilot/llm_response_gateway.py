@@ -522,7 +522,7 @@ class LLMResponseGateway:
         if self.generator_func:
             raw_text = self.generator_func(context, working_decision.max_prompt_words)
         else:
-            raw_text = self._call_llm(context, working_decision, snapshot=snapshot)
+            raw_text = self._call_llm(context, working_decision, snapshot=snapshot, facts=facts)
 
         cleaned_text = self._clean_and_truncate(raw_text, working_decision.max_prompt_words)
 
@@ -530,7 +530,7 @@ class LLMResponseGateway:
         has_inj, inj_pattern = detect_prompt_injection(cleaned_text)
         if has_inj:
             LOGGER.warning("Prompt injection instruction ('%s') detected in generated output; neutralizing with fallback.", inj_pattern)
-            cleaned_text = self._deterministic_fallback(working_decision, snapshot=snapshot)
+            cleaned_text = self._deterministic_fallback(working_decision, snapshot=snapshot, facts=facts)
             cleaned_text = self._clean_and_truncate(cleaned_text, working_decision.max_prompt_words)
 
         # Post-generation Hallucination Guardrail Check (Doc 02 §9)
@@ -541,7 +541,7 @@ class LLMResponseGateway:
                 "Hallucination guardrail triggered on prompt: violations=%s. Replacing with prospect-focused truthful fallback.",
                 violations,
             )
-            cleaned_text = self._deterministic_fallback(working_decision, snapshot=snapshot)
+            cleaned_text = self._deterministic_fallback(working_decision, snapshot=snapshot, facts=facts)
             cleaned_text = self._clean_and_truncate(cleaned_text, working_decision.max_prompt_words)
 
         # Checkpoint: Stale discard right before teleprompter delivery (Doc 01 §13 & Item 8)
@@ -580,6 +580,7 @@ class LLMResponseGateway:
         context: str,
         decision: StrategicDecision,
         snapshot: Optional[ConversationStateSnapshot] = None,
+        facts: Optional[List[Any]] = None,
     ) -> str:
         # If client is configured and not mock, execute real LLM call
         if self.llm_client and hasattr(self.llm_client, "chat"):
@@ -598,12 +599,13 @@ class LLMResponseGateway:
                 LOGGER.warning("LLM call failed, falling back to deterministic formulation: %s", e)
 
         # Fallback deterministic formulation matching the strategic action
-        return self._deterministic_fallback(decision, snapshot=snapshot)
+        return self._deterministic_fallback(decision, snapshot=snapshot, facts=facts)
 
     def _deterministic_fallback(
         self,
         decision: StrategicDecision,
         snapshot: Optional[ConversationStateSnapshot] = None,
+        facts: Optional[List[Any]] = None,
     ) -> str:
         action = decision.primary_action
         reasons = decision.reason_codes
@@ -619,6 +621,12 @@ class LLMResponseGateway:
             if action == StrategicAction.ACKNOWLEDGE or "COMPLIANCE_PRIORITY" in reasons:
                 return "Understood, I completely respect that. We will honor your preferences."
             return "I want to make sure I'm respecting your preferences—would you prefer we not stay in touch?"
+
+        if facts:
+            primary_fact = facts[0]
+            f_text = getattr(primary_fact, "text", str(primary_fact))
+            if action in (StrategicAction.QUANTIFY, StrategicAction.EDUCATE, StrategicAction.DIFFERENTIATE, StrategicAction.SOCIAL_PROOF):
+                return f_text
 
         if "UNCLASSIFIED_MATERIAL_CONTENT" in reasons:
             return "Could you share a little more about that so I can make sure I understand your situation?"

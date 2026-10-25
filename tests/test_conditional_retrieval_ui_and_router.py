@@ -157,3 +157,93 @@ def test_latency_metrics_endpoint(client):
     assert "stage_percentiles" in metrics or "percentiles" in metrics
     assert "total_calls" in metrics
     assert "deadline_alert" in metrics
+
+
+def test_preset_executes_live_engine_not_canned_document_mutation(client):
+    """Proves that presets execute the live retrieval and LLM engine with zero canned responses.
+
+    1. Runs Scenario 2 (Westlake past sales).
+       Initial fact in store: "I have closed 42 homes in Westlake over the past 3 years with an average of 18 days on market."
+       Verifies returned fact cites 42 homes and generated prompt cites 42 homes.
+    2. Dynamically mutates chunk_westlake_sales in the authoritative store:
+       New text: "I have closed 88 homes in Westlake over the past 5 years with an average of 12 days on market."
+    3. Re-runs the exact same simulation request.
+    4. Asserts that the returned fact is updated to 88 homes and the generated prompt immediately cites 88 homes,
+       conclusively proving the engine runs live and does not return canned/mocked output.
+    5. Restores canonical dummies to preserve test isolation.
+    """
+    # Ensure clean starting store
+    client.post("/api/conditional-retrieval/load-canonical-dummies?user_id=rep_john")
+
+    # Step 1: Run Scenario 2 initially
+    payload = {
+        "user_id": "rep_john",
+        "conversation_evidence": "Do you have any actual sales experience in Westlake?",
+        "strategic_action": "quantify",
+        "trigger": "credibility_objection",
+        "need_statement": "verified sales experience in Westlake",
+        "topic_tags": ["westlake", "sales"],
+        "state_version": 1,
+    }
+    res_1 = client.post("/api/conditional-retrieval/simulate", json=payload)
+    assert res_1.status_code == 200
+    data_1 = res_1.json()
+    assert data_1["retrieval_result"]["status"] == "retrieved"
+    assert "42 homes in Westlake" in data_1["retrieval_result"]["facts"][0]["text"]
+    assert "42" in data_1["prompt_result"]["text"]
+
+    # Step 2: Mutate the document in the live store
+    mutated_text = "I have closed 88 homes in Westlake over the past 5 years with an average of 12 days on market."
+    ingest_payload = {
+        "knowledge_id": "chunk_westlake_sales",
+        "owner_user_id": "rep_john",
+        "owner_scope": "user",
+        "knowledge_class": "performance_past_sales",
+        "source_title": "Westlake Production Record (Updated)",
+        "source_version": "2.0",
+        "topic_tags": ["westlake", "experience", "sales", "track_record"],
+        "text": mutated_text,
+        "verification_status": "company_approved",
+    }
+    update_res = client.post("/api/conditional-retrieval/records", json=ingest_payload)
+    assert update_res.status_code == 200
+
+    # Step 3: Rerun the exact same preset request
+    res_2 = client.post("/api/conditional-retrieval/simulate", json=payload)
+    assert res_2.status_code == 200
+    data_2 = res_2.json()
+
+    # Step 4: Verify the result changed dynamically (ZERO canned responses!)
+    assert data_2["retrieval_result"]["status"] == "retrieved"
+    assert len(data_2["retrieval_result"]["facts"]) == 1
+    assert "88 homes in Westlake" in data_2["retrieval_result"]["facts"][0]["text"]
+    assert "42 homes" not in data_2["retrieval_result"]["facts"][0]["text"]
+    assert "88" in data_2["prompt_result"]["text"]
+
+    # Step 5: Restore canonical dummies
+    client.post("/api/conditional-retrieval/load-canonical-dummies?user_id=rep_john")
+
+
+def test_simulate_pipeline_autonomous_core_decision(client):
+    """Verifies that setting trigger='auto' invokes Core Intelligence autonomously."""
+    client.post("/api/conditional-retrieval/load-canonical-dummies?user_id=rep_john")
+    payload = {
+        "user_id": "rep_john",
+        "conversation_evidence": "Do you have any actual sales experience in Westlake?",
+        "strategic_action": "quantify",
+        "trigger": "auto",  # Autonomous Core Mode
+        "need_statement": "",
+        "topic_tags": [],
+        "state_version": 1,
+    }
+    res = client.post("/api/conditional-retrieval/simulate", json=payload)
+    assert res.status_code == 200
+    data = res.json()
+
+    assert data["core_decision"] is not None
+    assert data["core_decision"]["autonomous"] is True
+    assert data["core_decision"]["trigger_chosen"] == "credibility_objection"
+    assert data["core_decision"]["retrieval_needed"] is True
+    assert data["retrieval_result"]["status"] == "retrieved"
+    assert "42 homes in Westlake" in data["retrieval_result"]["facts"][0]["text"]
+

@@ -586,6 +586,7 @@
           <div class="form-group">
             <label>Retrieval Trigger</label>
             <select class="form-select" id="retrievalTrigger">
+              <option value="auto">✨ AUTO (Core Intelligence Decides)</option>
               <option value="credibility_objection" selected>credibility_objection</option>
               <option value="factual_question">factual_question</option>
               <option value="service_process_objection">service_process_objection</option>
@@ -1125,8 +1126,13 @@
       const gateBadge = document.getElementById('gateDecisionBadge');
       gateBadge.textContent = data.gate_evaluation.decision.toUpperCase();
       gateBadge.className = 'badge-pill ' + (data.gate_evaluation.decision === 'proceed' ? 'badge-green' : 'badge-blue');
-      document.getElementById('gateReasonText').textContent = 'Reason: ' + data.gate_evaluation.reason + ` (${data.gate_evaluation.latency_ms} ms)`;
-      document.getElementById('gateRuleText').textContent = 'Rule Triggered: ' + data.gate_evaluation.rule_applied;
+      if (data.core_decision && data.core_decision.autonomous) {
+        document.getElementById('gateReasonText').textContent = `Core Picked: ${data.core_decision.primary_action.toUpperCase()} -> trigger="${data.core_decision.trigger_chosen || 'none'}" (${data.gate_evaluation.reason})`;
+        document.getElementById('gateRuleText').textContent = `Core Strategy: posture=${data.core_decision.strategic_posture}, retrieval_needed=${data.core_decision.retrieval_needed}`;
+      } else {
+        document.getElementById('gateReasonText').textContent = 'Reason: ' + data.gate_evaluation.reason + ` (${data.gate_evaluation.latency_ms} ms)`;
+        document.getElementById('gateRuleText').textContent = 'Rule Triggered: ' + data.gate_evaluation.rule_applied;
+      }
 
       // 3. Candidates & Relevance Floor
       const candContainer = document.getElementById('candidatesTableContainer');

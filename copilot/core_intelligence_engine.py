@@ -20,7 +20,9 @@ from .core_intelligence_models import (
     StrategicInterpretationContext,
     DecisionEvaluationResult,
     Spec01ObjectionLadderStage,
+    RequiredFactScope,
 )
+from .conditional_retrieval_models import RetrievalNeed, RetrievalTrigger
 
 LOGGER = logging.getLogger("copilot.core_intelligence_engine")
 
@@ -156,6 +158,7 @@ class PitchProXCoreIntelligenceEngine:
         self._apply_contact_compliance_constraints(snapshot, eval_res.decision, eval_res.context, turn_text=turn_text, turn_id=turn_id)
         self._apply_cross_metric_consistency_rules(snapshot, eval_res.decision, eval_res.context)
         self._finalize_decision_confidence(snapshot, eval_res.decision, eval_res.context)
+        self._evaluate_retrieval_need(snapshot, eval_res.decision, eval_res.context, turn_text=turn_text)
         self._attach_full_trace(eval_res.decision, eval_res.context, snapshot, turn_speaker, turn_text, turn_id=turn_id)
         if turn_speaker in ("salesperson", "rep", "agent"):
             eval_res.decision.should_prompt = False
@@ -1387,6 +1390,9 @@ class PitchProXCoreIntelligenceEngine:
             if prov_str not in evidence:
                 evidence.append(prov_str)
 
+        if getattr(decision, "retrieval_needed", False) and getattr(decision, "retrieval_need", None):
+            evidence.append(f"Retrieval need: {decision.retrieval_need.trigger.value} ({decision.retrieval_need.need_statement})")
+
         decision.evidence_considered = evidence
         decision.meeting_gate_open = context.meeting_gate_open
         decision.conversion_confirmed = context.conversion_confirmed
@@ -1406,4 +1412,195 @@ class PitchProXCoreIntelligenceEngine:
             "readiness_score": None if (has_insufficient_ev or context.readiness_score is None) else round(context.readiness_score, 1),
             "momentum_trend": context.momentum_trend,
             "cross_metric_penalties": context.cross_metric_penalties,
+            "retrieval_needed": decision.retrieval_needed,
+            "retrieval_trigger": decision.retrieval_need.trigger.value if getattr(decision, "retrieval_need", None) else None,
         }
+
+    def _evaluate_retrieval_need(
+        self,
+        snapshot: ConversationStateSnapshot,
+        decision: StrategicDecision,
+        context: StrategicInterpretationContext,
+        turn_text: str = "",
+    ) -> None:
+        """Autonomously determines if personalized knowledge retrieval is needed per Doc 02 §6.
+
+        The Core decides whether retrieval is needed, why, and what facts are required.
+        Retrieval executes this need against the knowledge store.
+        Constraint C1: 'No retrieval' is a normal, first-class outcome (fast 0ms exit).
+        """
+        # If retrieval_need was already explicitly populated (e.g. injected or test override), preserve it
+        if getattr(decision, "retrieval_need", None) is not None:
+            decision.retrieval_needed = True
+            return
+
+        action_val = str(getattr(decision.primary_action, "value", decision.primary_action)).lower()
+        t_lower = (turn_text or "").lower().strip()
+
+        # 1. Short-circuit: Excluded actions or boundary conditions require 0 retrieval
+        if (
+            action_val in ("hold", "wait_silence", "acknowledge", "respect_boundary", "exit")
+            or context.hard_boundary_active
+            or context.boundary_suspected
+            or not decision.should_prompt
+        ):
+            decision.retrieval_needed = False
+            decision.retrieval_need = None
+            decision.required_facts = []
+            return
+
+        # 2. Check for Credibility / Local Track Record / Sales Experience
+        credibility_patterns = [
+            r"\b(?:sales?|selling|sold)\s+experience\b",
+            r"\btrack\s+record\b",
+            r"\bhow\s+many\s+(?:homes?|houses?|properties|units)\b",
+            r"\bhow\s+long\s+(?:have\s+you\s+been|in\s+business|in\s+the\s+area)\b",
+            r"\b(?:in|around|near)\s+westlake\b",
+            r"\bwhy\s+should\s+i\s+(?:pick|choose|hire|work\s+with)\s+you\b",
+            r"\bclosed\s+(?:volume|transactions?|deals?)\b",
+            r"\bhow\s+many\s+(?:listings|sales)\b",
+            r"\bexperience\s+(?:in|with)\b",
+        ]
+        has_credibility_query = any(re.search(pat, t_lower) for pat in credibility_patterns)
+        has_credibility_objection = any(
+            obj.canonical_category in ("credibility_experience", "track_record", "agent_ranking", "credentials", "experience")
+            for obj in snapshot.get_unresolved_objections()
+        )
+
+        if has_credibility_query or (has_credibility_objection and action_val in ("quantify", "differentiate", "de_risk", "educate")):
+            topic_tags = ["experience", "sales", "track_record"]
+            if "westlake" in t_lower:
+                topic_tags.insert(0, "westlake")
+            decision.retrieval_needed = True
+            decision.retrieval_need = RetrievalNeed(
+                trigger=RetrievalTrigger.CREDIBILITY_OBJECTION,
+                need_statement=f"Verified sales experience and local track record to support {action_val.upper()}",
+                topic_tags=topic_tags,
+            )
+            decision.required_facts = [
+                RequiredFactScope(topic="experience", required_evidence_type="stats")
+            ]
+            return
+
+        # 3. Check for Service Process / Timeline / Contingency / Walkthrough
+        process_patterns = [
+            r"\bcontingenc(?:y|ies)\b",
+            r"\binspection\b",
+            r"\bhow\s+long\s+does\s+(?:the\s+)?(?:process|inspection|timeline)\b",
+            r"\bwhat\s+(?:happens|are\s+the\s+steps)\b",
+            r"\bhow\s+does\s+(?:it|the\s+process|listing)\s+work\b",
+            r"\bmarketing\s+plan\b",
+            r"\bshowing\s+schedule\b",
+            r"\bcancellation\s+clause\b",
+        ]
+        has_process_query = any(re.search(pat, t_lower) for pat in process_patterns)
+        has_process_objection = any(
+            obj.canonical_category in ("process", "timeline", "inspection", "service_process", "contract_terms")
+            for obj in snapshot.get_unresolved_objections()
+        )
+
+        if has_process_query or (has_process_objection and action_val in ("educate", "clarify", "quantify")):
+            decision.retrieval_needed = True
+            decision.retrieval_need = RetrievalNeed(
+                trigger=RetrievalTrigger.SERVICE_PROCESS_OBJECTION,
+                need_statement=f"Verified service process and timeline facts to support {action_val.upper()}",
+                topic_tags=["process", "timeline", "inspection", "contingency"],
+            )
+            decision.required_facts = [
+                RequiredFactScope(topic="service_process", required_evidence_type="policy")
+            ]
+            return
+
+        # 4. Check for Commission / Fees / Pricing Policies
+        pricing_patterns = [
+            r"\bcommission\b",
+            r"\bfee[s]?\b",
+            r"\bwhat\s+do\s+you\s+charge\b",
+            r"\bpercentage\b",
+            r"\brate[s]?\b",
+            r"\bcost\s+to\s+list\b",
+            r"\bpricing\s+structure\b",
+        ]
+        has_pricing_query = any(re.search(pat, t_lower) for pat in pricing_patterns)
+        has_pricing_objection = any(
+            obj.canonical_category in ("commission_fee", "financial_net_proceeds", "pricing", "fee")
+            for obj in snapshot.get_unresolved_objections()
+        )
+
+        if has_pricing_query or (has_pricing_objection and action_val in ("educate", "quantify", "differentiate", "reframe")):
+            decision.retrieval_needed = True
+            decision.retrieval_need = RetrievalNeed(
+                trigger=RetrievalTrigger.POLICY_WORDING,
+                need_statement=f"Authoritative commission rate and pricing policy to support {action_val.upper()}",
+                topic_tags=["commission", "fees", "pricing"],
+            )
+            decision.required_facts = [
+                RequiredFactScope(topic="commission", required_evidence_type="policy")
+            ]
+            return
+
+        # 5. Check for Social Proof / Testimonials / Case Studies
+        social_proof_patterns = [
+            r"\btestimonials?\b",
+            r"\breferences?\b",
+            r"\breviews?\b",
+            r"\bcase\s+stud(?:y|ies)\b",
+            r"\bother\s+clients?\b",
+            r"\bwho\s+else\s+have\s+you\s+helped\b",
+        ]
+        has_social_proof_query = any(re.search(pat, t_lower) for pat in social_proof_patterns)
+        if action_val in ("social_proof", "socialproof") or has_social_proof_query:
+            decision.retrieval_needed = True
+            decision.retrieval_need = RetrievalNeed(
+                trigger=RetrievalTrigger.PLAYBOOK_EVIDENCE,
+                need_statement="Verified client testimonials or social proof case studies",
+                topic_tags=["testimonials", "reviews", "social_proof"],
+            )
+            decision.required_facts = [
+                RequiredFactScope(topic="testimonials", required_evidence_type="case_study")
+            ]
+            return
+
+        # 6. Check for Prior Claim / Promised Incentive Reference
+        claim_patterns = [
+            r"\byou\s+said\b",
+            r"\byou\s+mentioned\b",
+            r"\byou\s+promised\b",
+            r"\brebate[s]?\b",
+            r"\bcash\s*back\b",
+            r"\bclosing\s+credit\b",
+        ]
+        has_claim_query = any(re.search(pat, t_lower) for pat in claim_patterns)
+        if has_claim_query:
+            decision.retrieval_needed = True
+            decision.retrieval_need = RetrievalNeed(
+                trigger=RetrievalTrigger.PRIOR_CLAIM_REFERENCE,
+                need_statement="Verified prior claim or incentive wording",
+                topic_tags=["rebate", "credit", "prior_claim"],
+            )
+            decision.required_facts = [
+                RequiredFactScope(topic="prior_claim", required_evidence_type="statement")
+            ]
+            return
+
+        # 7. Check for Direct Factual Inquiry on Informational Actions
+        if action_val in ("educate", "quantify") and (
+            "?" in turn_text or any(t_lower.startswith(w) for w in ("what", "how", "where", "when", "which", "can you check", "tell me about"))
+        ):
+            clean_sub = t_lower[:60]
+            decision.retrieval_needed = True
+            decision.retrieval_need = RetrievalNeed(
+                trigger=RetrievalTrigger.FACTUAL_QUESTION,
+                need_statement=f"Verified business facts for prospect inquiry: {clean_sub}",
+                topic_tags=["factual", "information"],
+            )
+            decision.required_facts = [
+                RequiredFactScope(topic="factual", required_evidence_type="data")
+            ]
+            return
+
+        # 8. Default: No retrieval needed (0ms fast exit)
+        decision.retrieval_needed = False
+        decision.retrieval_need = None
+        decision.required_facts = []
+
