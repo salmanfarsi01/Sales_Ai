@@ -477,6 +477,26 @@
       padding: 24px;
       box-shadow: 0 10px 30px rgba(0,0,0,0.6);
     }
+    .modal-box-large {
+      width: 940px;
+      max-width: 95vw;
+      max-height: 88vh;
+      display: flex;
+      flex-direction: column;
+    }
+    .modal-tab-content { display: none; }
+    .modal-tab-content.active { display: block; }
+    .table-clickable-row {
+      cursor: pointer;
+      transition: background 0.15s ease;
+    }
+    .table-clickable-row:hover {
+      background: rgba(56, 189, 248, 0.08) !important;
+    }
+    .table-changed-row {
+      background: rgba(16, 185, 129, 0.15) !important;
+      border-left: 3px solid var(--accent-green) !important;
+    }
 
     .badge-pill {
       font-size: 10px;
@@ -680,6 +700,7 @@
       <!-- Tabs Navigation -->
       <div class="tabs-nav">
         <button class="tab-btn active" onclick="switchTab('tabPipeline')">🔍 Pipeline Stepper</button>
+        <button class="tab-btn" id="btnTabMultiTurn" onclick="switchTab('tabMultiTurn')">📜 Multi-Turn Script Studio</button>
         <button class="tab-btn" onclick="switchTab('tabContext')">📦 6-Block Context</button>
         <button class="tab-btn" onclick="switchTab('tabTeleprompter')">🎙️ Spoken Teleprompter</button>
         <button class="tab-btn" onclick="switchTab('tabStore')">📚 Knowledge Store (<span id="storeCount">0</span>)</button>
@@ -800,6 +821,98 @@
         </div>
       </div>
 
+      <!-- TAB 6: Multi-Turn Script Studio -->
+      <div class="tab-content" id="tabMultiTurn">
+        
+        <!-- Controls & Presets Panel -->
+        <div class="panel" style="margin-bottom: 14px;">
+          <div class="panel-header">
+            <h3><span>📜</span> Multi-Turn Script Studio & Regression Runner</h3>
+            <span class="badge-pill badge-green">Core-to-Retrieval Autonomous Link • Spec Doc 02 §6</span>
+          </div>
+
+          <div style="display: flex; gap: 12px; align-items: flex-end; margin-bottom: 12px; flex-wrap: wrap;">
+            <div style="flex: 1; min-width: 280px;">
+              <label style="font-size: 11px; font-weight: 700; color: var(--text-muted); text-transform: uppercase;">Benchmark Regression Script</label>
+              <select class="form-select" id="multiTurnScriptSelect" onchange="onBenchmarkScriptSelected()">
+                <!-- Populated dynamically via JS -->
+              </select>
+            </div>
+            <button class="btn btn-primary" id="btnRunMultiTurn" onclick="runMultiTurnScript()">
+              ▶ Run Multi-Turn Script
+            </button>
+            <button class="btn" id="btnReplayMultiTurn" onclick="replayMultiTurnScript()">
+              🔁 Replay Script (Check Diff)
+            </button>
+            <button class="btn btn-success" onclick="loadCanonicalDummiesAndReplay()">
+              ⚡ Reset Rep John Dummies
+            </button>
+          </div>
+
+          <div style="font-size: 12px; color: var(--text-dim); margin-bottom: 10px;" id="multiTurnScriptDesc">
+            Loading benchmark scripts…
+          </div>
+
+          <!-- Script Lines Editor -->
+          <div class="form-group" style="margin-bottom: 0;">
+            <div style="display: flex; justify-content: space-between; margin-bottom: 6px;">
+              <label style="font-size: 11px; font-weight: 700; color: var(--text-muted); text-transform: uppercase;">Prospect Utterance Sequence (1 per line)</label>
+              <span style="font-size: 11px; color: var(--accent-blue);">Edit any line below, then click "Run" or "Replay"</span>
+            </div>
+            <textarea id="multiTurnScriptEditor" rows="6" style="font-family: 'JetBrains Mono', monospace; font-size: 12px; line-height: 1.6;"></textarea>
+          </div>
+        </div>
+
+        <!-- Multi-Turn Run Summary Strip -->
+        <div class="results-hero" id="multiTurnSummaryBar" style="display: none; margin-bottom: 14px;">
+          <div>
+            <div style="font-weight: 800; font-size: 14px; color: #fff;" id="mtSummaryTitle">Canonical 8-Turn Run Completed</div>
+            <div style="font-size: 12px; color: var(--text-muted);" id="mtSummarySub">Core evaluated all turns autonomously without hand-set triggers.</div>
+          </div>
+          <div class="metric-pills">
+            <div class="metric-pill">Total Turns: <b id="mtMetricTurns">8</b></div>
+            <div class="metric-pill">Fired: <b id="mtMetricFired" style="color: #38bdf8;">5</b></div>
+            <div class="metric-pill">0ms Quiet: <b id="mtMetricQuiet" style="color: #34d399;">3</b></div>
+            <div class="metric-pill">Safety: <b id="mtMetricSafety" style="color: #34d399;">SAFE (0)</b></div>
+            <div class="metric-pill">Avg Turn: <b id="mtMetricAvgLatency">—</b></div>
+          </div>
+        </div>
+
+        <!-- Interactive Multi-Turn Table Panel -->
+        <div class="panel">
+          <div class="panel-header">
+            <h3><span>📊</span> Multi-Turn Execution Matrix</h3>
+            <span style="font-size: 11px; color: var(--text-dim);">Click any row or 'Inspect' to open the complete 6-block context for that turn</span>
+          </div>
+
+          <div style="overflow-x: auto;">
+            <table class="custom-table" id="multiTurnTable">
+              <thead>
+                <tr>
+                  <th style="width: 36px;">#</th>
+                  <th style="width: 200px;">Prospect Line</th>
+                  <th style="width: 140px;">Core Action & Trigger</th>
+                  <th style="width: 80px;">Gate</th>
+                  <th style="width: 180px;">Candidates & Withheld</th>
+                  <th style="width: 180px;">Facts Delivered</th>
+                  <th>Teleprompter & Guardrail</th>
+                  <th style="width: 100px;">Ver / Latency</th>
+                  <th style="width: 70px;">Inspect</th>
+                </tr>
+              </thead>
+              <tbody id="multiTurnTableBody">
+                <tr>
+                  <td colspan="9" style="text-align: center; color: var(--text-dim); padding: 30px;">
+                    Select a benchmark script above and click <b>▶ Run Multi-Turn Script</b>.
+                  </td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+
+      </div>
+
     </div>
 
   </main>
@@ -860,10 +973,73 @@
     </div>
   </div>
 
+  <!-- Modal: Turn 6-Block Context Inspection -->
+  <div class="modal-backdrop" id="turnContextModal">
+    <div class="modal-box modal-box-large">
+      <div class="panel-header" style="margin-bottom: 10px;">
+        <div>
+          <h3 id="modalTurnTitle">Turn Inspection</h3>
+          <div style="font-size: 12px; color: var(--text-muted); margin-top: 2px;" id="modalTurnSubtitle">
+            Prospect statement
+          </div>
+        </div>
+        <button class="btn" onclick="closeTurnContextModal()">✕</button>
+      </div>
+
+      <!-- Quick Metrics Ribbon -->
+      <div style="display: flex; gap: 8px; margin-bottom: 12px; flex-wrap: wrap;">
+        <span class="badge-pill badge-blue" id="modalBadgeAction">Action: —</span>
+        <span class="badge-pill badge-green" id="modalBadgeTrigger">Trigger: —</span>
+        <span class="badge-pill badge-blue" id="modalBadgeGate">Gate: —</span>
+        <span class="badge-pill badge-green" id="modalBadgeSafety">🛡️ Hallucination Safe</span>
+        <span class="badge-pill badge-blue" id="modalBadgeVersion">State Version: 1</span>
+        <span class="badge-pill badge-blue" id="modalBadgeLatency">Latency: 0.0ms</span>
+      </div>
+
+      <!-- Modal Tabs Navigation -->
+      <div class="tabs-nav" style="margin-bottom: 12px;">
+        <button class="tab-btn active" id="btnMTabBlocks" onclick="switchModalTab('mtabBlocks')">📦 6 Context Blocks</button>
+        <button class="tab-btn" id="btnMTabRaw" onclick="switchModalTab('mtabRaw')">📝 Raw Prompt Contract</button>
+        <button class="tab-btn" id="btnMTabCandidates" onclick="switchModalTab('mtabCandidates')">🎯 Candidates & Floor</button>
+        <button class="tab-btn" id="btnMTabWithheld" onclick="switchModalTab('mtabWithheld')">🚫 Withheld Reasons</button>
+      </div>
+
+      <!-- Modal Tab 1: 6 Individual Blocks -->
+      <div class="modal-tab-content active" id="mtabBlocks" style="max-height: 480px; overflow-y: auto;">
+        <div id="modalBlocksContainer" style="display: flex; flex-direction: column; gap: 10px;"></div>
+      </div>
+
+      <!-- Modal Tab 2: Raw Contract -->
+      <div class="modal-tab-content" id="mtabRaw" style="display: none; max-height: 480px; overflow-y: auto;">
+        <div class="code-view" id="modalRawContext"></div>
+      </div>
+
+      <!-- Modal Tab 3: Candidates -->
+      <div class="modal-tab-content" id="mtabCandidates" style="display: none; max-height: 480px; overflow-y: auto;">
+        <div id="modalCandidatesContainer"></div>
+      </div>
+
+      <!-- Modal Tab 4: Withheld -->
+      <div class="modal-tab-content" id="mtabWithheld" style="display: none; max-height: 480px; overflow-y: auto;">
+        <div id="modalWithheldContainer"></div>
+      </div>
+
+      <div style="display: flex; justify-content: flex-end; margin-top: 14px;">
+        <button class="btn btn-primary" onclick="closeTurnContextModal()">Close Inspection</button>
+      </div>
+    </div>
+  </div>
+
   <script>
     let activeUserId = 'rep_john';
     let currentPresets = [];
     let activePresetId = 'scenario_2';
+
+    // Multi-Turn Script Studio State
+    let benchmarkScriptsCatalog = [];
+    let lastMultiTurnResult = null;
+    let multiTurnRunData = null;
+    let activeModalTurnData = null;
 
     // Shortcut: Ctrl+Enter executes pipeline
     document.addEventListener('keydown', (e) => {
@@ -874,6 +1050,7 @@
 
     async function init() {
       await loadPresets();
+      await loadBenchmarkScripts();
       await fetchStoreRecords();
       await fetchLatencyMetrics();
     }
@@ -939,10 +1116,12 @@
     }
 
     function switchTab(tabId) {
-      document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
+      document.querySelectorAll('.tabs-nav .tab-btn').forEach(b => b.classList.remove('active'));
       document.querySelectorAll('.tab-content').forEach(c => c.classList.remove('active'));
-      event.target.classList.add('active');
-      document.getElementById(tabId).classList.add('active');
+      const btn = Array.from(document.querySelectorAll('.tabs-nav .tab-btn')).find(b => b.getAttribute('onclick')?.includes(tabId));
+      if (btn) btn.classList.add('active');
+      const target = document.getElementById(tabId);
+      if (target) target.classList.add('active');
     }
 
     async function loadCanonicalDummies() {
@@ -1283,6 +1462,322 @@
       } catch (e) {
         console.error('Error fetching latency metrics:', e);
       }
+    }
+
+    // -------------------------------------------------------------------------
+    // Multi-Turn Script Studio Logic
+    // -------------------------------------------------------------------------
+
+    async function loadBenchmarkScripts() {
+      try {
+        const res = await fetch('/api/conditional-retrieval/scripts');
+        benchmarkScriptsCatalog = await res.json();
+        const select = document.getElementById('multiTurnScriptSelect');
+        select.innerHTML = benchmarkScriptsCatalog.map((s, idx) => `
+          <option value="${s.id}" ${idx === 0 ? 'selected' : ''}>${s.name}</option>
+        `).join('') + `<option value="custom">✏️ Custom Prospect Script...</option>`;
+        onBenchmarkScriptSelected();
+      } catch (e) {
+        console.error('Failed to load benchmark scripts:', e);
+      }
+    }
+
+    function onBenchmarkScriptSelected() {
+      const select = document.getElementById('multiTurnScriptSelect');
+      const chosenId = select.value;
+      const descEl = document.getElementById('multiTurnScriptDesc');
+      const editorEl = document.getElementById('multiTurnScriptEditor');
+
+      if (chosenId === 'custom') {
+        descEl.innerHTML = '<b>Custom Script:</b> Enter your own ordered list of prospect utterances below (one per line) to test sequential conversation flow.';
+        return;
+      }
+
+      const script = benchmarkScriptsCatalog.find(s => s.id === chosenId);
+      if (script) {
+        descEl.innerHTML = `<b>${script.name}:</b> ${script.description}`;
+        editorEl.value = script.lines.join('\n');
+      }
+    }
+
+    async function runMultiTurnScript(isReplay = false) {
+      const editorEl = document.getElementById('multiTurnScriptEditor');
+      const rawLines = editorEl.value.split('\n').map(l => l.trim()).filter(l => l.length > 0);
+      if (rawLines.length === 0) {
+        alert('Please enter at least one prospect line in the script editor.');
+        return;
+      }
+
+      const btn = isReplay ? document.getElementById('btnReplayMultiTurn') : document.getElementById('btnRunMultiTurn');
+      const origText = btn.textContent;
+      btn.textContent = isReplay ? '⏳ Replaying Script…' : '⏳ Running Multi-Turn…';
+      btn.disabled = true;
+
+      try {
+        const payload = {
+          user_id: activeUserId,
+          call_id: 'multiturn_' + Date.now().toString().slice(-4),
+          script_name: document.getElementById('multiTurnScriptSelect').selectedOptions[0]?.text || 'Prospect Script',
+          prospect_lines: rawLines,
+        };
+
+        const res = await fetch('/api/conditional-retrieval/multi-turn-simulate', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(payload),
+        });
+
+        if (!res.ok) {
+          const err = await res.json();
+          alert('Execution error: ' + (err.detail || 'Execution failed'));
+          return;
+        }
+
+        const data = await res.json();
+        renderMultiTurnResults(data, isReplay);
+        lastMultiTurnResult = data;
+        multiTurnRunData = data;
+      } catch (e) {
+        console.error('Error running multi-turn script:', e);
+        alert('Error running multi-turn script: ' + e.message);
+      } finally {
+        btn.textContent = origText;
+        btn.disabled = false;
+      }
+    }
+
+    async function replayMultiTurnScript() {
+      await runMultiTurnScript(true);
+    }
+
+    async function loadCanonicalDummiesAndReplay() {
+      await loadCanonicalDummies();
+      await runMultiTurnScript(true);
+    }
+
+    function renderMultiTurnResults(data, isReplay = false) {
+      // 1. Summary Strip
+      const summaryBar = document.getElementById('multiTurnSummaryBar');
+      summaryBar.style.display = 'flex';
+      document.getElementById('mtSummaryTitle').textContent = `${data.script_name} (${isReplay ? 'Replay' : 'Run'} Complete)`;
+      document.getElementById('mtSummarySub').textContent = `Total duration: ${data.total_sim_ms}ms • Evaluated across ${data.total_turns} sequential conversation state turns.`;
+
+      document.getElementById('mtMetricTurns').textContent = data.total_turns;
+      document.getElementById('mtMetricFired').textContent = data.retrieval_fired_count;
+      document.getElementById('mtMetricQuiet').textContent = data.retrieval_quiet_count;
+      document.getElementById('mtMetricSafety').textContent = data.total_violations === 0 ? 'SAFE (0)' : `${data.total_violations} Violations`;
+      document.getElementById('mtMetricSafety').style.color = data.total_violations === 0 ? '#34d399' : '#f87171';
+      document.getElementById('mtMetricAvgLatency').textContent = `${data.avg_latency_ms} ms`;
+
+      // 2. Table Rows
+      const tbody = document.getElementById('multiTurnTableBody');
+      tbody.innerHTML = data.turns.map(t => {
+        // Check if row changed from previous replay
+        let isChanged = false;
+        if (isReplay && lastMultiTurnResult) {
+          const prevTurn = lastMultiTurnResult.turns.find(x => x.turn_index === t.turn_index);
+          if (prevTurn) {
+            const prevFactText = (prevTurn.facts_delivered || []).map(f => f.text).join(' ');
+            const currFactText = (t.facts_delivered || []).map(f => f.text).join(' ');
+            if (prevTurn.teleprompter_line !== t.teleprompter_line || prevFactText !== currFactText || prevTurn.core_action !== t.core_action) {
+              isChanged = true;
+            }
+          }
+        }
+
+        // Candidates summary
+        let candSummaryHtml = '';
+        if (t.candidates && t.candidates.length > 0) {
+          candSummaryHtml = t.candidates.map(c => `
+            <div style="font-size: 11px; margin-bottom: 3px;">
+              <b>${c.knowledge_id}</b>: raw <span style="font-family: monospace; color: var(--accent-blue);">${c.raw_score}</span>
+              <span class="table-badge ${c.status_flag === 'cleared_floor' ? 'badge-green' : (c.status_flag === 'marginal_low_confidence' ? 'badge-yellow' : 'badge-red')}">${c.status_flag}</span>
+            </div>
+          `).join('');
+        } else {
+          candSummaryHtml = `<span style="color: var(--text-dim); font-size: 11px;">0 candidates searched</span>`;
+        }
+
+        // Withheld summary
+        if (t.withheld && t.withheld.length > 0) {
+          candSummaryHtml += t.withheld.map(w => `
+            <div style="font-size: 11px; color: #fca5a5; margin-top: 4px; background: rgba(239, 68, 68, 0.1); padding: 2px 6px; border-radius: 4px;">
+              🚫 <b>Withheld:</b> ${w.knowledge_id} (${w.reason})
+            </div>
+          `).join('');
+        }
+
+        // Facts summary
+        let factsSummaryHtml = '';
+        if (t.facts_delivered && t.facts_delivered.length > 0) {
+          factsSummaryHtml = t.facts_delivered.map(f => `
+            <div style="background: rgba(16, 185, 129, 0.1); border: 1px solid rgba(16, 185, 129, 0.25); border-radius: 4px; padding: 4px 6px; font-size: 11px; margin-bottom: 3px;">
+              <div style="display: flex; justify-content: space-between;">
+                <b>${f.knowledge_id}</b>
+                <span style="color: var(--accent-green); font-size: 10px;">v${f.source_version || '1.0'}</span>
+              </div>
+              <div style="color: #e2e8f0; font-size: 11px; margin-top: 2px;">${f.text}</div>
+            </div>
+          `).join('');
+        } else {
+          factsSummaryHtml = `<span style="color: var(--text-dim); font-size: 11px;">0 facts (0ms quiet / truthful fallback)</span>`;
+        }
+
+        return `
+          <tr class="table-clickable-row ${isChanged ? 'table-changed-row' : ''}" onclick="openTurnContextModal(${t.turn_index})" title="Click to open full 6-block context for Turn ${t.turn_index}">
+            <td style="font-weight: 800; color: var(--accent-blue);">${t.turn_index}</td>
+            <td>
+              <div style="font-weight: 600; color: #fff;">"${t.prospect_line}"</div>
+            </td>
+            <td>
+              <span class="badge-pill badge-blue" style="font-size: 11px;">${t.core_action}</span>
+              <div style="font-size: 11px; color: ${t.retrieval_needed ? '#34d399' : 'var(--text-dim)'}; margin-top: 4px;">
+                ${t.retrieval_needed ? '🎯 ' + t.core_trigger : '🔇 ' + t.core_trigger}
+              </div>
+            </td>
+            <td>
+              <span class="table-badge ${t.gate_result === 'proceed' ? 'badge-green' : (t.gate_result === 'none_needed' ? 'badge-blue' : 'badge-yellow')}">
+                ${t.gate_result.toUpperCase()}
+              </span>
+            </td>
+            <td>${candSummaryHtml}</td>
+            <td>${factsSummaryHtml}</td>
+            <td>
+              <div style="font-size: 12px; color: #f8fafc; font-style: italic; margin-bottom: 4px;">"${t.teleprompter_line}"</div>
+              <span class="badge-pill ${t.hallucination_safe ? 'badge-green' : 'badge-red'}">
+                ${t.hallucination_safe ? '🛡️ Safe (0 violations)' : '⚠️ ' + t.hallucination_violations.length + ' Violations'}
+              </span>
+            </td>
+            <td>
+              <div style="font-size: 11px; color: var(--text-muted);">State: <b>v${t.state_version}</b></div>
+              <div style="font-family: monospace; font-size: 11px; color: var(--accent-blue); margin-top: 2px;">${t.latency_ms} ms</div>
+            </td>
+            <td>
+              <button class="btn" style="padding: 4px 8px; font-size: 11px;" onclick="event.stopPropagation(); openTurnContextModal(${t.turn_index})">
+                🔍 View
+              </button>
+            </td>
+          </tr>
+        `;
+      }).join('');
+    }
+
+    function openTurnContextModal(turnIndex) {
+      if (!multiTurnRunData || !multiTurnRunData.turns) return;
+      const turn = multiTurnRunData.turns.find(t => t.turn_index === turnIndex);
+      if (!turn) return;
+
+      activeModalTurnData = turn;
+
+      document.getElementById('modalTurnTitle').textContent = `Turn ${turn.turn_index} Detailed Context Inspection`;
+      document.getElementById('modalTurnSubtitle').textContent = `Prospect: "${turn.prospect_line}"`;
+
+      document.getElementById('modalBadgeAction').textContent = `Action: ${turn.core_action}`;
+      document.getElementById('modalBadgeTrigger').textContent = `Trigger: ${turn.core_trigger}`;
+      document.getElementById('modalBadgeGate').textContent = `Gate: ${turn.gate_result.toUpperCase()}`;
+      document.getElementById('modalBadgeSafety').textContent = turn.hallucination_safe ? '🛡️ Safe (0 violations)' : `⚠️ ${turn.hallucination_violations.length} Violations`;
+      document.getElementById('modalBadgeSafety').className = 'badge-pill ' + (turn.hallucination_safe ? 'badge-green' : 'badge-red');
+      document.getElementById('modalBadgeVersion').textContent = `State Ver: ${turn.state_version}`;
+      document.getElementById('modalBadgeLatency').textContent = `Latency: ${turn.latency_ms}ms`;
+
+      // Tab 1: Render the 6 discrete blocks
+      const blocksContainer = document.getElementById('modalBlocksContainer');
+      const blkDict = turn.context_blocks || {};
+      const blockLabels = {
+        'block_1': 'Block 1: Strategic Decision Contract',
+        'block_2': 'Block 2: Current Conversation Truth',
+        'block_3': 'Block 3: Grounded Knowledge Facts',
+        'block_4': 'Block 4: Playbook Methodology Constraints',
+        'block_5': 'Block 5: Conversational Pacing & Calibration',
+        'block_6': 'Block 6: Mandatory Generation Directives & Guardrails'
+      };
+
+      if (Object.keys(blkDict).length === 0 && turn.context_assembled) {
+        blocksContainer.innerHTML = `<div class="code-view">${turn.context_assembled}</div>`;
+      } else {
+        blocksContainer.innerHTML = Object.entries(blkDict).map(([k, v]) => `
+          <div class="step-card" style="margin-bottom: 8px;">
+            <div class="step-title" style="color: var(--accent-blue); font-size: 12px;">
+              ${blockLabels[k] || k.toUpperCase()}
+            </div>
+            <div style="font-family: 'JetBrains Mono', monospace; font-size: 11px; white-space: pre-wrap; color: #cbd5e1; line-height: 1.4;">
+              ${v}
+            </div>
+          </div>
+        `).join('');
+      }
+
+      // Tab 2: Raw Contract
+      document.getElementById('modalRawContext').textContent = turn.context_assembled || 'No context assembled.';
+
+      // Tab 3: Candidates
+      const candContainer = document.getElementById('modalCandidatesContainer');
+      if (!turn.candidates || turn.candidates.length === 0) {
+        candContainer.innerHTML = '<div style="font-size: 12px; color: var(--text-dim); padding: 12px;">0 candidate chunks searched for this turn (0ms fast exit).</div>';
+      } else {
+        candContainer.innerHTML = `
+          <table class="custom-table">
+            <thead>
+              <tr>
+                <th>Chunk ID / Source</th>
+                <th>Raw Similarity</th>
+                <th>Ranking Score</th>
+                <th>Floor Verdict</th>
+              </tr>
+            </thead>
+            <tbody>
+              ${turn.candidates.map(c => `
+                <tr>
+                  <td><b>${c.knowledge_id}</b><br><span style="font-size: 11px; color: var(--text-muted);">${c.source_title}</span></td>
+                  <td><span style="font-family: monospace;">${c.raw_score}</span></td>
+                  <td><span style="font-family: monospace; color: var(--accent-blue);">${c.ranking_score}</span></td>
+                  <td>
+                    <span class="table-badge ${c.status_flag === 'cleared_floor' ? 'badge-green' : (c.status_flag === 'marginal_low_confidence' ? 'badge-yellow' : 'badge-red')}">
+                      ${c.status_flag}
+                    </span>
+                  </td>
+                </tr>
+              `).join('')}
+            </tbody>
+          </table>
+        `;
+      }
+
+      // Tab 4: Withheld Chunks
+      const withheldContainer = document.getElementById('modalWithheldContainer');
+      if (!turn.withheld || turn.withheld.length === 0) {
+        withheldContainer.innerHTML = '<div style="font-size: 12px; color: var(--text-dim); padding: 12px;">0 chunks withheld for this turn.</div>';
+      } else {
+        withheldContainer.innerHTML = `
+          <div style="display: flex; flex-direction: column; gap: 8px;">
+            ${turn.withheld.map(w => `
+              <div style="background: rgba(239, 68, 68, 0.1); border: 1px solid rgba(239, 68, 68, 0.3); padding: 10px 14px; border-radius: 6px; font-size: 12px;">
+                <div style="display: flex; justify-content: space-between; margin-bottom: 4px;">
+                  <b>${w.knowledge_id}</b>
+                  <span class="table-badge badge-red">${w.reason.toUpperCase()}</span>
+                </div>
+                <div style="color: var(--text-muted); font-size: 12px;">${w.details || 'Fact withheld by conflict resolution rule.'}</div>
+              </div>
+            `).join('')}
+          </div>
+        `;
+      }
+
+      switchModalTab('mtabBlocks');
+      document.getElementById('turnContextModal').style.display = 'flex';
+    }
+
+    function closeTurnContextModal() {
+      document.getElementById('turnContextModal').style.display = 'none';
+    }
+
+    function switchModalTab(tabId) {
+      document.querySelectorAll('#turnContextModal .tab-btn').forEach(b => b.classList.remove('active'));
+      document.querySelectorAll('.modal-tab-content').forEach(c => c.style.display = 'none');
+      const targetBtn = Array.from(document.querySelectorAll('#turnContextModal .tab-btn')).find(b => b.getAttribute('onclick')?.includes(tabId));
+      if (targetBtn) targetBtn.classList.add('active');
+      const el = document.getElementById(tabId);
+      if (el) el.style.display = 'block';
     }
 
     window.onload = init;

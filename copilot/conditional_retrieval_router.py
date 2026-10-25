@@ -29,13 +29,17 @@ from copilot.conditional_retrieval_models import (
     KnowledgeRecord,
     RetrievalNeed,
     RetrievalRequest,
+    RetrievalResult,
     RetrievalTrigger,
 )
 from copilot.conversation_state_models import (
     ConversationStage,
     ConversationStateSnapshot,
     DecisionStructure,
+    ObjectionLifecycleState,
+    ObjectionRecord,
 )
+from copilot.core_intelligence_engine import PitchProXCoreIntelligenceEngine
 from copilot.core_intelligence_models import (
     RequiredFactScope,
     StrategicAction,
@@ -99,12 +103,39 @@ class SimulationRequest(BaseModel):
     prospect_live_override: Optional[str] = None  # E.g. prospect says afternoon when doc says morning
 
 
+class MultiTurnScriptRequest(BaseModel):
+    user_id: str = "rep_john"
+    call_id: str = "multiturn_script_001"
+    script_name: Optional[str] = "Canonical 8-Turn Benchmark"
+    prospect_lines: List[str] = Field(default_factory=list)
+    lead_type: Optional[str] = "residential_seller"
+    prospect_type: Optional[str] = None
+    deadline_ms: Optional[float] = 250.0
+    allow_confidential: bool = False
+
+
 # -----------------------------------------------------------------------------
-# Helper: Seed 6 Canonical Dummy Documents
+# Helper: Seed Canonical Dummy Documents (Rep Profile, Sales, Pricing, Policy & Traps)
 # -----------------------------------------------------------------------------
 
 def seed_canonical_dummy_documents(store: KnowledgeStore, user_id: str = "rep_john") -> None:
-    """Seeds the 6 canonical dummy documents from Doc 02 §3, §6, §13."""
+    """Seeds the canonical dummy documents covering profile, past sales, pricing, policy, and traps."""
+    # 0. Salesperson Profile Document
+    store.add_record(
+        KnowledgeRecord(
+            knowledge_id="chunk_salesperson_profile",
+            owner_scope="user",
+            owner_user_id=user_id,
+            knowledge_class=KnowledgeClass.SALESPERSON_PROFILE.value,
+            source_title="Agent John Miller Bio",
+            source_version="1.0",
+            topic_tags=["profile", "experience", "bio", "background", "credentials"],
+            text="John Miller has 12 years of residential real estate experience and is a certified luxury home marketing specialist.",
+            verification_status="company_approved",
+            sensitivity="normal",
+        )
+    )
+
     # 1. Verified Local Track Record (Positive match for Credibility objection)
     store.add_record(
         KnowledgeRecord(
@@ -757,6 +788,324 @@ def get_conditional_retrieval_router(
             },
             "sim_latency_total_ms": total_sim_ms,
             "latency_metrics_p50_p95": shared_engine.get_latency_metrics(),
+        }
+
+    # -------------------------------------------------------------------------
+    # Multi-Turn Script Studio & Regression Testing Endpoints
+    # -------------------------------------------------------------------------
+
+    @router.get("/api/conditional-retrieval/scripts")
+    async def get_benchmark_scripts() -> List[Dict[str, Any]]:
+        """Returns the canonical benchmark multi-turn scripts for regression testing."""
+        return [
+            {
+                "id": "canonical_8_turn",
+                "name": "Canonical 8-Turn Lifecycle (Full Verification & Traps)",
+                "description": "Comprehensive multi-turn benchmark covering Profile, Past Sales, Filler turns, Contradictory Pricing, Cross-rep Leaks, 7-Day Guarantees, Live Schedule Overrides, and Irrelevant Zoning.",
+                "lines": [
+                    "Hi John, thanks for calling. We're thinking about selling.",
+                    "What is your actual sales experience and track record in Westlake?",
+                    "Okay, makes sense. That sounds pretty good.",
+                    "What is your standard commission fee to list our home?",
+                    "Another agent told me Sarah offers a $5,000 cash back rebate. Can you match that?",
+                    "Do you guarantee you can sell it in 7 days? I heard someone claim that.",
+                    "What are your consultation hours? Can we meet tomorrow afternoon at 3:00 PM?",
+                    "How long does the residential home inspection contingency take?",
+                ],
+            },
+            {
+                "id": "pricing_state_continuity_5_turn",
+                "name": "5-Turn Pricing & State Continuity Arc",
+                "description": "Tests contradiction resolution (5% vs 6%) and verifies that state continuity prevents stale data leakage across repeated queries.",
+                "lines": [
+                    "Hello, we got your flyer in the mail.",
+                    "How much do you charge in commissions?",
+                    "I heard standard is 6 percent, why does your card say something different?",
+                    "Got it, that works. What happens next?",
+                    "Wait, remind me again what your commission rate was?",
+                ],
+            },
+            {
+                "id": "speed_filler_4_turn",
+                "name": "4-Turn Speed & Filler Quietness Test",
+                "description": "Verifies that retrieval remains 0ms quiet on non-factual turns and activates instantly when a factual objection occurs.",
+                "lines": [
+                    "Good afternoon.",
+                    "Yeah, okay, makes sense.",
+                    "Wait, how many homes have you actually sold around here?",
+                    "Alright, thanks for confirming.",
+                ],
+            },
+        ]
+
+    @router.post("/api/conditional-retrieval/multi-turn-simulate")
+    async def simulate_multi_turn_script(req: MultiTurnScriptRequest) -> Dict[str, Any]:
+        """Executes a multi-turn prospect script through the real Core and retrieval engine."""
+        core_engine = PitchProXCoreIntelligenceEngine()
+        unresolved_objections: List[ObjectionRecord] = []
+        live_state_facts: Dict[str, Any] = {}
+        recent_turns: List[Dict[str, str]] = []
+        turn_results: List[Dict[str, Any]] = []
+
+        total_sim_start = time.monotonic()
+
+        for turn_idx, raw_line in enumerate(req.prospect_lines, start=1):
+            line = raw_line.strip()
+            if not line:
+                continue
+
+            turn_start = time.monotonic()
+            line_lower = line.lower()
+
+            # Stage detection
+            if any(w in line_lower for w in ("meet", "schedule", "tomorrow", "afternoon", "morning", "hours", "appointment")):
+                stage = ConversationStage.SCHEDULING
+                if "afternoon" in line_lower or "3:00 pm" in line_lower or "3pm" in line_lower:
+                    live_state_facts["scheduling_constraint"] = "prospect requested tomorrow afternoon at 3:00 PM"
+            elif any(w in line_lower for w in ("experience", "fee", "rate", "cost", "commission", "guarantee", "rebate", "zoning", "how many", "track record")):
+                stage = ConversationStage.OBJECTION_HANDLING
+            elif any(w in line_lower for w in ("makes sense", "sounds good", "okay", "got it", "i see", "thanks for calling", "thinking about selling", "good afternoon", "hello")):
+                stage = ConversationStage.DISCOVERY
+                # Resolve active objections on positive filler remarks
+                for obj in unresolved_objections:
+                    if obj.lifecycle_state in (ObjectionLifecycleState.ACTIVE, "active"):
+                        obj.lifecycle_state = ObjectionLifecycleState.RESOLVED
+            else:
+                stage = ConversationStage.DISCOVERY
+
+            # Objection detection & tracking across turns
+            if any(w in line_lower for w in ("experience", "track record", "how many homes", "how long")):
+                unresolved_objections.append(
+                    ObjectionRecord(
+                        objection_id=f"obj_credibility_{turn_idx}",
+                        canonical_category="credibility",
+                        lifecycle_state=ObjectionLifecycleState.ACTIVE,
+                        initial_statement=line,
+                        latest_statement=line,
+                        first_turn_id=turn_idx,
+                        last_updated_turn_id=turn_idx,
+                        recurrence_count=1,
+                        confidence=0.88,
+                    )
+                )
+            elif any(w in line_lower for w in ("commission", "fee", "rate", "what do you charge")):
+                unresolved_objections.append(
+                    ObjectionRecord(
+                        objection_id=f"obj_pricing_{turn_idx}",
+                        canonical_category="commission_fee",
+                        lifecycle_state=ObjectionLifecycleState.ACTIVE,
+                        initial_statement=line,
+                        latest_statement=line,
+                        first_turn_id=turn_idx,
+                        last_updated_turn_id=turn_idx,
+                        recurrence_count=1,
+                        confidence=0.90,
+                    )
+                )
+
+            # Build state snapshot
+            active_objs = [o for o in unresolved_objections if o.lifecycle_state in (ObjectionLifecycleState.ACTIVE, "active")]
+            snapshot = ConversationStateSnapshot(
+                call_sid=req.call_id,
+                call_id=req.call_id,
+                state_version=turn_idx,
+                conversation_stage=stage,
+                decision_structure=DecisionStructure(decision_maker_present=True),
+                unresolved_objections=active_objs,
+                live_state_facts=dict(live_state_facts),
+            )
+
+            # Real Core Intelligence evaluation
+            eval_res = core_engine.evaluate(
+                snapshot,
+                turn_speaker="prospect",
+                turn_text=line,
+                turn_id=turn_idx,
+            )
+            core_dec = eval_res.decision
+            action_val = str(getattr(core_dec.primary_action, "value", core_dec.primary_action)).lower()
+
+            search_candidates_info: List[Dict[str, Any]] = []
+            withheld_info: List[Dict[str, Any]] = []
+            facts_info: List[Dict[str, Any]] = []
+
+            if not core_dec.retrieval_needed:
+                # Fast exit: 0ms vector search
+                gate_status = "none_needed"
+                gate_passed = False
+                gate_reason = "Autonomous Core determined no retrieval needed for this turn (0ms fast exit)"
+                retrieval_result = RetrievalResult(
+                    request_id=f"req_{req.call_id}_{turn_idx}",
+                    status="none_needed",
+                    state_version=turn_idx,
+                    facts=[],
+                    withheld=[],
+                    fallback_hint=None,
+                    latency_ms=0.0,
+                )
+                stage_latencies = {
+                    "gate_evaluation_ms": 0.0,
+                    "candidate_search_ms": 0.0,
+                    "conflict_resolution_ms": 0.0,
+                    "total_ms": 0.0,
+                }
+            else:
+                # Core demands retrieval
+                retrieval_request = RetrievalRequest(
+                    call_id=req.call_id,
+                    state_version=turn_idx,
+                    user_id=req.user_id,
+                    lead_type=req.lead_type,
+                    prospect_type=req.prospect_type,
+                    strategic_action=action_val,
+                    retrieval_need=core_dec.retrieval_need,
+                    conversation_evidence=line,
+                    deadline_ms=req.deadline_ms,
+                    live_state_facts=[{"fact_key": k, "fact_value": v} for k, v in live_state_facts.items()],
+                )
+
+                gate_passed, gate_status, fallback_hint, gate_reason = shared_engine.gate.evaluate(
+                    request=retrieval_request,
+                    knowledge_store=shared_engine.store,
+                )
+
+                if gate_passed:
+                    # Inspect raw candidates
+                    query_terms = f"{core_dec.retrieval_need.need_statement} {' '.join(core_dec.retrieval_need.topic_tags)} {line}"
+                    candidates = shared_engine.store.search_candidates(
+                        query=query_terms,
+                        user_id=req.user_id,
+                        lead_type=req.lead_type,
+                        prospect_type=req.prospect_type,
+                        time_sensitive=core_dec.retrieval_need.time_sensitive,
+                        allow_confidential=req.allow_confidential,
+                        top_k=5,
+                    )
+                    for cand, score, raw_score in candidates:
+                        status_flag = "cleared_floor"
+                        if raw_score < shared_engine.config.relevance_floor:
+                            status_flag = "dropped_below_floor"
+                        elif raw_score < shared_engine.config.marginal_threshold:
+                            status_flag = "marginal_low_confidence"
+
+                        search_candidates_info.append({
+                            "knowledge_id": cand.knowledge_id,
+                            "source_title": cand.source_title,
+                            "text": cand.text,
+                            "raw_score": round(raw_score, 4),
+                            "ranking_score": round(score, 4),
+                            "status_flag": status_flag,
+                        })
+
+                    retrieval_result = shared_engine.retrieve_for_request(
+                        request=retrieval_request,
+                        allow_confidential=req.allow_confidential,
+                    )
+                else:
+                    retrieval_result = RetrievalResult(
+                        request_id=retrieval_request.request_id,
+                        status=gate_status,
+                        state_version=turn_idx,
+                        facts=[],
+                        withheld=[],
+                        fallback_hint=fallback_hint,
+                        latency_ms=0.1,
+                    )
+
+                stage_latencies = retrieval_result.stage_latencies.model_dump() if retrieval_result.stage_latencies else {
+                    "gate_evaluation_ms": 0.0,
+                    "candidate_search_ms": round(retrieval_result.latency_ms, 2),
+                    "conflict_resolution_ms": 0.0,
+                    "total_ms": round(retrieval_result.latency_ms, 2),
+                }
+
+                # Withheld items
+                for w in retrieval_result.withheld:
+                    withheld_info.append(w.model_dump())
+
+                # Facts delivered
+                for f in retrieval_result.facts:
+                    facts_info.append(f.model_dump())
+
+            # 6-Block Context assembly
+            context_str = shared_gateway.assemble_context(
+                decision=core_dec,
+                snapshot=snapshot,
+                retrieval_result=retrieval_result,
+                recent_turns=recent_turns,
+            )
+
+            # Split context into 6 discrete blocks for rich modal inspection
+            blocks_dict = {}
+            if "### BLOCK 1" in context_str:
+                raw_blocks = context_str.split("### BLOCK ")
+                for blk in raw_blocks[1:]:
+                    lines_blk = blk.strip().split("\n", 1)
+                    header = lines_blk[0].strip()
+                    blk_num = header[0]
+                    blocks_dict[f"block_{blk_num}"] = f"### BLOCK {blk.strip()}"
+
+            # Teleprompter prompt generation
+            prompt = shared_gateway.generate_prompt(
+                decision=core_dec,
+                snapshot=snapshot,
+                retrieval_result=retrieval_result,
+                post_generation_state_version=turn_idx,
+                recent_turns=recent_turns,
+            )
+
+            # Hallucination Guardrail Check
+            is_safe, violations = validate_prompt_hallucinations(
+                prompt_text=prompt.text,
+                facts=retrieval_result.facts,
+                prospect_context=recent_turns,
+            )
+
+            turn_latency_ms = round((time.monotonic() - turn_start) * 1000, 2)
+
+            # Append turns to history
+            recent_turns.append({"speaker": "prospect", "text": line})
+            recent_turns.append({"speaker": "salesperson", "text": prompt.text})
+
+            chosen_trigger = "no retrieval needed"
+            if core_dec.retrieval_needed and core_dec.retrieval_need:
+                chosen_trigger = core_dec.retrieval_need.trigger.value
+
+            turn_results.append({
+                "turn_index": turn_idx,
+                "prospect_line": line,
+                "core_action": action_val.upper(),
+                "core_trigger": chosen_trigger,
+                "retrieval_needed": core_dec.retrieval_needed,
+                "gate_result": "proceed" if (core_dec.retrieval_needed and gate_passed) else (gate_status if core_dec.retrieval_needed else "none_needed"),
+                "gate_reason": gate_reason,
+                "candidates": search_candidates_info,
+                "withheld": withheld_info,
+                "facts_delivered": facts_info,
+                "teleprompter_line": prompt.text,
+                "prompt_status": prompt.status,
+                "hallucination_safe": is_safe,
+                "hallucination_violations": violations,
+                "state_version": turn_idx,
+                "latency_ms": turn_latency_ms,
+                "stage_latencies": stage_latencies,
+                "context_assembled": context_str,
+                "context_blocks": blocks_dict,
+            })
+
+        total_sim_ms = round((time.monotonic() - total_sim_start) * 1000, 2)
+
+        return {
+            "status": "success",
+            "script_name": req.script_name,
+            "user_id": req.user_id,
+            "total_turns": len(turn_results),
+            "retrieval_fired_count": sum(1 for t in turn_results if t["retrieval_needed"]),
+            "retrieval_quiet_count": sum(1 for t in turn_results if not t["retrieval_needed"]),
+            "total_violations": sum(len(t["hallucination_violations"]) for t in turn_results),
+            "avg_latency_ms": round(sum(t["latency_ms"] for t in turn_results) / max(1, len(turn_results)), 2),
+            "total_sim_ms": total_sim_ms,
+            "turns": turn_results,
         }
 
     @router.get("/api/conditional-retrieval/latency-metrics")

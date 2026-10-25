@@ -625,7 +625,15 @@ class LLMResponseGateway:
         if facts:
             primary_fact = facts[0]
             f_text = getattr(primary_fact, "text", str(primary_fact))
-            if action in (StrategicAction.QUANTIFY, StrategicAction.EDUCATE, StrategicAction.DIFFERENTIATE, StrategicAction.SOCIAL_PROOF):
+            if action in (
+                StrategicAction.QUANTIFY,
+                StrategicAction.EDUCATE,
+                StrategicAction.DIFFERENTIATE,
+                StrategicAction.SOCIAL_PROOF,
+                StrategicAction.QUESTION,
+                StrategicAction.CLARIFY,
+                StrategicAction.DE_RISK,
+            ):
                 return f_text
 
         if "UNCLASSIFIED_MATERIAL_CONTENT" in reasons:

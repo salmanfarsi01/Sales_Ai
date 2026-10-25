@@ -17,6 +17,8 @@ def test_serve_conditional_retrieval_ui(client):
     assert res.status_code == 200
     assert "PitchProX | Conditional Knowledge Retrieval Test Console" in res.text
     assert "Acceptance Presets:" in res.text
+    assert "Multi-Turn Script Studio" in res.text
+    assert "Multi-Turn Execution Matrix" in res.text
 
     res_alias = client.get("/conditional-retrieval")
     assert res_alias.status_code == 200
@@ -246,4 +248,159 @@ def test_simulate_pipeline_autonomous_core_decision(client):
     assert data["core_decision"]["retrieval_needed"] is True
     assert data["retrieval_result"]["status"] == "retrieved"
     assert "42 homes in Westlake" in data["retrieval_result"]["facts"][0]["text"]
+
+
+def test_get_benchmark_scripts(client):
+    """Verifies that GET /api/conditional-retrieval/scripts returns the 3 canonical benchmark scripts."""
+    res = client.get("/api/conditional-retrieval/scripts")
+    assert res.status_code == 200
+    scripts = res.json()
+    assert len(scripts) >= 3
+    ids = [s["id"] for s in scripts]
+    assert "canonical_8_turn" in ids
+    assert "pricing_state_continuity_5_turn" in ids
+    assert "speed_filler_4_turn" in ids
+
+    c8 = next(s for s in scripts if s["id"] == "canonical_8_turn")
+    assert len(c8["lines"]) == 8
+
+
+def test_multi_turn_simulate_canonical_8_turn(client):
+    """Verifies full execution of the 8-turn benchmark script through the real Core and retrieval engine."""
+    client.post("/api/conditional-retrieval/load-canonical-dummies?user_id=rep_john")
+
+    res_scripts = client.get("/api/conditional-retrieval/scripts")
+    scripts = res_scripts.json()
+    c8 = next(s for s in scripts if s["id"] == "canonical_8_turn")
+
+    req_payload = {
+        "user_id": "rep_john",
+        "call_id": "bench_call_8_turn",
+        "script_name": c8["name"],
+        "prospect_lines": c8["lines"],
+    }
+    res = client.post("/api/conditional-retrieval/multi-turn-simulate", json=req_payload)
+    assert res.status_code == 200
+    data = res.json()
+
+    assert data["status"] == "success"
+    assert data["total_turns"] == 8
+    assert data["total_violations"] == 0
+    turns = data["turns"]
+    assert len(turns) == 8
+
+    # Turn 1: Greeting -> Core decides no retrieval needed (0ms)
+    t1 = turns[0]
+    assert t1["turn_index"] == 1
+    assert t1["retrieval_needed"] is False
+    assert t1["gate_result"] == "none_needed"
+    assert len(t1["facts_delivered"]) == 0
+    assert t1["latency_ms"] >= 0.0
+
+    # Turn 2: Westlake track record -> Core picks credibility_objection -> Retrieves 42 homes
+    t2 = turns[1]
+    assert t2["turn_index"] == 2
+    assert t2["retrieval_needed"] is True
+    assert t2["core_trigger"] == "credibility_objection"
+    assert t2["gate_result"] == "proceed"
+    assert len(t2["facts_delivered"]) == 1
+    assert "42 homes in Westlake" in t2["facts_delivered"][0]["text"]
+    assert t2["hallucination_safe"] is True
+
+    # Turn 3: "Okay, makes sense" -> Core stays quiet (0ms)
+    t3 = turns[2]
+    assert t3["turn_index"] == 3
+    assert t3["retrieval_needed"] is False
+    assert t3["gate_result"] == "none_needed"
+    assert len(t3["facts_delivered"]) == 0
+
+    # Turn 4: Commission fee -> Core picks policy_wording -> Delivers 5%, withholds 6%
+    t4 = turns[3]
+    assert t4["turn_index"] == 4
+    assert t4["retrieval_needed"] is True
+    assert t4["core_trigger"] == "policy_wording"
+    assert len(t4["facts_delivered"]) == 1
+    assert "5.0%" in t4["facts_delivered"][0]["text"]
+    # Verify legacy 6% was withheld
+    withheld_ids = [w["knowledge_id"] for w in t4["withheld"]]
+    assert "chunk_commission_v1" in withheld_ids
+
+    # Turn 5: Sarah rebate trap -> rep_john isolation prevents Sarah's doc from leaking (Constraint C6)
+    t5 = turns[4]
+    assert t5["turn_index"] == 5
+    delivered_ids_t5 = [f["knowledge_id"] for f in t5["facts_delivered"]]
+    assert "chunk_sarah_rebate" not in delivered_ids_t5
+
+    # Turn 6: 7-day guarantee trap -> unverified user_supplied doc is withheld
+    t6 = turns[5]
+    assert t6["turn_index"] == 6
+    delivered_ids_t6 = [f["knowledge_id"] for f in t6["facts_delivered"]]
+    assert "chunk_old_pitch_deck" not in delivered_ids_t6
+
+    # Turn 7: Afternoon 3 PM schedule -> Live prospect constraint overrides stored morning 10 AM doc
+    t7 = turns[6]
+    assert t7["turn_index"] == 7
+    # Verify stored 10 AM morning chunk was withheld due to conflict with live prospect constraint
+    withheld_ids_t7 = [w["knowledge_id"] for w in t7["withheld"]]
+    assert "chunk_stored_schedule" in withheld_ids_t7
+
+    # Turn 8: Commercial warehouse zoning -> Irrelevant doc dropped below 0.35 relevance floor
+    t8 = turns[7]
+    assert t8["turn_index"] == 8
+    delivered_ids_t8 = [f["knowledge_id"] for f in t8["facts_delivered"]]
+    assert "chunk_unrelated_zoning" not in delivered_ids_t8
+
+    # Verify context blocks exist on all turns for modal inspection
+    for t in turns:
+        assert "context_assembled" in t
+        assert "context_blocks" in t
+        assert len(t["context_assembled"]) > 0
+
+
+def test_multi_turn_replay_mutation(client):
+    """Verifies that mutating a seeded document and replaying the script immediately updates the result."""
+    client.post("/api/conditional-retrieval/load-canonical-dummies?user_id=rep_john")
+
+    script_lines = [
+        "Good morning John.",
+        "What is your standard commission fee to list our home?",
+    ]
+    req = {
+        "user_id": "rep_john",
+        "call_id": "replay_test_call",
+        "script_name": "Replay Mutation Test",
+        "prospect_lines": script_lines,
+    }
+
+    # Initial run -> Turn 2 delivers 5.0%
+    res1 = client.post("/api/conditional-retrieval/multi-turn-simulate", json=req)
+    assert res1.status_code == 200
+    t2_run1 = res1.json()["turns"][1]
+    assert "5.0%" in t2_run1["facts_delivered"][0]["text"]
+    assert "5.0%" in t2_run1["teleprompter_line"]
+
+    # Mutate chunk_commission_v2 in live store to 4.25%
+    mutated_doc = {
+        "knowledge_id": "chunk_commission_v2",
+        "owner_user_id": "rep_john",
+        "owner_scope": "user",
+        "knowledge_class": "pricing_packaging",
+        "source_title": "Listing Agreement Schedule 2026 (Special Promotion)",
+        "source_version": "2.1",
+        "topic_tags": ["commission", "fees", "pricing"],
+        "text": "Standard residential listing commission rate is 4.25% of gross purchase price.",
+        "verification_status": "company_approved",
+    }
+    client.post("/api/conditional-retrieval/records", json=mutated_doc)
+
+    # Replay identical script
+    res2 = client.post("/api/conditional-retrieval/multi-turn-simulate", json=req)
+    assert res2.status_code == 200
+    t2_run2 = res2.json()["turns"][1]
+    assert "4.25%" in t2_run2["facts_delivered"][0]["text"]
+    assert "4.25%" in t2_run2["teleprompter_line"]
+
+    # Restore canonical dummies
+    client.post("/api/conditional-retrieval/load-canonical-dummies?user_id=rep_john")
+
 

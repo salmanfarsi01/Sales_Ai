@@ -1460,17 +1460,24 @@ class PitchProXCoreIntelligenceEngine:
             r"\bclosed\s+(?:volume|transactions?|deals?)\b",
             r"\bhow\s+many\s+(?:listings|sales)\b",
             r"\bexperience\s+(?:in|with)\b",
+            r"\bguarantee\b",
+            r"\bpromise\b",
+            r"\bhow\s+fast\b",
+            r"\b7\s+days?\b",
+            r"\bseven\s+days?\b",
         ]
         has_credibility_query = any(re.search(pat, t_lower) for pat in credibility_patterns)
         has_credibility_objection = any(
-            obj.canonical_category in ("credibility_experience", "track_record", "agent_ranking", "credentials", "experience")
+            obj.canonical_category in ("credibility_experience", "track_record", "agent_ranking", "credentials", "experience", "credibility")
             for obj in snapshot.get_unresolved_objections()
         )
 
-        if has_credibility_query or (has_credibility_objection and action_val in ("quantify", "differentiate", "de_risk", "educate")):
+        if has_credibility_query or (has_credibility_objection and action_val in ("quantify", "differentiate", "de_risk", "educate", "question", "clarify")):
             topic_tags = ["experience", "sales", "track_record"]
             if "westlake" in t_lower:
                 topic_tags.insert(0, "westlake")
+            if "guarantee" in t_lower or "7 days" in t_lower:
+                topic_tags.extend(["guarantee", "ranking"])
             decision.retrieval_needed = True
             decision.retrieval_need = RetrievalNeed(
                 trigger=RetrievalTrigger.CREDIBILITY_OBJECTION,
@@ -1492,19 +1499,24 @@ class PitchProXCoreIntelligenceEngine:
             r"\bmarketing\s+plan\b",
             r"\bshowing\s+schedule\b",
             r"\bcancellation\s+clause\b",
+            r"\bconsultation\s+hours\b",
+            r"\bhours\b",
+            r"\bwhen\s+can\s+we\s+meet\b",
+            r"\bappointment\b",
+            r"\bschedule\b",
         ]
         has_process_query = any(re.search(pat, t_lower) for pat in process_patterns)
         has_process_objection = any(
-            obj.canonical_category in ("process", "timeline", "inspection", "service_process", "contract_terms")
+            obj.canonical_category in ("process", "timeline", "inspection", "service_process", "contract_terms", "scheduling")
             for obj in snapshot.get_unresolved_objections()
         )
 
-        if has_process_query or (has_process_objection and action_val in ("educate", "clarify", "quantify")):
+        if has_process_query or (has_process_objection and action_val in ("educate", "clarify", "quantify", "question", "acknowledge")):
             decision.retrieval_needed = True
             decision.retrieval_need = RetrievalNeed(
                 trigger=RetrievalTrigger.SERVICE_PROCESS_OBJECTION,
                 need_statement=f"Verified service process and timeline facts to support {action_val.upper()}",
-                topic_tags=["process", "timeline", "inspection", "contingency"],
+                topic_tags=["process", "timeline", "inspection", "contingency", "schedule"],
             )
             decision.required_facts = [
                 RequiredFactScope(topic="service_process", required_evidence_type="policy")
@@ -1527,7 +1539,7 @@ class PitchProXCoreIntelligenceEngine:
             for obj in snapshot.get_unresolved_objections()
         )
 
-        if has_pricing_query or (has_pricing_objection and action_val in ("educate", "quantify", "differentiate", "reframe")):
+        if has_pricing_query or (has_pricing_objection and action_val in ("educate", "quantify", "differentiate", "reframe", "question", "clarify")):
             decision.retrieval_needed = True
             decision.retrieval_need = RetrievalNeed(
                 trigger=RetrievalTrigger.POLICY_WORDING,
@@ -1583,16 +1595,21 @@ class PitchProXCoreIntelligenceEngine:
             ]
             return
 
-        # 7. Check for Direct Factual Inquiry on Informational Actions
-        if action_val in ("educate", "quantify") and (
-            "?" in turn_text or any(t_lower.startswith(w) for w in ("what", "how", "where", "when", "which", "can you check", "tell me about"))
+        # 7. Check for Direct Factual Inquiry on Informational Actions or specific out-of-domain terms
+        filler_tokens = ("makes sense", "sounds good", "okay", "got it", "i see", "thanks for calling", "thinking about selling", "good afternoon", "hello")
+        is_filler = any(t_lower == f or t_lower.startswith(f + ".") or t_lower.startswith(f + ",") for f in filler_tokens)
+        if not is_filler and (
+            action_val in ("educate", "quantify", "clarify", "question") and (
+                "?" in turn_text or any(t_lower.startswith(w) for w in ("what", "how", "where", "when", "which", "can you check", "tell me about", "can you tell"))
+                or any(w in t_lower for w in ("zoning", "industrial", "warehouse", "commercial", "school", "taxes"))
+            )
         ):
             clean_sub = t_lower[:60]
             decision.retrieval_needed = True
             decision.retrieval_need = RetrievalNeed(
                 trigger=RetrievalTrigger.FACTUAL_QUESTION,
                 need_statement=f"Verified business facts for prospect inquiry: {clean_sub}",
-                topic_tags=["factual", "information"],
+                topic_tags=["factual", "information", "market"],
             )
             decision.required_facts = [
                 RequiredFactScope(topic="factual", required_evidence_type="data")
