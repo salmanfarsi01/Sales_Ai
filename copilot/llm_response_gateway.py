@@ -227,6 +227,7 @@ class Prompt(BaseModel):
     expires_at: Optional[str] = None
     max_prompt_words: int = 24
     confidence: float = 1.0
+    generation_source: Optional[str] = "deterministic"
 
 
 class LLMResponseGateway:
@@ -240,7 +241,18 @@ class LLMResponseGateway:
     ):
         self.llm_client = llm_client
         self.generator_func = generator_func
-        self.model_name = model_name or os.getenv("GROQ_MODEL", "llama-3.1-8b-instant")
+        # Lazily initialize Groq client if available and no client provided
+        if self.llm_client is None:
+            groq_key = os.getenv("GROQ_API_KEY")
+            if groq_key and not groq_key.startswith("mock"):
+                try:
+                    import groq
+                    self.llm_client = groq.Groq(api_key=groq_key, timeout=5.0)
+                except Exception as exc:
+                    LOGGER.debug("Could not initialize Groq client: %s", exc)
+        self.model_name = model_name or os.getenv("GROQ_MODEL", "qwen/qwen3.8-27b")
+        if self.model_name == "llama-3.1-8b-instant":
+            self.model_name = "qwen/qwen3.8-27b"
 
     def assemble_context(
         self,
@@ -467,6 +479,7 @@ class LLMResponseGateway:
         recent_turns: Optional[List[Dict[str, str]]] = None,
         retrieval_result: Optional[RetrievalResult] = None,
         post_generation_state_version: Optional[int] = None,
+        use_llm: bool = False,
     ) -> Prompt:
         """Executes LLM language construction adhering to the strategic decision contract."""
         working_decision = decision
@@ -509,6 +522,7 @@ class LLMResponseGateway:
                 max_prompt_words=working_decision.max_prompt_words,
                 confidence=working_decision.confidence,
                 status="skipped",
+                generation_source="skipped",
             )
 
         context = self.assemble_context(
@@ -519,10 +533,17 @@ class LLMResponseGateway:
             retrieval_result=retrieval_result,
         )
 
-        if self.generator_func:
-            raw_text = self.generator_func(context, working_decision.max_prompt_words)
+        gen_source = "deterministic"
+        if use_llm and (self.generator_func or (self.llm_client and hasattr(self.llm_client, "chat"))):
+            if self.generator_func:
+                raw_text = self.generator_func(context, working_decision.max_prompt_words)
+                gen_source = "generator_func"
+            else:
+                raw_text, used_llm = self._call_llm(context, working_decision, snapshot=snapshot, facts=facts)
+                gen_source = "llm" if used_llm else "deterministic"
         else:
-            raw_text = self._call_llm(context, working_decision, snapshot=snapshot, facts=facts)
+            raw_text = self._deterministic_fallback(working_decision, snapshot=snapshot, facts=facts)
+            gen_source = "deterministic"
 
         cleaned_text = self._clean_and_truncate(raw_text, working_decision.max_prompt_words)
 
@@ -532,6 +553,7 @@ class LLMResponseGateway:
             LOGGER.warning("Prompt injection instruction ('%s') detected in generated output; neutralizing with fallback.", inj_pattern)
             cleaned_text = self._deterministic_fallback(working_decision, snapshot=snapshot, facts=facts)
             cleaned_text = self._clean_and_truncate(cleaned_text, working_decision.max_prompt_words)
+            gen_source = "neutralized_fallback"
 
         # Post-generation Hallucination Guardrail Check (Doc 02 §9)
         prospect_ctx = recent_turns or (snapshot.conversation_evidence if hasattr(snapshot, "conversation_evidence") else None)
@@ -543,10 +565,9 @@ class LLMResponseGateway:
             )
             cleaned_text = self._deterministic_fallback(working_decision, snapshot=snapshot, facts=facts)
             cleaned_text = self._clean_and_truncate(cleaned_text, working_decision.max_prompt_words)
+            gen_source = "guardrail_fallback"
 
         # Checkpoint: Stale discard right before teleprompter delivery (Doc 01 §13 & Item 8)
-        # If conversation state advanced while LLM was formulating the response (post_generation_state_version != snapshot.state_version),
-        # discard the response immediately to prevent uttering an obsolete line.
         effective_post_version = post_generation_state_version if post_generation_state_version is not None else snapshot.state_version
         if effective_post_version != snapshot.state_version:
             LOGGER.warning(
@@ -563,6 +584,7 @@ class LLMResponseGateway:
                 max_prompt_words=working_decision.max_prompt_words,
                 confidence=working_decision.confidence,
                 status="stale_discarded",
+                generation_source=gen_source,
             )
 
         return Prompt(
@@ -573,6 +595,7 @@ class LLMResponseGateway:
             strategic_objective=working_decision.strategic_objective,
             max_prompt_words=working_decision.max_prompt_words,
             confidence=working_decision.confidence,
+            generation_source=gen_source,
         )
 
     def _call_llm(
@@ -581,25 +604,38 @@ class LLMResponseGateway:
         decision: StrategicDecision,
         snapshot: Optional[ConversationStateSnapshot] = None,
         facts: Optional[List[Any]] = None,
-    ) -> str:
+    ) -> Tuple[str, bool]:
         # If client is configured and not mock, execute real LLM call
         if self.llm_client and hasattr(self.llm_client, "chat"):
             try:
+                model = self.model_name
+                if model == "llama-3.1-8b-instant":
+                    model = "qwen/qwen3.8-27b"
                 response = self.llm_client.chat.completions.create(
-                    model=self.model_name,
+                    model=model,
                     messages=[
-                        {"role": "system", "content": "You are PitchProX Teleprompter Engine. Output only the exact sentence to speak."},
+                        {
+                            "role": "system",
+                            "content": (
+                                "You are PitchProX Spoken Teleprompter Assistant. "
+                                "Formulate a single, direct, natural spoken sentence for the salesperson to say right now. "
+                                "CRITICAL CONSTRAINT: You must strictly ground any facts, percentages, numbers, or terms ONLY in the provided verified facts in Block 3. "
+                                "Never fabricate or exaggerate. Output ONLY the exact sentence to speak."
+                            ),
+                        },
                         {"role": "user", "content": context},
                     ],
                     temperature=0.2,
                     max_tokens=60,
                 )
-                return response.choices[0].message.content.strip()
+                content = response.choices[0].message.content
+                if content and content.strip():
+                    return content.strip().strip('"'), True
             except Exception as e:
                 LOGGER.warning("LLM call failed, falling back to deterministic formulation: %s", e)
 
         # Fallback deterministic formulation matching the strategic action
-        return self._deterministic_fallback(decision, snapshot=snapshot, facts=facts)
+        return self._deterministic_fallback(decision, snapshot=snapshot, facts=facts), False
 
     def _deterministic_fallback(
         self,

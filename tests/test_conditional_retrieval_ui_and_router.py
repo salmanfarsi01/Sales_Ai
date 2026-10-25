@@ -404,3 +404,67 @@ def test_multi_turn_replay_mutation(client):
     client.post("/api/conditional-retrieval/load-canonical-dummies?user_id=rep_john")
 
 
+def test_upload_file_endpoint(client):
+    """Verifies that uploading a document file extracts text and indexes discrete chunks."""
+    doc_content = (
+        "Westlake Premium Escrow Guarantee.\n\n"
+        "All Westlake transactions close within 14 business days with zero escrow cancellation fees.\n\n"
+        "Contact the Westlake regional director for emergency wire transfers."
+    )
+    files = {
+        "file": ("escrow_policy.txt", doc_content.encode("utf-8"), "text/plain")
+    }
+    data = {
+        "user_id": "rep_john",
+        "knowledge_class": "product_specs",
+        "verification_status": "company_approved",
+        "topic_tags": "escrow, guarantee, westlake",
+        "source_title": "Westlake Escrow Policy Doc",
+    }
+    res = client.post("/api/conditional-retrieval/upload-file", files=files, data=data)
+    assert res.status_code == 200
+    res_data = res.json()
+    assert res_data["success"] is True
+    assert res_data["chunks_created"] >= 2
+    assert "escrow_policy.txt" in res_data["file_name"]
+
+    # Verify chunks are now listed in user records
+    list_res = client.get("/api/conditional-retrieval/records?user_id=rep_john")
+    assert list_res.status_code == 200
+    records = list_res.json()["records"]
+    matching = [r for r in records if "Westlake Premium Escrow" in r["text"]]
+    assert len(matching) > 0
+
+
+def test_timing_precision_and_context_blocks(client):
+    """Verifies that latencies are strictly > 0 ms and all 6 context blocks are populated."""
+    client.post("/api/conditional-retrieval/load-canonical-dummies?user_id=rep_john")
+    req = {
+        "user_id": "rep_john",
+        "call_id": "timing_test_call",
+        "script_name": "Timing Precision Test",
+        "prospect_lines": ["What is your standard commission fee to list our home?"],
+        "use_real_llm": False,
+    }
+    res = client.post("/api/conditional-retrieval/multi-turn-simulate", json=req)
+    assert res.status_code == 200
+    turn = res.json()["turns"][0]
+
+    # Verify timing precision is > 0 ms
+    assert turn["latency_ms"] > 0.0, f"Turn latency was {turn['latency_ms']} ms"
+
+    # Verify all 6 context blocks are present with non-empty descriptions/content
+    blocks = turn["context_blocks"]
+    assert "block_1" in blocks or "block_1_operational_mode" in blocks
+    assert "block_2" in blocks or "block_2_strategic_intent" in blocks
+    assert "block_3" in blocks or "block_3_live_evidence" in blocks
+    assert "block_4" in blocks or "block_4_verified_facts" in blocks
+    assert "block_5" in blocks or "block_5_boundary_constraints" in blocks
+    assert "block_6" in blocks or "block_6_response_format" in blocks
+
+    # Verify teleprompter source badge field
+    assert "teleprompter_source" in turn
+    assert turn["teleprompter_source"] == "deterministic"
+
+
+

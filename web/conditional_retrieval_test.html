@@ -9,28 +9,45 @@
   <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
   <style>
     :root {
-      --bg-dark: #070d18;
-      --card-bg: #0d172b;
-      --card-border: #1a2948;
-      --card-hover: #162442;
-      --accent-green: #10b981;
-      --accent-green-glow: rgba(16, 185, 129, 0.2);
-      --accent-blue: #38bdf8;
-      --accent-blue-glow: rgba(56, 189, 248, 0.2);
-      --accent-purple: #818cf8;
-      --accent-amber: #f59e0b;
-      --accent-red: #ef4444;
-      --accent-red-glow: rgba(239, 68, 68, 0.2);
-      --text-main: #f8fafc;
-      --text-muted: #94a3b8;
+      --bg: #f8fafc;
+      --surface: #ffffff;
+      --surface-card: #ffffff;
+      --surface-hover: #f1f5f9;
+      --border: #e2e8f0;
+      --border-subtle: #f1f5f9;
+      --border-focus: #0d9488;
+      --text: #0f172a;
+      --text-muted: #475569;
       --text-dim: #64748b;
+      --accent: #0d9488;
+      --accent-hover: #0f766e;
+      --accent-dim: #f0fdfa;
+      --accent-border: #99f6e4;
+      --blue: #2563eb;
+      --blue-dim: #eff6ff;
+      --blue-border: #bfdbfe;
+      --green: #059669;
+      --green-dim: #ecfdf5;
+      --green-border: #a7f3d0;
+      --amber: #b45309;
+      --amber-dim: #fffbeb;
+      --amber-border: #fde68a;
+      --red: #b91c1c;
+      --red-dim: #fef2f2;
+      --red-border: #fecaca;
+      --purple: #6d28d9;
+      --purple-dim: #f5f3ff;
+      --purple-border: #ddd6fe;
+      --shadow-sm: 0 1px 2px 0 rgba(0, 0, 0, 0.05);
+      --shadow-md: 0 4px 6px -1px rgba(0, 0, 0, 0.06), 0 2px 4px -1px rgba(0, 0, 0, 0.03);
+      --radius: 10px;
     }
 
     * { box-sizing: border-box; }
     body {
       margin: 0;
-      background: var(--bg-dark);
-      color: var(--text-main);
+      background: var(--bg);
+      color: var(--text);
       font-family: 'Plus Jakarta Sans', system-ui, sans-serif;
       -webkit-font-smoothing: antialiased;
       min-height: 100vh;
@@ -40,10 +57,9 @@
 
     /* Top Navbar */
     .navbar {
-      background: rgba(13, 23, 43, 0.9);
-      backdrop-filter: blur(12px);
-      border-bottom: 1px solid var(--card-border);
-      padding: 12px 24px;
+      background: var(--surface);
+      border-bottom: 1px solid var(--border);
+      padding: 14px 28px;
       display: flex;
       justify-content: space-between;
       align-items: center;
@@ -53,23 +69,23 @@
     }
     .brand-group { display: flex; align-items: center; gap: 14px; }
     .brand-badge {
-      background: linear-gradient(135deg, #10b981, #059669);
+      background: var(--accent);
       color: #fff;
       font-weight: 800;
       font-size: 13px;
-      padding: 4px 10px;
+      padding: 5px 12px;
       border-radius: 6px;
       letter-spacing: 0.05em;
     }
-    .brand-title { font-size: 16px; font-weight: 700; color: #fff; }
-    .brand-sub { font-size: 12px; color: var(--text-muted); }
+    .brand-title { font-size: 16px; font-weight: 700; color: var(--text); }
+    .brand-sub { font-size: 12px; color: var(--text-dim); }
 
     .nav-actions { display: flex; align-items: center; gap: 12px; }
     .user-pill {
-      background: rgba(30, 41, 59, 0.8);
-      border: 1px solid var(--card-border);
+      background: var(--surface-hover);
+      border: 1px solid var(--border);
       border-radius: 20px;
-      padding: 4px 14px;
+      padding: 5px 14px;
       display: flex;
       align-items: center;
       gap: 8px;
@@ -79,16 +95,18 @@
     .user-pill select {
       background: transparent;
       border: none;
-      color: var(--accent-blue);
-      font-weight: 600;
+      color: var(--accent);
+      font-weight: 700;
       outline: none;
       cursor: pointer;
     }
+
+    /* Buttons */
     .btn {
-      background: #1e293b;
-      border: 1px solid var(--card-border);
-      color: var(--text-main);
-      padding: 7px 14px;
+      background: var(--surface);
+      border: 1px solid var(--border);
+      color: var(--text-muted);
+      padding: 8px 16px;
       border-radius: 8px;
       font-size: 13px;
       font-weight: 600;
@@ -98,119 +116,110 @@
       gap: 6px;
       transition: all 0.15s ease;
     }
-    .btn:hover { background: var(--card-hover); border-color: var(--accent-blue); }
+    .btn:hover {
+      background: var(--surface-hover);
+      color: var(--text);
+      border-color: #cbd5e1;
+    }
     .btn-primary {
-      background: linear-gradient(135deg, #0284c7, #2563eb);
-      border: none;
+      background: var(--accent);
+      border: 1px solid var(--accent-hover);
       color: #fff;
-      box-shadow: 0 4px 12px rgba(37, 99, 235, 0.3);
+      box-shadow: 0 1px 3px rgba(13, 148, 136, 0.2);
     }
     .btn-primary:hover {
-      background: linear-gradient(135deg, #0369a1, #1d4ed8);
-      box-shadow: 0 4px 16px rgba(37, 99, 235, 0.5);
+      background: var(--accent-hover);
+      color: #fff;
     }
     .btn-success {
-      background: linear-gradient(135deg, #059669, #10b981);
-      border: none;
+      background: var(--green);
+      border: 1px solid #047857;
+      color: #fff;
+    }
+    .btn-success:hover {
+      background: #047857;
       color: #fff;
     }
     .btn-danger {
-      background: rgba(239, 68, 68, 0.15);
-      border: 1px solid rgba(239, 68, 68, 0.3);
-      color: #fca5a5;
+      background: var(--red-dim);
+      border: 1px solid var(--red-border);
+      color: var(--red);
     }
-    .btn-danger:hover { background: rgba(239, 68, 68, 0.3); }
+    .btn-danger:hover {
+      background: #fee2e2;
+    }
 
-    /* Presets Strip */
-    .presets-bar {
-      background: #091122;
-      border-bottom: 1px solid var(--card-border);
-      padding: 10px 24px;
+    /* Top Mode Navigation Bar */
+    .mode-nav {
+      background: var(--surface);
+      border-bottom: 1px solid var(--border);
+      padding: 0 28px;
       display: flex;
-      align-items: center;
-      gap: 12px;
+      gap: 8px;
       overflow-x: auto;
+    }
+    .mode-btn {
+      background: transparent;
+      border: none;
+      border-bottom: 2px solid transparent;
+      color: var(--text-muted);
+      padding: 12px 16px;
+      font-size: 13px;
+      font-weight: 600;
+      cursor: pointer;
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      transition: all 0.15s ease;
       white-space: nowrap;
     }
-    .presets-label {
-      font-size: 11px;
-      text-transform: uppercase;
+    .mode-btn:hover {
+      color: var(--accent);
+    }
+    .mode-btn.active {
+      color: var(--accent);
+      border-bottom-color: var(--accent);
       font-weight: 700;
-      color: var(--text-dim);
-      letter-spacing: 0.05em;
-      flex-shrink: 0;
-    }
-    .preset-chip {
-      background: #111e38;
-      border: 1px solid #1e293b;
-      color: var(--text-muted);
-      padding: 5px 12px;
-      border-radius: 16px;
-      font-size: 12px;
-      font-weight: 500;
-      cursor: pointer;
-      transition: all 0.15s ease;
-      flex-shrink: 0;
-    }
-    .preset-chip:hover, .preset-chip.active {
-      background: rgba(56, 189, 248, 0.15);
-      border-color: var(--accent-blue);
-      color: #fff;
-    }
-    .preset-chip.active {
-      box-shadow: 0 0 10px rgba(56, 189, 248, 0.25);
     }
 
-    /* Scenario Description Banner */
-    .scenario-banner {
-      background: rgba(15, 23, 42, 0.7);
-      border-bottom: 1px solid var(--card-border);
-      padding: 10px 24px;
-      display: flex;
-      justify-content: space-between;
-      align-items: center;
-      font-size: 13px;
-    }
-    .scenario-banner b { color: var(--accent-blue); }
-    .scenario-banner span { color: var(--text-muted); }
-
-    /* Main Layout */
-    .layout-grid {
-      display: grid;
-      grid-template-columns: 460px 1fr;
-      gap: 20px;
-      padding: 20px 24px;
+    /* Container Views */
+    .view-content {
+      display: none;
+      padding: 24px 28px;
       flex: 1;
+    }
+    .view-content.active {
+      display: block;
     }
 
     /* Card Panels */
     .panel {
-      background: var(--card-bg);
-      border: 1px solid var(--card-border);
-      border-radius: 12px;
-      padding: 18px;
-      margin-bottom: 16px;
+      background: var(--surface-card);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      padding: 20px;
+      margin-bottom: 20px;
+      box-shadow: var(--shadow-sm);
     }
     .panel-header {
       display: flex;
       justify-content: space-between;
       align-items: center;
-      margin-bottom: 14px;
-      padding-bottom: 10px;
-      border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+      margin-bottom: 16px;
+      padding-bottom: 12px;
+      border-bottom: 1px solid var(--border);
     }
     .panel-header h3 {
       margin: 0;
-      font-size: 14px;
+      font-size: 15px;
       font-weight: 700;
-      letter-spacing: 0.02em;
-      color: #fff;
+      color: var(--text);
       display: flex;
       align-items: center;
       gap: 8px;
     }
 
-    /* Form Controls */
+    /* Forms */
     .form-group { margin-bottom: 14px; }
     .form-group label {
       display: block;
@@ -221,237 +230,222 @@
     }
     .form-control, .form-select, textarea {
       width: 100%;
-      background: #091122;
-      border: 1px solid var(--card-border);
+      background: #ffffff;
+      border: 1px solid #cbd5e1;
       border-radius: 8px;
-      padding: 8px 12px;
-      color: #fff;
+      padding: 9px 12px;
+      color: var(--text);
       font-family: inherit;
       font-size: 13px;
       outline: none;
-      transition: border-color 0.15s ease;
+      transition: border-color 0.15s ease, box-shadow 0.15s ease;
     }
     .form-control:focus, .form-select:focus, textarea:focus {
-      border-color: var(--accent-blue);
-      box-shadow: 0 0 0 2px rgba(56, 189, 248, 0.2);
+      border-color: var(--accent);
+      box-shadow: 0 0 0 3px var(--accent-dim);
     }
     textarea { resize: vertical; min-height: 70px; }
+
+    .form-row {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 16px;
+    }
 
     .quick-chips {
       display: flex;
       gap: 6px;
       flex-wrap: wrap;
-      margin-top: 6px;
+      margin-top: 8px;
     }
     .quick-chip {
-      background: rgba(255, 255, 255, 0.04);
-      border: 1px solid rgba(255, 255, 255, 0.08);
-      border-radius: 4px;
+      background: var(--surface-hover);
+      border: 1px solid var(--border);
+      border-radius: 6px;
       font-size: 11px;
-      padding: 3px 7px;
+      padding: 4px 10px;
       color: var(--text-muted);
       cursor: pointer;
+      font-weight: 500;
+      transition: all 0.15s ease;
     }
     .quick-chip:hover {
-      background: rgba(56, 189, 248, 0.1);
-      color: var(--accent-blue);
-      border-color: var(--accent-blue);
+      background: var(--accent-dim);
+      color: var(--accent);
+      border-color: var(--accent-border);
     }
 
-    .form-row {
-      display: grid;
-      grid-template-columns: 1fr 1fr;
-      gap: 12px;
-    }
-
+    /* Toggles */
     .toggle-row {
       display: flex;
       align-items: center;
       justify-content: space-between;
       padding: 8px 0;
-      border-bottom: 1px solid rgba(255, 255, 255, 0.04);
+      border-bottom: 1px solid var(--border-subtle);
       font-size: 12px;
     }
     .toggle-switch {
       position: relative;
       display: inline-block;
-      width: 36px;
-      height: 20px;
+      width: 38px;
+      height: 22px;
     }
     .toggle-switch input { opacity: 0; width: 0; height: 0; }
     .slider {
       position: absolute;
       cursor: pointer;
       top: 0; left: 0; right: 0; bottom: 0;
-      background-color: #1e293b;
+      background-color: #cbd5e1;
       transition: .2s;
       border-radius: 20px;
     }
     .slider:before {
       position: absolute;
       content: "";
-      height: 14px;
-      width: 14px;
+      height: 16px;
+      width: 16px;
       left: 3px;
       bottom: 3px;
       background-color: white;
       transition: .2s;
       border-radius: 50%;
     }
-    input:checked + .slider { background-color: var(--accent-blue); }
+    input:checked + .slider { background-color: var(--accent); }
     input:checked + .slider:before { transform: translateX(16px); }
 
-    /* Results Header Bar */
+    /* File Drop Area */
+    .file-drop-area {
+      border: 2px dashed #cbd5e1;
+      border-radius: 8px;
+      padding: 20px;
+      text-align: center;
+      background: #f8fafc;
+      cursor: pointer;
+      transition: all 0.15s ease;
+    }
+    .file-drop-area:hover {
+      border-color: var(--accent);
+      background: var(--accent-dim);
+    }
+
+    /* Results Header / Hero Strip */
     .results-hero {
-      background: #0d172b;
-      border: 1px solid var(--card-border);
-      border-radius: 12px;
+      background: #ffffff;
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
       padding: 16px 20px;
       display: flex;
       justify-content: space-between;
       align-items: center;
-      margin-bottom: 16px;
+      margin-bottom: 18px;
+      box-shadow: var(--shadow-sm);
     }
     .status-badge-lg {
       display: inline-flex;
       align-items: center;
-      gap: 8px;
-      padding: 6px 16px;
-      border-radius: 8px;
-      font-size: 14px;
-      font-weight: 800;
-      letter-spacing: 0.04em;
+      padding: 6px 14px;
+      border-radius: 6px;
+      font-size: 13px;
+      font-weight: 700;
+      letter-spacing: 0.02em;
     }
     .badge-retrieved {
-      background: rgba(16, 185, 129, 0.15);
-      border: 1px solid var(--accent-green);
-      color: #34d399;
+      background: var(--green-dim);
+      border: 1px solid var(--green-border);
+      color: var(--green);
     }
     .badge-none_needed {
-      background: rgba(56, 189, 248, 0.15);
-      border: 1px solid var(--accent-blue);
-      color: var(--accent-blue);
+      background: var(--blue-dim);
+      border: 1px solid var(--blue-border);
+      color: var(--blue);
     }
     .badge-none_found {
-      background: rgba(245, 158, 11, 0.15);
-      border: 1px solid var(--accent-amber);
-      color: #fbbf24;
+      background: var(--amber-dim);
+      border: 1px solid var(--amber-border);
+      color: var(--amber);
     }
     .badge-stale_discarded, .badge-conflict_unresolved, .badge-timed_out, .badge-error {
-      background: rgba(239, 68, 68, 0.15);
-      border: 1px solid var(--accent-red);
-      color: #f87171;
+      background: var(--red-dim);
+      border: 1px solid var(--red-border);
+      color: var(--red);
     }
 
-    .metric-pills { display: flex; gap: 10px; }
+    .metric-pills { display: flex; gap: 8px; flex-wrap: wrap; }
     .metric-pill {
-      background: #091122;
-      border: 1px solid var(--card-border);
-      border-radius: 8px;
+      background: var(--surface-hover);
+      border: 1px solid var(--border);
+      border-radius: 6px;
       padding: 6px 12px;
       font-size: 12px;
       color: var(--text-muted);
     }
-    .metric-pill b { color: #fff; font-family: 'JetBrains Mono', monospace; }
-
-    /* Tab Controls */
-    .tabs-nav {
-      display: flex;
-      gap: 6px;
-      border-bottom: 1px solid var(--card-border);
-      margin-bottom: 16px;
-    }
-    .tab-btn {
-      background: transparent;
-      border: none;
-      border-bottom: 2px solid transparent;
-      padding: 10px 16px;
-      color: var(--text-muted);
-      font-size: 13px;
-      font-weight: 600;
-      cursor: pointer;
-      transition: all 0.15s ease;
-    }
-    .tab-btn:hover { color: #fff; }
-    .tab-btn.active {
-      color: var(--accent-blue);
-      border-bottom-color: var(--accent-blue);
-    }
-
-    /* Tab Contents */
-    .tab-content { display: none; }
-    .tab-content.active { display: block; }
-
-    /* Pipeline Step Cards */
-    .step-card {
-      background: #091122;
-      border: 1px solid var(--card-border);
-      border-radius: 8px;
-      padding: 14px;
-      margin-bottom: 12px;
-    }
-    .step-title {
-      font-size: 13px;
-      font-weight: 700;
-      color: #fff;
-      display: flex;
-      justify-content: space-between;
-      margin-bottom: 8px;
-    }
+    .metric-pill b { color: var(--text); }
 
     /* Tables */
     .custom-table {
       width: 100%;
-      border-collapse: collapse;
-      font-size: 12px;
-      margin-top: 8px;
+      border-collapse: separate;
+      border-spacing: 0;
+      font-size: 12.5px;
     }
     .custom-table th {
-      text-align: left;
-      padding: 8px 10px;
-      background: #0d172b;
+      background: #f8fafc;
       color: var(--text-muted);
-      border-bottom: 1px solid var(--card-border);
-    }
-    .custom-table td {
-      padding: 8px 10px;
-      border-bottom: 1px solid rgba(255, 255, 255, 0.04);
-      color: #e2e8f0;
-    }
-    .table-badge {
-      padding: 2px 6px;
-      border-radius: 4px;
-      font-size: 10px;
       font-weight: 700;
       text-transform: uppercase;
+      font-size: 11px;
+      letter-spacing: 0.05em;
+      padding: 10px 14px;
+      border-bottom: 1px solid var(--border);
+      text-align: left;
+    }
+    .custom-table td {
+      padding: 12px 14px;
+      border-bottom: 1px solid var(--border);
+      color: var(--text);
+      vertical-align: middle;
+      background: #ffffff;
+    }
+    .custom-table tr:hover td {
+      background: #f8fafc;
+    }
+    .table-clickable-row {
+      cursor: pointer;
+    }
+    .table-clickable-row:hover td {
+      background: #f1f5f9 !important;
+    }
+    .table-changed-row td {
+      background: #f0fdf4 !important;
+      border-left: 3px solid var(--green);
     }
 
-    /* Teleprompter Box */
-    .teleprompter-card {
-      background: #040812;
-      border: 1px solid #1e3a5f;
-      border-radius: 12px;
-      padding: 20px;
-      box-shadow: inset 0 0 20px rgba(0,0,0,0.5);
+    /* Badges */
+    .table-badge, .badge-pill {
+      display: inline-flex;
+      align-items: center;
+      padding: 3px 8px;
+      border-radius: 6px;
+      font-size: 11px;
+      font-weight: 600;
+      white-space: nowrap;
     }
-    .teleprompter-text {
-      font-size: 16px;
-      line-height: 1.6;
-      color: #f8fafc;
-      font-weight: 500;
-      white-space: pre-wrap;
-    }
+    .badge-green { background: var(--green-dim); color: var(--green); border: 1px solid var(--green-border); }
+    .badge-blue { background: var(--blue-dim); color: var(--blue); border: 1px solid var(--blue-border); }
+    .badge-yellow { background: var(--amber-dim); color: var(--amber); border: 1px solid var(--amber-border); }
+    .badge-red { background: var(--red-dim); color: var(--red); border: 1px solid var(--red-border); }
+    .badge-purple { background: var(--purple-dim); color: var(--purple); border: 1px solid var(--purple-border); }
 
-    /* Code & Context Blocks */
+    /* Code View */
     .code-view {
-      background: #040812;
-      border: 1px solid var(--card-border);
+      background: #f8fafc;
+      border: 1px solid var(--border);
       border-radius: 8px;
       padding: 14px;
       font-family: 'JetBrains Mono', monospace;
       font-size: 12px;
-      color: #93c5fd;
-      line-height: 1.5;
+      color: #1e293b;
+      line-height: 1.55;
       max-height: 480px;
       overflow-y: auto;
       white-space: pre-wrap;
@@ -462,52 +456,94 @@
       display: none;
       position: fixed;
       top: 0; left: 0; right: 0; bottom: 0;
-      background: rgba(0, 0, 0, 0.7);
+      background: rgba(15, 23, 42, 0.4);
       backdrop-filter: blur(4px);
       z-index: 200;
       align-items: center;
       justify-content: center;
     }
     .modal-box {
-      background: var(--card-bg);
-      border: 1px solid var(--card-border);
-      border-radius: 12px;
-      width: 580px;
-      max-width: 90vw;
+      background: #ffffff;
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      width: 600px;
+      max-width: 92vw;
       padding: 24px;
-      box-shadow: 0 10px 30px rgba(0,0,0,0.6);
+      box-shadow: 0 20px 25px -5px rgba(0, 0, 0, 0.1), 0 8px 10px -6px rgba(0, 0, 0, 0.1);
     }
     .modal-box-large {
-      width: 940px;
+      width: 960px;
       max-width: 95vw;
-      max-height: 88vh;
+      max-height: 90vh;
       display: flex;
       flex-direction: column;
     }
     .modal-tab-content { display: none; }
     .modal-tab-content.active { display: block; }
-    .table-clickable-row {
+
+    /* Presets Strip */
+    .presets-bar {
+      background: #ffffff;
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      padding: 12px 16px;
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      overflow-x: auto;
+      white-space: nowrap;
+      margin-bottom: 16px;
+    }
+    .presets-label {
+      font-size: 11px;
+      text-transform: uppercase;
+      font-weight: 700;
+      color: var(--text-dim);
+      letter-spacing: 0.05em;
+      flex-shrink: 0;
+    }
+    .preset-chip {
+      background: var(--surface-hover);
+      border: 1px solid var(--border);
+      color: var(--text-muted);
+      padding: 6px 12px;
+      border-radius: 6px;
+      font-size: 12px;
+      font-weight: 600;
       cursor: pointer;
-      transition: background 0.15s ease;
+      transition: all 0.15s ease;
+      flex-shrink: 0;
     }
-    .table-clickable-row:hover {
-      background: rgba(56, 189, 248, 0.08) !important;
-    }
-    .table-changed-row {
-      background: rgba(16, 185, 129, 0.15) !important;
-      border-left: 3px solid var(--accent-green) !important;
+    .preset-chip:hover, .preset-chip.active {
+      background: var(--accent-dim);
+      border-color: var(--accent-border);
+      color: var(--accent);
     }
 
-    .badge-pill {
-      font-size: 10px;
-      padding: 2px 8px;
-      border-radius: 10px;
-      font-weight: 700;
+    /* Sub Tabs Nav inside Single Turn */
+    .subtabs-nav {
+      display: flex;
+      gap: 6px;
+      border-bottom: 1px solid var(--border);
+      margin-bottom: 16px;
     }
-    .badge-green { background: rgba(16, 185, 129, 0.2); color: #34d399; }
-    .badge-yellow { background: rgba(245, 158, 11, 0.2); color: #fbbf24; }
-    .badge-red { background: rgba(239, 68, 68, 0.2); color: #f87171; }
-    .badge-blue { background: rgba(56, 189, 248, 0.2); color: var(--accent-blue); }
+    .subtab-btn {
+      background: transparent;
+      border: none;
+      border-bottom: 2px solid transparent;
+      color: var(--text-muted);
+      padding: 10px 14px;
+      font-size: 13px;
+      font-weight: 600;
+      cursor: pointer;
+    }
+    .subtab-btn:hover { color: var(--accent); }
+    .subtab-btn.active {
+      color: var(--accent);
+      border-bottom-color: var(--accent);
+    }
+    .subtab-content { display: none; }
+    .subtab-content.active { display: block; }
   </style>
 </head>
 <body>
@@ -517,397 +553,569 @@
     <div class="brand-group">
       <div class="brand-badge">PITCHPROX</div>
       <div>
-        <div class="brand-title">Conditional Knowledge Retrieval Console</div>
-        <div class="brand-sub">Verification Test Bench • Doc 02 §6–§13 & Constraint C6</div>
+        <div class="brand-title">PitchProX | Conditional Knowledge Retrieval Test Console</div>
+        <div class="brand-sub">Verification Test Bench • Doc 02 Section 6–13 & Constraint C6</div>
       </div>
     </div>
     <div class="nav-actions">
-      <div class="user-pill" title="Active Rep Identity (Constraint C6 enforced)">
-        <span>Active Rep:</span>
+      <div class="user-pill" title="Active Salesman (Constraint C6 isolation enforced)">
+        <span>Active Salesman:</span>
         <select id="userSelect" onchange="onUserChange()">
-          <option value="rep_john" selected>rep_john (Default User)</option>
-          <option value="rep_sarah">rep_sarah (Different Rep)</option>
+          <option value="rep_john" selected>rep_john (John Miller)</option>
+          <option value="rep_sarah">rep_sarah (Different Salesman)</option>
           <option value="rep_empty">rep_empty (0 Chunks Uploaded)</option>
         </select>
       </div>
-      <button class="btn btn-success" id="btnLoadDummies" onclick="loadCanonicalDummies()">
-        ⚡ Seed 6 Canonical Dummy Docs
+      <button class="btn btn-primary" onclick="switchMode('modeUpload')">
+        Upload Context as Salesman
       </button>
-      <button class="btn" onclick="openIngestModal()">
-        ➕ Ingest Chunk
+      <button class="btn" id="btnLoadDummies" onclick="loadCanonicalDummies()">
+        Reset Canonical Dummy Docs
       </button>
     </div>
   </header>
 
-  <!-- 14 Acceptance Presets Strip -->
-  <div class="presets-bar">
-    <div class="presets-label">Acceptance Presets:</div>
-    <div id="presetsContainer" style="display: flex; gap: 8px;">
-      <!-- Populated dynamically via JS -->
-      <span style="font-size: 12px; color: var(--text-dim);">Loading presets catalog…</span>
-    </div>
-  </div>
+  <!-- Top Primary Mode Navigation -->
+  <nav class="mode-nav">
+    <button class="mode-btn active" id="tabBtnMultiTurn" onclick="switchMode('modeMultiTurn')">
+      Simulate Multi-Turn Script
+    </button>
+    <button class="mode-btn" id="tabBtnUpload" onclick="switchMode('modeUpload')">
+      Upload Salesman Context & Documents
+    </button>
+    <button class="mode-btn" id="tabBtnSingleTurn" onclick="switchMode('modeSingleTurn')">
+      Acceptance Presets & Single-Turn Pipeline
+    </button>
+    <button class="mode-btn" id="tabBtnLatency" onclick="switchMode('modeLatency')">
+      Latency Metrics & SLA
+    </button>
+  </nav>
 
-  <!-- Scenario Explainer Banner -->
-  <div class="scenario-banner" id="scenarioBanner">
-    <div>
-      <b id="scenarioTitle">Scenario 2: Relevant Upload (Westlake Sales)</b> — 
-      <span id="scenarioDesc">Tests credibility objection trigger grounding exact verified transaction count into prompt.</span>
-    </div>
-    <div style="font-size: 11px; color: var(--text-dim);" id="scenarioCategory">Category: Grounding & Quotes</div>
-  </div>
-
-  <!-- Main 2-Column Layout -->
-  <main class="layout-grid">
-
-    <!-- LEFT COLUMN: Input & Simulation Controls -->
-    <div>
-
-      <!-- Panel 1: Prospect Turn Input -->
-      <div class="panel">
-        <div class="panel-header">
-          <h3><span>🗣️</span> Prospect Conversational Utterance</h3>
-          <span style="font-size: 11px; color: var(--text-dim);">Current Turn</span>
-        </div>
-        <div class="form-group">
-          <textarea id="prospectUtterance" placeholder="What the prospect just said…">Do you have any actual sales experience in the Westlake area?</textarea>
-          <div class="quick-chips">
-            <span class="quick-chip" onclick="setUtterance('Do you have any actual sales experience in Westlake?')">Westlake Experience</span>
-            <span class="quick-chip" onclick="setUtterance('What commission percentage do you charge to list?')">5% vs 6% Commission</span>
-            <span class="quick-chip" onclick="setUtterance('How long does the residential home inspection take?')">Inspection Timeline</span>
-            <span class="quick-chip" onclick="setUtterance('Can you guarantee you will sell in 7 days?')">7-Day Guarantee</span>
-            <span class="quick-chip" onclick="setUtterance('I can only meet tomorrow afternoon at 3:00 PM.')">3:00 PM Schedule</span>
-            <span class="quick-chip" onclick="setUtterance('Yeah, okay, that makes sense.')">No Trigger (Silence)</span>
+  <!-- ===================================================================== -->
+  <!-- MODE 1: Simulate Multi-Turn Script (DEFAULT VIEW)                     -->
+  <!-- ===================================================================== -->
+  <section class="view-content active" id="modeMultiTurn">
+    
+    <!-- Controls Card -->
+    <div class="panel">
+      <div class="panel-header">
+        <div>
+          <h3>Multi-Turn Script Studio</h3>
+          <div style="font-size: 12px; color: var(--text-dim); margin-top: 3px;">
+            Sequential prospect script simulation through autonomous Core decision engine
           </div>
         </div>
-      </div>
-
-      <!-- Panel 2: Core Strategic Decision & Retrieval Trigger -->
-      <div class="panel">
-        <div class="panel-header">
-          <h3><span>🧠</span> Core Strategic Intent</h3>
-          <span class="badge-pill badge-blue">Doc 02 §6</span>
-        </div>
-
-        <div class="form-row">
-          <div class="form-group">
-            <label>Strategic Action (Core)</label>
-            <select class="form-select" id="stratAction">
-              <option value="quantify" selected>QUANTIFY (Proof / Stats)</option>
-              <option value="differentiate">DIFFERENTIATE (Unique Value)</option>
-              <option value="educate">EDUCATE (Process / Policy)</option>
-              <option value="social_proof">SOCIAL_PROOF (Testimonials)</option>
-              <option value="question">QUESTION (Clarify / Discover)</option>
-              <option value="acknowledge">ACKNOWLEDGE (Listening / Hold)</option>
-              <option value="hold">HOLD (Tactical Silence)</option>
-            </select>
-          </div>
-
-          <div class="form-group">
-            <label>Retrieval Trigger</label>
-            <select class="form-select" id="retrievalTrigger">
-              <option value="auto">✨ AUTO (Core Intelligence Decides)</option>
-              <option value="credibility_objection" selected>credibility_objection</option>
-              <option value="factual_question">factual_question</option>
-              <option value="service_process_objection">service_process_objection</option>
-              <option value="playbook_evidence">playbook_evidence</option>
-              <option value="policy_wording">policy_wording</option>
-              <option value="prior_claim_reference">prior_claim_reference</option>
-              <option value="none">None (No Trigger / Short-Circuit)</option>
-            </select>
-          </div>
-        </div>
-
-        <div class="form-group">
-          <label>Need Statement (Query Intent)</label>
-          <input type="text" class="form-control" id="needStatement" value="verified sales experience in Westlake">
-        </div>
-
-        <div class="form-group">
-          <label>Topic Tags (comma-separated)</label>
-          <input type="text" class="form-control" id="topicTags" value="westlake, experience, sales">
-        </div>
-      </div>
-
-      <!-- Panel 3: Runtime State & Advanced Toggles -->
-      <div class="panel">
-        <div class="panel-header">
-          <h3><span>⚙️</span> Runtime Guards & Edge Cases</h3>
-        </div>
-
-        <div class="form-row" style="margin-bottom: 10px;">
-          <div class="form-group" style="margin-bottom: 0;">
-            <label>State Version</label>
-            <input type="number" class="form-control" id="stateVersion" value="1" min="1">
-          </div>
-          <div class="form-group" style="margin-bottom: 0;">
-            <label>Deadline Budget (ms)</label>
-            <input type="number" class="form-control" id="deadlineBudget" value="250" min="1">
-          </div>
-        </div>
-
-        <div class="toggle-row">
-          <div>
-            <b>Simulate Prospect Interruption</b>
-            <div style="font-size: 11px; color: var(--text-dim);">Increments state_version mid-generation (stale discard)</div>
-          </div>
-          <label class="toggle-switch">
-            <input type="checkbox" id="toggleInterruption">
-            <span class="slider"></span>
+        <div style="display: flex; align-items: center; gap: 12px;">
+          <label style="display: flex; align-items: center; gap: 6px; cursor: pointer; font-size: 12px; font-weight: 600; color: var(--text-muted);">
+            <input type="checkbox" id="toggleUseRealLlm" style="width: 16px; height: 16px; accent-color: var(--accent);">
+            Use Live LLM (Groq Qwen-3.8-27B)
           </label>
-        </div>
-
-        <div class="toggle-row">
-          <div>
-            <b>Live Prospect Time/Date Override</b>
-            <div style="font-size: 11px; color: var(--text-dim);">Live truth wins over contrary stored schedule</div>
-          </div>
-          <label class="toggle-switch">
-            <input type="checkbox" id="toggleLiveOverride">
-            <span class="slider"></span>
-          </label>
+          <span class="badge-pill badge-green">Core-to-Retrieval Autonomous Link</span>
         </div>
       </div>
 
-      <!-- Big Action Trigger -->
-      <button class="btn btn-primary" id="btnRunPipeline" style="width: 100%; padding: 12px; font-size: 14px; justify-content: center;" onclick="runSimulation()">
-        ⚡ Run Conditional Retrieval Pipeline (Ctrl+Enter)
-      </button>
+      <!-- Script Setup Row -->
+      <div style="display: flex; gap: 14px; align-items: flex-end; margin-bottom: 14px; flex-wrap: wrap;">
+        <div style="flex: 1; min-width: 280px;">
+          <label style="font-size: 11px; font-weight: 700; color: var(--text-muted); text-transform: uppercase; display: block; margin-bottom: 6px;">
+            Benchmark Regression Script
+          </label>
+          <select class="form-select" id="multiTurnScriptSelect" onchange="onBenchmarkScriptSelected()">
+            <!-- Populated dynamically via JS -->
+          </select>
+        </div>
+        <button class="btn btn-primary" id="btnRunMultiTurn" onclick="runMultiTurnScript()" style="padding: 10px 20px; font-size: 14px;">
+          Run Multi-Turn Script Simulation
+        </button>
+        <button class="btn" id="btnReplayMultiTurn" onclick="replayMultiTurnScript()">
+          Replay Script (Check Diff)
+        </button>
+        <button class="btn" onclick="loadCanonicalDummiesAndReplay()">
+          Reset Rep John Dummies
+        </button>
+        <button class="btn" onclick="switchMode('modeUpload')">
+          Upload Context for this Salesman
+        </button>
+      </div>
 
+      <div style="font-size: 12.5px; color: var(--text-muted); margin-bottom: 12px; background: #f8fafc; border: 1px solid var(--border); padding: 8px 12px; border-radius: 6px;" id="multiTurnScriptDesc">
+        Loading benchmark scripts...
+      </div>
+
+      <!-- Script Line Editor -->
+      <div class="form-group" style="margin-bottom: 0;">
+        <div style="display: flex; justify-content: space-between; margin-bottom: 6px;">
+          <label style="font-size: 11px; font-weight: 700; color: var(--text-muted); text-transform: uppercase;">
+            Prospect Utterance Sequence (1 line per turn)
+          </label>
+          <span style="font-size: 11px; color: var(--accent); font-weight: 600;">
+            Edit any line below, then click "Run Multi-Turn Script Simulation"
+          </span>
+        </div>
+        <textarea id="multiTurnScriptEditor" rows="7" style="font-family: 'JetBrains Mono', monospace; font-size: 12.5px; line-height: 1.6;"></textarea>
+      </div>
     </div>
 
+    <!-- Summary Strip -->
+    <div class="results-hero" id="multiTurnSummaryBar" style="display: none;">
+      <div>
+        <div style="font-weight: 800; font-size: 14px; color: var(--text);" id="mtSummaryTitle">Simulation Complete</div>
+        <div style="font-size: 12px; color: var(--text-muted);" id="mtSummarySub">Core evaluated all turns autonomously without hand-set triggers.</div>
+      </div>
+      <div class="metric-pills">
+        <div class="metric-pill">Total Turns: <b id="mtMetricTurns">8</b></div>
+        <div class="metric-pill">Fired: <b id="mtMetricFired" style="color: var(--blue);">5</b></div>
+        <div class="metric-pill">0ms Quiet: <b id="mtMetricQuiet" style="color: var(--green);">3</b></div>
+        <div class="metric-pill">Safety: <b id="mtMetricSafety" style="color: var(--green);">SAFE (0)</b></div>
+        <div class="metric-pill">Avg Turn Latency: <b id="mtMetricAvgLatency">—</b></div>
+      </div>
+    </div>
 
-    <!-- RIGHT COLUMN: Multi-Stage Inspection & Results -->
-    <div>
-
-      <!-- Hero Results Strip -->
-      <div class="results-hero">
-        <div style="display: flex; align-items: center; gap: 14px;">
-          <div class="status-badge-lg badge-none_needed" id="statusBadge">
-            READY FOR SIMULATION
-          </div>
-          <div style="font-size: 13px; color: var(--text-muted);" id="statusSummary">
-            Select a preset above or click 'Run Pipeline'.
+    <!-- Multi-Turn Execution Matrix Table -->
+    <div class="panel">
+      <div class="panel-header">
+        <div>
+          <h3>Multi-Turn Execution Matrix</h3>
+          <div style="font-size: 12px; color: var(--text-dim); margin-top: 2px;">
+            Click any row to open the complete 6-block context and candidate scores for that turn
           </div>
         </div>
-        <div class="metric-pills">
-          <div class="metric-pill">Latency: <b id="mLatency">—</b></div>
-          <div class="metric-pill">Facts: <b id="mFactsCount">0</b></div>
-          <div class="metric-pill">Safety: <b id="mSafetyVerdict">—</b></div>
-        </div>
+        <span class="badge-pill badge-blue">Interactive Turn Inspection</span>
       </div>
 
-      <!-- Tabs Navigation -->
-      <div class="tabs-nav">
-        <button class="tab-btn active" onclick="switchTab('tabPipeline')">🔍 Pipeline Stepper</button>
-        <button class="tab-btn" id="btnTabMultiTurn" onclick="switchTab('tabMultiTurn')">📜 Multi-Turn Script Studio</button>
-        <button class="tab-btn" onclick="switchTab('tabContext')">📦 6-Block Context</button>
-        <button class="tab-btn" onclick="switchTab('tabTeleprompter')">🎙️ Spoken Teleprompter</button>
-        <button class="tab-btn" onclick="switchTab('tabStore')">📚 Knowledge Store (<span id="storeCount">0</span>)</button>
-        <button class="tab-btn" onclick="switchTab('tabLatency')">⏱️ Latency SLA</button>
+      <div style="overflow-x: auto;">
+        <table class="custom-table" id="multiTurnTable">
+          <thead>
+            <tr>
+              <th style="width: 40px;">Turn</th>
+              <th style="width: 220px;">Prospect Line</th>
+              <th style="width: 150px;">Core Action & Trigger</th>
+              <th style="width: 90px;">Gate Result</th>
+              <th style="width: 200px;">Candidates & Withheld</th>
+              <th style="width: 200px;">Facts Delivered</th>
+              <th>Spoken Teleprompter Response</th>
+              <th style="width: 110px;">Ver / Latency</th>
+              <th style="width: 80px;">Action</th>
+            </tr>
+          </thead>
+          <tbody id="multiTurnTableBody">
+            <tr>
+              <td colspan="9" style="text-align: center; color: var(--text-dim); padding: 40px;">
+                Select a benchmark script above and click <b>Run Multi-Turn Script Simulation</b>.
+              </td>
+            </tr>
+          </tbody>
+        </table>
       </div>
+    </div>
 
-      <!-- TAB 1: Pipeline Stepper -->
-      <div class="tab-content active" id="tabPipeline">
+  </section>
 
-        <!-- Stage 1: Retrieval Gate Card -->
-        <div class="step-card">
-          <div class="step-title">
-            <span>1. RETRIEVAL GATE EVALUATION</span>
-            <span class="badge-pill badge-blue" id="gateDecisionBadge">Decision: —</span>
-          </div>
-          <div style="font-size: 12px; color: var(--text-muted); margin-bottom: 6px;" id="gateReasonText">
-            The Gate evaluates whether to short-circuit vector search to preserve 0ms latency.
-          </div>
-          <div style="font-size: 11px; font-family: 'JetBrains Mono', monospace; color: var(--text-dim);" id="gateRuleText">
-            Rule: —
-          </div>
-        </div>
+  <!-- ===================================================================== -->
+  <!-- MODE 2: Upload Salesman Context & Documents                           -->
+  <!-- ===================================================================== -->
+  <section class="view-content" id="modeUpload">
+    
+    <div style="display: grid; grid-template-columns: 500px 1fr; gap: 24px;">
+      
+      <!-- Left Column: Upload Forms -->
+      <div>
 
-        <!-- Stage 2: Candidates & Relevance Floor Card -->
-        <div class="step-card">
-          <div class="step-title">
-            <span>2. VECTOR CANDIDATES & RELEVANCE FLOORS</span>
-            <span style="font-size: 11px; color: var(--text-dim);">Floor: 0.35 | Marginal: 0.50</span>
-          </div>
-          <div id="candidatesTableContainer">
-            <div style="font-size: 12px; color: var(--text-dim); padding: 8px 0;">No candidate search executed yet.</div>
-          </div>
-        </div>
-
-        <!-- Stage 3: Conflict Resolution & Withheld Facts Card -->
-        <div class="step-card">
-          <div class="step-title">
-            <span>3. CONFLICT RESOLUTION & WITHHELD FACTS</span>
-            <span class="badge-pill badge-yellow" id="withheldBadge">Withheld: 0</span>
-          </div>
-          <div id="withheldContainer">
-            <div style="font-size: 12px; color: var(--text-dim); padding: 8px 0;">No withheld facts in current turn.</div>
-          </div>
-        </div>
-
-        <!-- Stage 4: Verified Facts Served Card -->
-        <div class="step-card">
-          <div class="step-title">
-            <span>4. VERIFIED FACTS DELIVERED TO BLOCK 3</span>
-            <span class="badge-pill badge-green" id="deliveredFactsBadge">Delivered: 0</span>
-          </div>
-          <div id="deliveredFactsContainer">
-            <div style="font-size: 12px; color: var(--text-dim); padding: 8px 0;">No verified facts delivered.</div>
-          </div>
-        </div>
-
-      </div>
-
-      <!-- TAB 2: 6-Block Context -->
-      <div class="tab-content" id="tabContext">
-        <div class="panel" style="margin-bottom: 0;">
+        <!-- Section A: Upload Document File -->
+        <div class="panel" style="margin-bottom: 20px;">
           <div class="panel-header">
-            <h3><span>📦</span> Structured 6-Block Prompt Packaging</h3>
-            <span style="font-size: 11px; color: var(--text-dim);">Spec 11 §7</span>
-          </div>
-          <div class="code-view" id="rawContextViewer">Assembled 6-block context will appear here upon simulation…</div>
-        </div>
-      </div>
-
-      <!-- TAB 3: Spoken Teleprompter Response -->
-      <div class="tab-content" id="tabTeleprompter">
-        <div class="teleprompter-card" style="margin-bottom: 16px;">
-          <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px;">
-            <span style="font-size: 12px; text-transform: uppercase; letter-spacing: 0.05em; color: var(--accent-blue); font-weight: 700;">
-              Teleprompter Prompt
-            </span>
-            <span class="badge-pill badge-green" id="teleprompterStatusBadge">Status: Generated</span>
-          </div>
-          <div class="teleprompter-text" id="teleprompterPromptText">
-            Waiting for simulation run…
-          </div>
-        </div>
-
-        <div class="panel">
-          <div class="panel-header">
-            <h3><span>🛡️</span> Post-Generation Hallucination Scanner</h3>
-            <span class="badge-pill badge-green" id="scannerBadge">Status: Clean</span>
-          </div>
-          <div id="hallucinationScannerDetails" style="font-size: 13px; color: var(--text-muted);">
-            Scans for ungrounded volume numbers, ungrounded guarantees, and upward escalations (e.g. '50+').
-          </div>
-        </div>
-      </div>
-
-      <!-- TAB 4: Knowledge Store -->
-      <div class="tab-content" id="tabStore">
-        <div class="panel">
-          <div class="panel-header">
-            <h3><span>📚</span> Rep Authoritative Store Chunks</h3>
-            <button class="btn btn-success" onclick="openIngestModal()">➕ Add Chunk</button>
-          </div>
-          <div id="storeChunksTableContainer">
-            <div style="font-size: 12px; color: var(--text-dim);">Loading authoritative store…</div>
-          </div>
-        </div>
-      </div>
-
-      <!-- TAB 5: Latency Metrics Aggregator -->
-      <div class="tab-content" id="tabLatency">
-        <div class="panel">
-          <div class="panel-header">
-            <h3><span>⏱️</span> Statistical Stage Latency Metrics</h3>
-            <button class="btn" onclick="fetchLatencyMetrics()">🔄 Refresh Metrics</button>
-          </div>
-          <div id="latencyMetricsContainer">
-            <div style="font-size: 12px; color: var(--text-dim);">Loading latency stats…</div>
-          </div>
-        </div>
-      </div>
-
-      <!-- TAB 6: Multi-Turn Script Studio -->
-      <div class="tab-content" id="tabMultiTurn">
-        
-        <!-- Controls & Presets Panel -->
-        <div class="panel" style="margin-bottom: 14px;">
-          <div class="panel-header">
-            <h3><span>📜</span> Multi-Turn Script Studio & Regression Runner</h3>
-            <span class="badge-pill badge-green">Core-to-Retrieval Autonomous Link • Spec Doc 02 §6</span>
+            <div>
+              <h3>Upload Document File as Salesman</h3>
+              <div style="font-size: 12px; color: var(--text-dim); margin-top: 2px;">
+                Extracts and indexes PDF, DOCX, TXT, MD, CSV, XLSX, or JSON files
+              </div>
+            </div>
+            <span class="badge-pill badge-purple">File Extractor</span>
           </div>
 
-          <div style="display: flex; gap: 12px; align-items: flex-end; margin-bottom: 12px; flex-wrap: wrap;">
-            <div style="flex: 1; min-width: 280px;">
-              <label style="font-size: 11px; font-weight: 700; color: var(--text-muted); text-transform: uppercase;">Benchmark Regression Script</label>
-              <select class="form-select" id="multiTurnScriptSelect" onchange="onBenchmarkScriptSelected()">
-                <!-- Populated dynamically via JS -->
+          <div class="form-group">
+            <label>Choose Document File</label>
+            <div class="file-drop-area" onclick="document.getElementById('fileUploadInput').click()">
+              <input type="file" id="fileUploadInput" accept=".pdf,.docx,.doc,.txt,.md,.csv,.xlsx,.xls,.json" style="display: none;" onchange="onFileSelected()">
+              <div style="font-weight: 600; color: var(--text);" id="fileUploadSelectedName">Click to browse file (.pdf, .docx, .txt, .md, .csv, .json)</div>
+              <div style="font-size: 11.5px; color: var(--text-dim); margin-top: 4px;">File content is automatically parsed and indexed into chunks</div>
+            </div>
+          </div>
+
+          <div class="form-group">
+            <label>Document Title</label>
+            <input type="text" class="form-control" id="fileChunkTitle" placeholder="e.g. 2024 Sales Agreement Policy">
+          </div>
+
+          <div class="form-row">
+            <div class="form-group">
+              <label>Knowledge Class</label>
+              <select class="form-select" id="fileChunkClass">
+                <option value="performance_past_sales" selected>performance_past_sales (Volume, stats)</option>
+                <option value="salesperson_profile">salesperson_profile (Bio, background)</option>
+                <option value="pricing_packaging">pricing_packaging (Commissions, fees)</option>
+                <option value="service_process">service_process (Schedules, timelines)</option>
+                <option value="company_policy">company_policy (Guidelines)</option>
+                <option value="market_knowledge">market_knowledge (Zoning, comps)</option>
+                <option value="client_testimonials">client_testimonials (Social proof)</option>
+                <option value="objection_responses">objection_responses (Playbooks)</option>
               </select>
             </div>
-            <button class="btn btn-primary" id="btnRunMultiTurn" onclick="runMultiTurnScript()">
-              ▶ Run Multi-Turn Script
-            </button>
-            <button class="btn" id="btnReplayMultiTurn" onclick="replayMultiTurnScript()">
-              🔁 Replay Script (Check Diff)
-            </button>
-            <button class="btn btn-success" onclick="loadCanonicalDummiesAndReplay()">
-              ⚡ Reset Rep John Dummies
-            </button>
-          </div>
 
-          <div style="font-size: 12px; color: var(--text-dim); margin-bottom: 10px;" id="multiTurnScriptDesc">
-            Loading benchmark scripts…
-          </div>
-
-          <!-- Script Lines Editor -->
-          <div class="form-group" style="margin-bottom: 0;">
-            <div style="display: flex; justify-content: space-between; margin-bottom: 6px;">
-              <label style="font-size: 11px; font-weight: 700; color: var(--text-muted); text-transform: uppercase;">Prospect Utterance Sequence (1 per line)</label>
-              <span style="font-size: 11px; color: var(--accent-blue);">Edit any line below, then click "Run" or "Replay"</span>
+            <div class="form-group">
+              <label>Verification Status</label>
+              <select class="form-select" id="fileChunkVerification">
+                <option value="company_approved" selected>company_approved (Authority 3)</option>
+                <option value="self_attested">self_attested (Authority 2)</option>
+                <option value="user_supplied">user_supplied (Authority 1)</option>
+              </select>
             </div>
-            <textarea id="multiTurnScriptEditor" rows="6" style="font-family: 'JetBrains Mono', monospace; font-size: 12px; line-height: 1.6;"></textarea>
           </div>
+
+          <div class="form-group">
+            <label>Topic Tags (comma-separated)</label>
+            <input type="text" class="form-control" id="fileChunkTags" placeholder="e.g. pricing, commission, policy">
+          </div>
+
+          <button class="btn btn-primary" style="width: 100%; justify-content: center; padding: 10px;" onclick="submitDocumentFileUpload()">
+            Upload and Index Document File
+          </button>
+
+          <div id="fileUploadStatus" style="display: none; margin-top: 12px; padding: 10px; border-radius: 6px; font-size: 12px; background: #f8fafc; border: 1px solid var(--border);"></div>
         </div>
 
-        <!-- Multi-Turn Run Summary Strip -->
-        <div class="results-hero" id="multiTurnSummaryBar" style="display: none; margin-bottom: 14px;">
-          <div>
-            <div style="font-weight: 800; font-size: 14px; color: #fff;" id="mtSummaryTitle">Canonical 8-Turn Run Completed</div>
-            <div style="font-size: 12px; color: var(--text-muted);" id="mtSummarySub">Core evaluated all turns autonomously without hand-set triggers.</div>
-          </div>
-          <div class="metric-pills">
-            <div class="metric-pill">Total Turns: <b id="mtMetricTurns">8</b></div>
-            <div class="metric-pill">Fired: <b id="mtMetricFired" style="color: #38bdf8;">5</b></div>
-            <div class="metric-pill">0ms Quiet: <b id="mtMetricQuiet" style="color: #34d399;">3</b></div>
-            <div class="metric-pill">Safety: <b id="mtMetricSafety" style="color: #34d399;">SAFE (0)</b></div>
-            <div class="metric-pill">Avg Turn: <b id="mtMetricAvgLatency">—</b></div>
-          </div>
-        </div>
-
-        <!-- Interactive Multi-Turn Table Panel -->
+        <!-- Section B: Direct Text / Snippet Entry -->
         <div class="panel">
           <div class="panel-header">
-            <h3><span>📊</span> Multi-Turn Execution Matrix</h3>
-            <span style="font-size: 11px; color: var(--text-dim);">Click any row or 'Inspect' to open the complete 6-block context for that turn</span>
+            <div>
+              <h3>Or Direct Text / Factual Snippet Entry</h3>
+              <div style="font-size: 12px; color: var(--text-dim); margin-top: 2px;">
+                Type or paste a specific quote, statistic, or policy rule
+              </div>
+            </div>
+            <span class="badge-pill badge-green">Direct Ingest</span>
           </div>
 
-          <div style="overflow-x: auto;">
-            <table class="custom-table" id="multiTurnTable">
-              <thead>
-                <tr>
-                  <th style="width: 36px;">#</th>
-                  <th style="width: 200px;">Prospect Line</th>
-                  <th style="width: 140px;">Core Action & Trigger</th>
-                  <th style="width: 80px;">Gate</th>
-                  <th style="width: 180px;">Candidates & Withheld</th>
-                  <th style="width: 180px;">Facts Delivered</th>
-                  <th>Teleprompter & Guardrail</th>
-                  <th style="width: 100px;">Ver / Latency</th>
-                  <th style="width: 70px;">Inspect</th>
-                </tr>
-              </thead>
-              <tbody id="multiTurnTableBody">
-                <tr>
-                  <td colspan="9" style="text-align: center; color: var(--text-dim); padding: 30px;">
-                    Select a benchmark script above and click <b>▶ Run Multi-Turn Script</b>.
-                  </td>
-                </tr>
-              </tbody>
-            </table>
+          <div class="form-group">
+            <label>Document Title</label>
+            <input type="text" class="form-control" id="uploadChunkTitle" value="Agent Bio / Profile" placeholder="e.g. Westlake Sales Record">
+          </div>
+
+          <div class="form-row">
+            <div class="form-group">
+              <label>Knowledge Class</label>
+              <select class="form-select" id="uploadChunkClass">
+                <option value="salesperson_profile" selected>salesperson_profile (Bio, background)</option>
+                <option value="performance_past_sales">performance_past_sales (Volume, stats)</option>
+                <option value="pricing_packaging">pricing_packaging (Commissions, fees)</option>
+                <option value="service_process">service_process (Schedules, timelines)</option>
+                <option value="company_policy">company_policy (Guidelines)</option>
+                <option value="market_knowledge">market_knowledge (Zoning, comps)</option>
+                <option value="client_testimonials">client_testimonials (Social proof)</option>
+                <option value="objection_responses">objection_responses (Playbooks)</option>
+              </select>
+            </div>
+
+            <div class="form-group">
+              <label>Verification Status</label>
+              <select class="form-select" id="uploadChunkVerification">
+                <option value="company_approved" selected>company_approved (Authority 3 - Verified)</option>
+                <option value="self_attested">self_attested (Authority 2 - Rep Attested)</option>
+                <option value="user_supplied">user_supplied (Authority 1 - Unverified Claim)</option>
+              </select>
+            </div>
+          </div>
+
+          <div class="form-group">
+            <label>Topic Tags (comma-separated)</label>
+            <input type="text" class="form-control" id="uploadChunkTags" value="profile, experience, credentials">
+          </div>
+
+          <div class="form-group">
+            <label>Document / Context Text</label>
+            <textarea id="uploadChunkText" rows="3" placeholder="Enter factual content...">John Miller has 12 years of residential real estate experience and is a certified luxury home marketing specialist.</textarea>
+          </div>
+
+          <div style="display: flex; gap: 10px; margin-top: 14px;">
+            <button class="btn btn-primary" style="flex: 1; justify-content: center;" onclick="submitSalesmanUpload()">
+              Upload Context as Text
+            </button>
+            <button class="btn" onclick="seedJohnDummiesFromUpload()">
+              Reset All Canonical Dummies
+            </button>
+          </div>
+        </div>
+
+      </div>
+
+      <!-- Right Column: Current Active Salesman Documents -->
+      <div class="panel">
+        <div class="panel-header">
+          <div>
+            <h3>Active Salesman Knowledge Store (<span id="storeCount">0</span> Chunks)</h3>
+            <div style="font-size: 12px; color: var(--text-dim); margin-top: 2px;">
+              Documents currently queryable for <b id="activeStoreRepLabel">rep_john</b>
+            </div>
+          </div>
+          <button class="btn" onclick="fetchStoreRecords()">Refresh List</button>
+        </div>
+
+        <div id="storeChunksTableContainer">
+          <div style="font-size: 12px; color: var(--text-dim); padding: 12px;">Loading authoritative store...</div>
+        </div>
+
+        <div style="margin-top: 16px; padding: 12px; background: #f8fafc; border: 1px solid var(--border); border-radius: 8px; font-size: 12px; color: var(--text-dim);">
+          <b>Constraint C6 Guarantee:</b> This context is partitioned strictly to the active salesman. Other salesmen will never receive or match this content.
+        </div>
+      </div>
+
+    </div>
+
+  </section>
+
+  <!-- ===================================================================== -->
+  <!-- MODE 3: Acceptance Presets & Single-Turn Pipeline                     -->
+  <!-- ===================================================================== -->
+  <section class="view-content" id="modeSingleTurn">
+    
+    <!-- 14 Acceptance Presets Strip -->
+    <div class="presets-bar">
+      <div class="presets-label">Acceptance Presets:</div>
+      <div id="presetsContainer" style="display: flex; gap: 8px;">
+        <span style="font-size: 12px; color: var(--text-dim);">Loading presets catalog...</span>
+      </div>
+    </div>
+
+    <!-- Scenario Banner -->
+    <div style="background: #ffffff; border: 1px solid var(--border); border-radius: 8px; padding: 12px 18px; display: flex; justify-content: space-between; align-items: center; font-size: 13px; margin-bottom: 18px;">
+      <div>
+        <b id="scenarioTitle" style="color: var(--accent);">Scenario 2: Relevant Upload (Westlake Sales)</b> — 
+        <span id="scenarioDesc" style="color: var(--text-muted);">Tests credibility objection trigger grounding exact verified transaction count into prompt.</span>
+      </div>
+      <div style="display: flex; align-items: center; gap: 12px;">
+        <label style="display: flex; align-items: center; gap: 6px; cursor: pointer; font-size: 12px; font-weight: 600; color: var(--text-muted);">
+          <input type="checkbox" id="toggleUseRealLlmSingle" style="width: 16px; height: 16px; accent-color: var(--accent);">
+          Use Live LLM (Groq)
+        </label>
+        <div style="font-size: 11px; color: var(--text-dim);" id="scenarioCategory">Category: Grounding & Quotes</div>
+      </div>
+    </div>
+
+    <div style="display: grid; grid-template-columns: 460px 1fr; gap: 24px;">
+      
+      <!-- Left Column: Single Turn Input -->
+      <div>
+        <div class="panel">
+          <div class="panel-header">
+            <h3>Prospect Conversational Utterance</h3>
+            <span style="font-size: 11px; color: var(--text-dim);">Current Turn</span>
+          </div>
+          <div class="form-group">
+            <textarea id="prospectUtterance" placeholder="What the prospect just said...">Do you have any actual sales experience in the Westlake area?</textarea>
+            <div class="quick-chips">
+              <span class="quick-chip" onclick="setUtterance('Do you have any actual sales experience in Westlake?')">Westlake Experience</span>
+              <span class="quick-chip" onclick="setUtterance('What commission percentage do you charge to list?')">5% vs 6% Commission</span>
+              <span class="quick-chip" onclick="setUtterance('How long does the residential home inspection take?')">Inspection Timeline</span>
+              <span class="quick-chip" onclick="setUtterance('Can you guarantee you will sell in 7 days?')">7-Day Guarantee</span>
+              <span class="quick-chip" onclick="setUtterance('I can only meet tomorrow afternoon at 3:00 PM.')">3:00 PM Schedule</span>
+              <span class="quick-chip" onclick="setUtterance('Yeah, okay, that makes sense.')">No Trigger (Silence)</span>
+            </div>
+          </div>
+        </div>
+
+        <div class="panel">
+          <div class="panel-header">
+            <h3>Core Strategic Intent</h3>
+            <span class="badge-pill badge-blue">Doc 02 Section 6</span>
+          </div>
+
+          <div class="form-row">
+            <div class="form-group">
+              <label>Strategic Action (Core)</label>
+              <select class="form-select" id="stratAction">
+                <option value="quantify" selected>QUANTIFY (Proof / Stats)</option>
+                <option value="differentiate">DIFFERENTIATE (Unique Value)</option>
+                <option value="educate">EDUCATE (Process / Policy)</option>
+                <option value="social_proof">SOCIAL_PROOF (Testimonials)</option>
+                <option value="question">QUESTION (Clarify / Discover)</option>
+                <option value="acknowledge">ACKNOWLEDGE (Listening / Hold)</option>
+                <option value="hold">HOLD (Tactical Silence)</option>
+              </select>
+            </div>
+
+            <div class="form-group">
+              <label>Retrieval Trigger</label>
+              <select class="form-select" id="retrievalTrigger">
+                <option value="auto">AUTO (Core Intelligence Decides)</option>
+                <option value="credibility_objection" selected>credibility_objection</option>
+                <option value="factual_question">factual_question</option>
+                <option value="service_process_objection">service_process_objection</option>
+                <option value="playbook_evidence">playbook_evidence</option>
+                <option value="policy_wording">policy_wording</option>
+                <option value="prior_claim_reference">prior_claim_reference</option>
+                <option value="none">None (No Trigger / Short-Circuit)</option>
+              </select>
+            </div>
+          </div>
+
+          <div class="form-group">
+            <label>Need Statement</label>
+            <input type="text" class="form-control" id="needStatement" value="verified sales experience in Westlake">
+          </div>
+
+          <div class="form-group">
+            <label>Topic Tags (comma-separated)</label>
+            <input type="text" class="form-control" id="topicTags" value="westlake, experience, sales">
+          </div>
+        </div>
+
+        <div class="panel">
+          <div class="panel-header">
+            <h3>Runtime Guards</h3>
+          </div>
+
+          <div class="form-row" style="margin-bottom: 10px;">
+            <div class="form-group" style="margin-bottom: 0;">
+              <label>State Version</label>
+              <input type="number" class="form-control" id="stateVersion" value="1" min="1">
+            </div>
+            <div class="form-group" style="margin-bottom: 0;">
+              <label>Deadline Budget (ms)</label>
+              <input type="number" class="form-control" id="deadlineBudget" value="250" min="1">
+            </div>
+          </div>
+
+          <div class="toggle-row">
+            <div>
+              <b>Simulate Prospect Interruption</b>
+              <div style="font-size: 11px; color: var(--text-dim);">Increments state_version mid-generation (stale discard)</div>
+            </div>
+            <label class="toggle-switch">
+              <input type="checkbox" id="toggleInterruption">
+              <span class="slider"></span>
+            </label>
+          </div>
+
+          <div class="toggle-row">
+            <div>
+              <b>Live Prospect Time/Date Override</b>
+              <div style="font-size: 11px; color: var(--text-dim);">Live truth wins over contrary stored schedule</div>
+            </div>
+            <label class="toggle-switch">
+              <input type="checkbox" id="toggleLiveOverride">
+              <span class="slider"></span>
+            </label>
+          </div>
+        </div>
+
+        <button class="btn btn-primary" id="btnRunPipeline" style="width: 100%; padding: 12px; font-size: 14px; justify-content: center;" onclick="runSimulation()">
+          Run Conditional Retrieval Pipeline
+        </button>
+      </div>
+
+      <!-- Right Column: Single Turn Stepper & Inspect -->
+      <div>
+        
+        <div class="results-hero">
+          <div style="display: flex; align-items: center; gap: 14px;">
+            <div class="status-badge-lg badge-none_needed" id="statusBadge">
+              READY FOR SIMULATION
+            </div>
+            <div style="font-size: 13px; color: var(--text-muted);" id="statusSummary">
+              Select a preset above or click 'Run Pipeline'.
+            </div>
+          </div>
+          <div class="metric-pills">
+            <div class="metric-pill">Latency: <b id="mLatency">—</b></div>
+            <div class="metric-pill">Facts: <b id="mFactsCount">0</b></div>
+            <div class="metric-pill">Safety: <b id="mSafetyVerdict">—</b></div>
+          </div>
+        </div>
+
+        <div class="subtabs-nav">
+          <button class="subtab-btn active" onclick="switchSubTab('subtabPipeline')">Pipeline Stepper</button>
+          <button class="subtab-btn" onclick="switchSubTab('subtabContext')">6-Block Context</button>
+          <button class="subtab-btn" onclick="switchSubTab('subtabTeleprompter')">Spoken Teleprompter</button>
+        </div>
+
+        <!-- Subtab 1: Pipeline Stepper -->
+        <div class="subtab-content active" id="subtabPipeline">
+          <div class="panel" style="margin-bottom: 12px;">
+            <div class="panel-header">
+              <span>1. Retrieval Gate Evaluation</span>
+              <span class="badge-pill badge-blue" id="gateDecisionBadge">Decision: —</span>
+            </div>
+            <div style="font-size: 12px; color: var(--text-muted); margin-bottom: 6px;" id="gateReasonText">
+              The Gate evaluates whether to short-circuit vector search to preserve 0ms latency.
+            </div>
+            <div style="font-size: 11px; font-family: 'JetBrains Mono', monospace; color: var(--text-dim);" id="gateRuleText">
+              Rule: —
+            </div>
+          </div>
+
+          <div class="panel" style="margin-bottom: 12px;">
+            <div class="panel-header">
+              <span>2. Vector Candidates & Relevance Floors</span>
+              <span style="font-size: 11px; color: var(--text-dim);">Floor: 0.35 | Marginal: 0.50</span>
+            </div>
+            <div id="candidatesTableContainer">
+              <div style="font-size: 12px; color: var(--text-dim); padding: 8px 0;">No candidate search executed yet.</div>
+            </div>
+          </div>
+
+          <div class="panel" style="margin-bottom: 12px;">
+            <div class="panel-header">
+              <span>3. Conflict Resolution & Withheld Facts</span>
+              <span class="badge-pill badge-yellow" id="withheldBadge">Withheld: 0</span>
+            </div>
+            <div id="withheldContainer">
+              <div style="font-size: 12px; color: var(--text-dim); padding: 8px 0;">No withheld facts in current turn.</div>
+            </div>
+          </div>
+
+          <div class="panel">
+            <div class="panel-header">
+              <span>4. Verified Facts Delivered to Block 4</span>
+              <span class="badge-pill badge-green" id="deliveredFactsBadge">Delivered: 0</span>
+            </div>
+            <div id="deliveredFactsContainer">
+              <div style="font-size: 12px; color: var(--text-dim); padding: 8px 0;">No verified facts delivered.</div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Subtab 2: 6-Block Context -->
+        <div class="subtab-content" id="subtabContext">
+          <div class="panel">
+            <div class="panel-header">
+              <h3>Structured 6-Block Prompt Packaging</h3>
+              <span style="font-size: 11px; color: var(--text-dim);">Spec 11 Section 7</span>
+            </div>
+            <div class="code-view" id="rawContextViewer">Assembled 6-block context will appear here upon simulation...</div>
+          </div>
+        </div>
+
+        <!-- Subtab 3: Teleprompter -->
+        <div class="subtab-content" id="subtabTeleprompter">
+          <div class="panel">
+            <div class="panel-header">
+              <h3>Spoken Teleprompter Response</h3>
+              <div style="display: flex; gap: 8px;">
+                <span class="badge-pill badge-blue" id="teleprompterSourceBadge">Source: Deterministic</span>
+                <span class="badge-pill badge-green" id="teleprompterStatusBadge">Status: Generated</span>
+              </div>
+            </div>
+            <div style="font-size: 14px; font-style: italic; color: var(--text); padding: 12px; background: #f8fafc; border: 1px solid var(--border); border-radius: 8px; margin-bottom: 16px;" id="teleprompterPromptText">
+              Waiting for simulation run...
+            </div>
+
+            <div class="panel-header" style="border-top: 1px solid var(--border); padding-top: 12px;">
+              <h3>Post-Generation Hallucination Scanner</h3>
+              <span class="badge-pill badge-green" id="scannerBadge">Status: Clean</span>
+            </div>
+            <div id="hallucinationScannerDetails" style="font-size: 13px; color: var(--text-muted);">
+              Scans for ungrounded volume numbers, ungrounded guarantees, and unauthorized claims.
+            </div>
           </div>
         </div>
 
@@ -915,65 +1123,31 @@
 
     </div>
 
-  </main>
+  </section>
 
-  <!-- Modal: Ingest Custom Knowledge Chunk -->
-  <div class="modal-backdrop" id="ingestModal">
-    <div class="modal-box">
+  <!-- ===================================================================== -->
+  <!-- MODE 4: Latency Metrics & SLA                                         -->
+  <!-- ===================================================================== -->
+  <section class="view-content" id="modeLatency">
+    <div class="panel">
       <div class="panel-header">
-        <h3>➕ Ingest Knowledge Chunk</h3>
-        <button class="btn" onclick="closeIngestModal()">✕</button>
-      </div>
-
-      <div class="form-row">
-        <div class="form-group">
-          <label>Source Title</label>
-          <input type="text" class="form-control" id="chunkTitle" value="Westlake Production Record">
+        <div>
+          <h3>Statistical Stage Latency Metrics</h3>
+          <div style="font-size: 12px; color: var(--text-dim); margin-top: 2px;">
+            Stage percentiles and deadline SLA adherence across all execution turns
+          </div>
         </div>
-        <div class="form-group">
-          <label>Knowledge Class</label>
-          <select class="form-select" id="chunkClass">
-            <option value="performance_past_sales" selected>performance_past_sales</option>
-            <option value="salesperson_profile">salesperson_profile</option>
-            <option value="value_proposition">value_proposition</option>
-            <option value="service_process">service_process</option>
-            <option value="pricing_packaging">pricing_packaging</option>
-            <option value="company_policy">company_policy</option>
-            <option value="market_knowledge">market_knowledge</option>
-            <option value="client_testimonials">client_testimonials</option>
-            <option value="objection_responses">objection_responses</option>
-          </select>
-        </div>
+        <button class="btn" onclick="fetchLatencyMetrics()">Refresh Metrics</button>
       </div>
-
-      <div class="form-row">
-        <div class="form-group">
-          <label>Verification Status</label>
-          <select class="form-select" id="chunkVerification">
-            <option value="company_approved" selected>company_approved (Authority 3)</option>
-            <option value="self_attested">self_attested (Authority 2 - Rep Verified)</option>
-            <option value="user_supplied">user_supplied (Authority 1 - Unapproved)</option>
-          </select>
-        </div>
-        <div class="form-group">
-          <label>Topic Tags (comma-separated)</label>
-          <input type="text" class="form-control" id="chunkTags" value="westlake, sales, experience">
-        </div>
-      </div>
-
-      <div class="form-group">
-        <label>Chunk Factual Text</label>
-        <textarea id="chunkText" rows="3">I have closed 42 homes in Westlake over the past 3 years with an average of 18 days on market.</textarea>
-      </div>
-
-      <div style="display: flex; justify-content: flex-end; gap: 10px; margin-top: 16px;">
-        <button class="btn" onclick="closeIngestModal()">Cancel</button>
-        <button class="btn btn-primary" onclick="submitIngestChunk()">Save & Index Chunk</button>
+      <div id="latencyMetricsContainer">
+        <div style="font-size: 12px; color: var(--text-dim);">Loading latency stats...</div>
       </div>
     </div>
-  </div>
+  </section>
 
-  <!-- Modal: Turn 6-Block Context Inspection -->
+  <!-- ===================================================================== -->
+  <!-- MODAL: Turn 6-Block Context Inspection                                -->
+  <!-- ===================================================================== -->
   <div class="modal-backdrop" id="turnContextModal">
     <div class="modal-box modal-box-large">
       <div class="panel-header" style="margin-bottom: 10px;">
@@ -983,7 +1157,7 @@
             Prospect statement
           </div>
         </div>
-        <button class="btn" onclick="closeTurnContextModal()">✕</button>
+        <button class="btn" onclick="closeTurnContextModal()">Close</button>
       </div>
 
       <!-- Quick Metrics Ribbon -->
@@ -991,35 +1165,36 @@
         <span class="badge-pill badge-blue" id="modalBadgeAction">Action: —</span>
         <span class="badge-pill badge-green" id="modalBadgeTrigger">Trigger: —</span>
         <span class="badge-pill badge-blue" id="modalBadgeGate">Gate: —</span>
-        <span class="badge-pill badge-green" id="modalBadgeSafety">🛡️ Hallucination Safe</span>
+        <span class="badge-pill badge-purple" id="modalBadgeSource">Source: —</span>
+        <span class="badge-pill badge-green" id="modalBadgeSafety">Hallucination Safe</span>
         <span class="badge-pill badge-blue" id="modalBadgeVersion">State Version: 1</span>
         <span class="badge-pill badge-blue" id="modalBadgeLatency">Latency: 0.0ms</span>
       </div>
 
-      <!-- Modal Tabs Navigation -->
-      <div class="tabs-nav" style="margin-bottom: 12px;">
-        <button class="tab-btn active" id="btnMTabBlocks" onclick="switchModalTab('mtabBlocks')">📦 6 Context Blocks</button>
-        <button class="tab-btn" id="btnMTabRaw" onclick="switchModalTab('mtabRaw')">📝 Raw Prompt Contract</button>
-        <button class="tab-btn" id="btnMTabCandidates" onclick="switchModalTab('mtabCandidates')">🎯 Candidates & Floor</button>
-        <button class="tab-btn" id="btnMTabWithheld" onclick="switchModalTab('mtabWithheld')">🚫 Withheld Reasons</button>
+      <!-- Modal Subtabs -->
+      <div class="subtabs-nav" style="margin-bottom: 12px;">
+        <button class="subtab-btn active" id="btnMTabBlocks" onclick="switchModalTab('mtabBlocks')">6 Context Blocks</button>
+        <button class="subtab-btn" id="btnMTabRaw" onclick="switchModalTab('mtabRaw')">Raw Prompt Contract</button>
+        <button class="subtab-btn" id="btnMTabCandidates" onclick="switchModalTab('mtabCandidates')">Candidates & Floor</button>
+        <button class="subtab-btn" id="btnMTabWithheld" onclick="switchModalTab('mtabWithheld')">Withheld Reasons</button>
       </div>
 
-      <!-- Modal Tab 1: 6 Individual Blocks -->
+      <!-- Modal Content 1: Blocks -->
       <div class="modal-tab-content active" id="mtabBlocks" style="max-height: 480px; overflow-y: auto;">
         <div id="modalBlocksContainer" style="display: flex; flex-direction: column; gap: 10px;"></div>
       </div>
 
-      <!-- Modal Tab 2: Raw Contract -->
+      <!-- Modal Content 2: Raw Contract -->
       <div class="modal-tab-content" id="mtabRaw" style="display: none; max-height: 480px; overflow-y: auto;">
         <div class="code-view" id="modalRawContext"></div>
       </div>
 
-      <!-- Modal Tab 3: Candidates -->
+      <!-- Modal Content 3: Candidates -->
       <div class="modal-tab-content" id="mtabCandidates" style="display: none; max-height: 480px; overflow-y: auto;">
         <div id="modalCandidatesContainer"></div>
       </div>
 
-      <!-- Modal Tab 4: Withheld -->
+      <!-- Modal Content 4: Withheld -->
       <div class="modal-tab-content" id="mtabWithheld" style="display: none; max-height: 480px; overflow-y: auto;">
         <div id="modalWithheldContainer"></div>
       </div>
@@ -1041,11 +1216,19 @@
     let multiTurnRunData = null;
     let activeModalTurnData = null;
 
-    // Shortcut: Ctrl+Enter executes pipeline
     document.addEventListener('keydown', (e) => {
       if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') {
-        runSimulation();
+        const activeMode = document.querySelector('.view-content.active')?.id;
+        if (activeMode === 'modeMultiTurn') {
+          runMultiTurnScript();
+        } else if (activeMode === 'modeSingleTurn') {
+          runSimulation();
+        }
       }
+    });
+
+    window.addEventListener('DOMContentLoaded', async () => {
+      await init();
     });
 
     async function init() {
@@ -1055,8 +1238,26 @@
       await fetchLatencyMetrics();
     }
 
+    function switchMode(modeId) {
+      document.querySelectorAll('.mode-nav .mode-btn').forEach(b => b.classList.remove('active'));
+      document.querySelectorAll('.view-content').forEach(v => v.classList.remove('active'));
+      
+      const target = document.getElementById(modeId);
+      if (target) target.classList.add('active');
+
+      if (modeId === 'modeMultiTurn') document.getElementById('tabBtnMultiTurn').classList.add('active');
+      if (modeId === 'modeUpload') document.getElementById('tabBtnUpload').classList.add('active');
+      if (modeId === 'modeSingleTurn') document.getElementById('tabBtnSingleTurn').classList.add('active');
+      if (modeId === 'modeLatency') {
+        document.getElementById('tabBtnLatency').classList.add('active');
+        fetchLatencyMetrics();
+      }
+    }
+
     function onUserChange() {
       activeUserId = document.getElementById('userSelect').value;
+      const label = document.getElementById('activeStoreRepLabel');
+      if (label) label.textContent = activeUserId;
       fetchStoreRecords();
     }
 
@@ -1065,7 +1266,6 @@
         const res = await fetch('/api/conditional-retrieval/presets');
         currentPresets = await res.json();
         renderPresets();
-        // Load default scenario 2
         selectPreset('scenario_2');
       } catch (e) {
         console.error('Failed to load presets:', e);
@@ -1104,10 +1304,9 @@
       if (p.user_id) {
         document.getElementById('userSelect').value = p.user_id;
         activeUserId = p.user_id;
-        fetchStoreRecords();
+        onUserChange();
       }
 
-      // Auto run simulation on preset selection
       runSimulation();
     }
 
@@ -1115,26 +1314,108 @@
       document.getElementById('prospectUtterance').value = text;
     }
 
-    function switchTab(tabId) {
-      document.querySelectorAll('.tabs-nav .tab-btn').forEach(b => b.classList.remove('active'));
-      document.querySelectorAll('.tab-content').forEach(c => c.classList.remove('active'));
-      const btn = Array.from(document.querySelectorAll('.tabs-nav .tab-btn')).find(b => b.getAttribute('onclick')?.includes(tabId));
+    function switchSubTab(subTabId) {
+      document.querySelectorAll('.subtabs-nav .subtab-btn').forEach(b => b.classList.remove('active'));
+      document.querySelectorAll('.subtab-content').forEach(c => c.classList.remove('active'));
+      const btn = Array.from(document.querySelectorAll('.subtabs-nav .subtab-btn')).find(b => b.getAttribute('onclick')?.includes(subTabId));
       if (btn) btn.classList.add('active');
-      const target = document.getElementById(tabId);
+      const target = document.getElementById(subTabId);
       if (target) target.classList.add('active');
     }
 
     async function loadCanonicalDummies() {
       try {
         const btn = document.getElementById('btnLoadDummies');
-        btn.textContent = '⏳ Seeding Docs…';
+        btn.textContent = 'Seeding Docs...';
         const res = await fetch(`/api/conditional-retrieval/load-canonical-dummies?user_id=${activeUserId}`, { method: 'POST' });
-        const data = await res.json();
-        btn.textContent = '⚡ Seed 6 Canonical Dummy Docs';
+        await res.json();
+        btn.textContent = 'Reset Canonical Dummy Docs';
         fetchStoreRecords();
-        alert('Canonical dummy documents successfully seeded into rep_john & rep_sarah store.');
+        alert(`Canonical dummy documents successfully seeded into ${activeUserId} store.`);
       } catch (e) {
         alert('Error seeding dummy docs: ' + e);
+      }
+    }
+
+    async function seedJohnDummiesFromUpload() {
+      await loadCanonicalDummies();
+      fetchStoreRecords();
+    }
+
+    // Document File Upload
+    function onFileSelected() {
+      const fileInput = document.getElementById('fileUploadInput');
+      if (fileInput.files && fileInput.files[0]) {
+        const file = fileInput.files[0];
+        const nameWithoutExt = file.name.substring(0, file.name.lastIndexOf('.')) || file.name;
+        document.getElementById('fileChunkTitle').value = nameWithoutExt.replace(/[_-]/g, ' ').replace(/\b\w/g, l => l.toUpperCase());
+        document.getElementById('fileUploadSelectedName').textContent = `${file.name} (${(file.size / 1024).toFixed(1)} KB)`;
+      }
+    }
+
+    async function submitDocumentFileUpload() {
+      const fileInput = document.getElementById('fileUploadInput');
+      if (!fileInput.files || !fileInput.files[0]) {
+        alert('Please select a file to upload first.');
+        return;
+      }
+
+      const file = fileInput.files[0];
+      const formData = new FormData();
+      formData.append('file', file);
+      formData.append('user_id', activeUserId);
+      formData.append('knowledge_class', document.getElementById('fileChunkClass').value);
+      formData.append('verification_status', document.getElementById('fileChunkVerification').value);
+      formData.append('topic_tags', document.getElementById('fileChunkTags').value);
+      formData.append('source_title', document.getElementById('fileChunkTitle').value);
+
+      const statusEl = document.getElementById('fileUploadStatus');
+      statusEl.style.display = 'block';
+      statusEl.innerHTML = '<span style="color: var(--accent);">Extracting text and indexing document...</span>';
+
+      try {
+        const res = await fetch('/api/conditional-retrieval/upload-file', {
+          method: 'POST',
+          body: formData,
+        });
+
+        const data = await res.json();
+        if (res.ok) {
+          statusEl.innerHTML = `<span style="color: var(--green);"><b>Success:</b> ${data.message}</span>`;
+          fetchStoreRecords();
+          fileInput.value = '';
+          document.getElementById('fileUploadSelectedName').textContent = 'Click to browse another file';
+        } else {
+          statusEl.innerHTML = `<span style="color: var(--red);"><b>Error:</b> ${data.detail || 'Upload failed'}</span>`;
+        }
+      } catch (err) {
+        statusEl.innerHTML = `<span style="color: var(--red);"><b>Error:</b> ${err.message}</span>`;
+      }
+    }
+
+    // Direct Text Upload
+    async function submitSalesmanUpload() {
+      const payload = {
+        owner_user_id: activeUserId,
+        owner_scope: 'user',
+        source_title: document.getElementById('uploadChunkTitle').value,
+        knowledge_class: document.getElementById('uploadChunkClass').value,
+        verification_status: document.getElementById('uploadChunkVerification').value,
+        topic_tags: document.getElementById('uploadChunkTags').value.split(',').map(s => s.trim()).filter(Boolean),
+        text: document.getElementById('uploadChunkText').value,
+        self_attest: (document.getElementById('uploadChunkVerification').value === 'self_attested'),
+      };
+      const res = await fetch('/api/conditional-retrieval/records', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload)
+      });
+      if (res.ok) {
+        fetchStoreRecords();
+        alert('Document indexed successfully for salesman ' + activeUserId);
+      } else {
+        const err = await res.json();
+        alert('Upload error: ' + (err.detail || 'failed'));
       }
     }
 
@@ -1146,7 +1427,7 @@
 
         const container = document.getElementById('storeChunksTableContainer');
         if (!data.records || data.records.length === 0) {
-          container.innerHTML = `<div style="font-size: 12px; color: var(--text-dim); padding: 12px;">No active documents in store for ${activeUserId}. Click 'Seed 6 Canonical Dummy Docs' above.</div>`;
+          container.innerHTML = `<div style="font-size: 13px; color: var(--text-dim); padding: 16px;">No active documents in store for ${activeUserId}. Use the form on the left or click 'Reset All Canonical Dummies'.</div>`;
           return;
         }
 
@@ -1157,7 +1438,7 @@
                 <th>ID / Title</th>
                 <th>Class</th>
                 <th>Status</th>
-                <th>Text</th>
+                <th>Text Snippet</th>
                 <th>Actions</th>
               </tr>
             </thead>
@@ -1174,13 +1455,13 @@
                       ${r.deleted ? 'DELETED' : r.verification_status}
                     </span>
                   </td>
-                  <td style="max-width: 300px; font-size: 11px; color: var(--text-muted);">${r.text}</td>
+                  <td style="max-width: 320px; font-size: 11.5px; color: var(--text-muted);">${r.text}</td>
                   <td>
                     <div style="display: flex; gap: 4px;">
-                      <button class="btn btn-danger" style="padding: 2px 6px; font-size: 11px;" onclick="softDeleteRecord('${r.knowledge_id}')" title="Test Eventual Consistency">
+                      <button class="btn btn-danger" style="padding: 3px 8px; font-size: 11px;" onclick="softDeleteRecord('${r.knowledge_id}')" title="Test Eventual Consistency">
                         ${r.deleted ? 'Un-Delete' : 'Soft-Delete'}
                       </button>
-                      <button class="btn" style="padding: 2px 6px; font-size: 11px;" onclick="tamperRecordText('${r.knowledge_id}')" title="Tamper text to break hash">
+                      <button class="btn" style="padding: 3px 8px; font-size: 11px;" onclick="tamperRecordText('${r.knowledge_id}')" title="Tamper text to break hash">
                         Tamper
                       </button>
                     </div>
@@ -1216,42 +1497,10 @@
       alert('Chunk text modified without updating SHA-256 hash. The authoritative store re-check will demote it to user_supplied.');
     }
 
-    function openIngestModal() {
-      document.getElementById('ingestModal').style.display = 'flex';
-    }
-
-    function closeIngestModal() {
-      document.getElementById('ingestModal').style.display = 'none';
-    }
-
-    async function submitIngestChunk() {
-      const payload = {
-        owner_user_id: activeUserId,
-        owner_scope: 'user',
-        source_title: document.getElementById('chunkTitle').value,
-        knowledge_class: document.getElementById('chunkClass').value,
-        verification_status: document.getElementById('chunkVerification').value,
-        topic_tags: document.getElementById('chunkTags').value.split(',').map(s => s.trim()).filter(Boolean),
-        text: document.getElementById('chunkText').value,
-        self_attest: (document.getElementById('chunkVerification').value === 'self_attested'),
-      };
-      const res = await fetch('/api/conditional-retrieval/records', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(payload)
-      });
-      if (res.ok) {
-        closeIngestModal();
-        fetchStoreRecords();
-      } else {
-        const err = await res.json();
-        alert('Ingestion error: ' + (err.detail || 'failed'));
-      }
-    }
-
+    // Single Turn Simulation Execution
     async function runSimulation() {
       const btn = document.getElementById('btnRunPipeline');
-      btn.textContent = '⏳ Executing Pipeline…';
+      btn.textContent = 'Executing Pipeline...';
 
       const payload = {
         user_id: activeUserId,
@@ -1264,6 +1513,7 @@
         deadline_ms: parseFloat(document.getElementById('deadlineBudget').value),
         simulate_interruption: document.getElementById('toggleInterruption').checked,
         prospect_live_override: document.getElementById('toggleLiveOverride').checked ? document.getElementById('prospectUtterance').value : null,
+        use_real_llm: document.getElementById('toggleUseRealLlmSingle')?.checked || false,
       };
 
       try {
@@ -1277,12 +1527,11 @@
       } catch (e) {
         alert('Simulation failed: ' + e);
       } finally {
-        btn.textContent = '⚡ Run Conditional Retrieval Pipeline (Ctrl+Enter)';
+        btn.textContent = 'Run Conditional Retrieval Pipeline';
       }
     }
 
     function renderSimulationResults(data) {
-      // 1. Status Badge
       const statusBadge = document.getElementById('statusBadge');
       const retStatus = data.retrieval_result.status;
       statusBadge.textContent = 'STATUS: ' + retStatus.toUpperCase();
@@ -1291,9 +1540,8 @@
       document.getElementById('mLatency').textContent = data.sim_latency_total_ms + ' ms';
       document.getElementById('mFactsCount').textContent = data.retrieval_result.facts.length;
       document.getElementById('mSafetyVerdict').textContent = data.hallucination_scanner.safe ? 'SAFE' : 'VIOLATIONS';
-      document.getElementById('mSafetyVerdict').style.color = data.hallucination_scanner.safe ? '#34d399' : '#f87171';
+      document.getElementById('mSafetyVerdict').style.color = data.hallucination_scanner.safe ? 'var(--green)' : 'var(--red)';
 
-      // Status Summary Text
       let summaryText = `Returned ${data.retrieval_result.facts.length} facts in ${data.sim_latency_total_ms}ms.`;
       if (retStatus === 'none_needed') summaryText = 'Fast short-circuit (0ms vector calls): Turn requires no factual citations.';
       if (retStatus === 'none_found') summaryText = 'No qualifying verified facts found. Zero-invention fallback directive issued.';
@@ -1301,7 +1549,6 @@
       if (retStatus === 'timed_out') summaryText = 'Retrieval deadline budget exceeded. Using generic truthful spoken fallback.';
       document.getElementById('statusSummary').textContent = summaryText;
 
-      // 2. Gate Evaluation
       const gateBadge = document.getElementById('gateDecisionBadge');
       gateBadge.textContent = data.gate_evaluation.decision.toUpperCase();
       gateBadge.className = 'badge-pill ' + (data.gate_evaluation.decision === 'proceed' ? 'badge-green' : 'badge-blue');
@@ -1313,7 +1560,6 @@
         document.getElementById('gateRuleText').textContent = 'Rule Triggered: ' + data.gate_evaluation.rule_applied;
       }
 
-      // 3. Candidates & Relevance Floor
       const candContainer = document.getElementById('candidatesTableContainer');
       if (!data.candidates_found || data.candidates_found.length === 0) {
         candContainer.innerHTML = '<div style="font-size: 12px; color: var(--text-dim); padding: 8px 0;">0 candidates searched (Gate short-circuited).</div>';
@@ -1333,7 +1579,7 @@
                 <tr>
                   <td><b>${c.knowledge_id}</b><br><span style="font-size: 11px; color: var(--text-muted);">${c.source_title}</span></td>
                   <td><span style="font-family: monospace;">${c.raw_score}</span></td>
-                  <td><span style="font-family: monospace; color: var(--accent-blue);">${c.ranking_score}</span></td>
+                  <td><span style="font-family: monospace; color: var(--accent);">${c.ranking_score}</span></td>
                   <td>
                     <span class="table-badge ${c.status_flag === 'cleared_floor' ? 'badge-green' : (c.status_flag === 'marginal_low_confidence' ? 'badge-yellow' : 'badge-red')}">
                       ${c.status_flag}
@@ -1346,7 +1592,6 @@
         `;
       }
 
-      // 4. Withheld Facts
       const withheldContainer = document.getElementById('withheldContainer');
       const withheldList = data.retrieval_result.withheld || [];
       document.getElementById('withheldBadge').textContent = 'Withheld: ' + withheldList.length;
@@ -1356,7 +1601,7 @@
         withheldContainer.innerHTML = `
           <div style="display: flex; flex-direction: column; gap: 8px; margin-top: 6px;">
             ${withheldList.map(w => `
-              <div style="background: rgba(239, 68, 68, 0.1); border: 1px solid rgba(239, 68, 68, 0.3); padding: 8px 12px; border-radius: 6px; font-size: 12px;">
+              <div style="background: var(--red-dim); border: 1px solid var(--red-border); padding: 8px 12px; border-radius: 6px; font-size: 12px;">
                 <div style="display: flex; justify-content: space-between;">
                   <b>${w.knowledge_id}</b>
                   <span class="table-badge badge-red">${w.reason.toUpperCase()}</span>
@@ -1368,50 +1613,53 @@
         `;
       }
 
-      // 5. Delivered Facts
       const deliveredContainer = document.getElementById('deliveredFactsContainer');
       const factsList = data.retrieval_result.facts || [];
       document.getElementById('deliveredFactsBadge').textContent = 'Delivered: ' + factsList.length;
       if (factsList.length === 0) {
-        deliveredContainer.innerHTML = '<div style="font-size: 12px; color: var(--text-dim); padding: 8px 0;">0 facts delivered to Block 3 (Truthful fallback active).</div>';
+        deliveredContainer.innerHTML = '<div style="font-size: 12px; color: var(--text-dim); padding: 8px 0;">0 facts delivered to Block 4 (Truthful fallback active).</div>';
       } else {
         deliveredContainer.innerHTML = `
           <div style="display: flex; flex-direction: column; gap: 8px; margin-top: 6px;">
             ${factsList.map(f => `
-              <div style="background: rgba(16, 185, 129, 0.1); border: 1px solid rgba(16, 185, 129, 0.3); padding: 10px 12px; border-radius: 6px; font-size: 12px;">
+              <div style="background: var(--green-dim); border: 1px solid var(--green-border); padding: 10px 12px; border-radius: 6px; font-size: 12px;">
                 <div style="display: flex; justify-content: space-between; margin-bottom: 4px;">
                   <b>${f.knowledge_id}</b>
                   <span class="table-badge badge-green">Authority ${f.authority_level || 3}</span>
                 </div>
-                <div style="color: #e2e8f0; font-size: 13px;">"${f.text}"</div>
+                <div style="color: var(--text); font-size: 13px;">"${f.text}"</div>
               </div>
             `).join('')}
           </div>
         `;
       }
 
-      // 6. Context Viewer
       document.getElementById('rawContextViewer').textContent = data.context_assembled;
+      document.getElementById('teleprompterPromptText').textContent = `"${data.prompt_result.text}"`;
+      
+      const sourceBadge = document.getElementById('teleprompterSourceBadge');
+      if (sourceBadge) {
+        const isLlm = data.prompt_result.generation_source === 'llm';
+        sourceBadge.textContent = isLlm ? 'Source: Groq Qwen-3.8-27B' : 'Source: Deterministic Verbalizer';
+        sourceBadge.className = `badge-pill ${isLlm ? 'badge-purple' : 'badge-blue'}`;
+      }
 
-      // 7. Teleprompter Spoken Response
-      document.getElementById('teleprompterPromptText').textContent = data.prompt_result.text;
       const teleStatus = document.getElementById('teleprompterStatusBadge');
       teleStatus.textContent = 'Status: ' + data.prompt_result.status;
       teleStatus.className = 'badge-pill ' + (data.prompt_result.status === 'generated' ? 'badge-green' : 'badge-red');
 
-      // 8. Hallucination Scanner Details
       const scannerDetails = document.getElementById('hallucinationScannerDetails');
       const scannerBadge = document.getElementById('scannerBadge');
       if (data.hallucination_scanner.safe) {
         scannerBadge.textContent = 'SAFE: 0 Violations';
         scannerBadge.className = 'badge-pill badge-green';
-        scannerDetails.innerHTML = '<span style="color: #34d399;">✓ No ungrounded volume numbers, guarantees, or unauthorized claims detected in teleprompter response.</span>';
+        scannerDetails.innerHTML = '<span style="color: var(--green);">Verified: No ungrounded volume numbers, guarantees, or unauthorized claims detected in teleprompter response.</span>';
       } else {
         scannerBadge.textContent = `VIOLATIONS: ${data.hallucination_scanner.violations_count}`;
         scannerBadge.className = 'badge-pill badge-red';
         scannerDetails.innerHTML = `
-          <div style="color: #f87171; margin-bottom: 6px;">⚠️ Guardrail intercepted ungrounded assertions:</div>
-          <ul style="margin: 0; padding-left: 20px; color: #fca5a5; font-size: 12px;">
+          <div style="color: var(--red); margin-bottom: 6px;">Guardrail intercepted ungrounded assertions:</div>
+          <ul style="margin: 0; padding-left: 20px; color: var(--red); font-size: 12px;">
             ${data.hallucination_scanner.violations.map(v => `<li>${v}</li>`).join('')}
           </ul>
         `;
@@ -1434,17 +1682,17 @@
 
         container.innerHTML = `
           <div style="display: flex; gap: 12px; margin-bottom: 14px;">
-            <div class="metric-pill">Total Calls: <b>${data.total_calls}</b></div>
-            <div class="metric-pill">Deadline Hits: <b style="color: ${data.deadline_hit_rate_pct > 5 ? '#f87171' : '#34d399'};">${data.deadline_hits} (${data.deadline_hit_rate_pct}%)</b></div>
-            <div class="metric-pill">SLA Alert: <b style="color: ${data.deadline_alert ? '#f87171' : '#34d399'};">${data.deadline_alert ? 'BREACHED' : 'HEALTHY'}</b></div>
+            <div class="metric-pill">Total Recorded Calls: <b>${data.total_calls}</b></div>
+            <div class="metric-pill">Deadline Hits: <b style="color: ${data.deadline_hit_rate_pct > 5 ? 'var(--red)' : 'var(--green)'};">${data.deadline_hits} (${data.deadline_hit_rate_pct}%)</b></div>
+            <div class="metric-pill">SLA Alert Status: <b style="color: ${data.deadline_alert ? 'var(--red)' : 'var(--green)'};">${data.deadline_alert ? 'BREACHED' : 'HEALTHY'}</b></div>
           </div>
           <table class="custom-table">
             <thead>
               <tr>
                 <th>Pipeline Stage</th>
-                <th>p50 (ms)</th>
-                <th>p95 (ms)</th>
-                <th>p99 (ms)</th>
+                <th>p50 Latency</th>
+                <th>p95 Latency</th>
+                <th>p99 Latency</th>
               </tr>
             </thead>
             <tbody>
@@ -1464,10 +1712,7 @@
       }
     }
 
-    // -------------------------------------------------------------------------
     // Multi-Turn Script Studio Logic
-    // -------------------------------------------------------------------------
-
     async function loadBenchmarkScripts() {
       try {
         const res = await fetch('/api/conditional-retrieval/scripts');
@@ -1475,7 +1720,7 @@
         const select = document.getElementById('multiTurnScriptSelect');
         select.innerHTML = benchmarkScriptsCatalog.map((s, idx) => `
           <option value="${s.id}" ${idx === 0 ? 'selected' : ''}>${s.name}</option>
-        `).join('') + `<option value="custom">✏️ Custom Prospect Script...</option>`;
+        `).join('') + `<option value="custom">Custom Prospect Script...</option>`;
         onBenchmarkScriptSelected();
       } catch (e) {
         console.error('Failed to load benchmark scripts:', e);
@@ -1510,7 +1755,7 @@
 
       const btn = isReplay ? document.getElementById('btnReplayMultiTurn') : document.getElementById('btnRunMultiTurn');
       const origText = btn.textContent;
-      btn.textContent = isReplay ? '⏳ Replaying Script…' : '⏳ Running Multi-Turn…';
+      btn.textContent = isReplay ? 'Replaying Script...' : 'Running Multi-Turn...';
       btn.disabled = true;
 
       try {
@@ -1519,6 +1764,7 @@
           call_id: 'multiturn_' + Date.now().toString().slice(-4),
           script_name: document.getElementById('multiTurnScriptSelect').selectedOptions[0]?.text || 'Prospect Script',
           prospect_lines: rawLines,
+          use_real_llm: document.getElementById('toggleUseRealLlm')?.checked || false,
         };
 
         const res = await fetch('/api/conditional-retrieval/multi-turn-simulate', {
@@ -1556,7 +1802,6 @@
     }
 
     function renderMultiTurnResults(data, isReplay = false) {
-      // 1. Summary Strip
       const summaryBar = document.getElementById('multiTurnSummaryBar');
       summaryBar.style.display = 'flex';
       document.getElementById('mtSummaryTitle').textContent = `${data.script_name} (${isReplay ? 'Replay' : 'Run'} Complete)`;
@@ -1566,13 +1811,11 @@
       document.getElementById('mtMetricFired').textContent = data.retrieval_fired_count;
       document.getElementById('mtMetricQuiet').textContent = data.retrieval_quiet_count;
       document.getElementById('mtMetricSafety').textContent = data.total_violations === 0 ? 'SAFE (0)' : `${data.total_violations} Violations`;
-      document.getElementById('mtMetricSafety').style.color = data.total_violations === 0 ? '#34d399' : '#f87171';
+      document.getElementById('mtMetricSafety').style.color = data.total_violations === 0 ? 'var(--green)' : 'var(--red)';
       document.getElementById('mtMetricAvgLatency').textContent = `${data.avg_latency_ms} ms`;
 
-      // 2. Table Rows
       const tbody = document.getElementById('multiTurnTableBody');
       tbody.innerHTML = data.turns.map(t => {
-        // Check if row changed from previous replay
         let isChanged = false;
         if (isReplay && lastMultiTurnResult) {
           const prevTurn = lastMultiTurnResult.turns.find(x => x.turn_index === t.turn_index);
@@ -1585,12 +1828,11 @@
           }
         }
 
-        // Candidates summary
         let candSummaryHtml = '';
         if (t.candidates && t.candidates.length > 0) {
           candSummaryHtml = t.candidates.map(c => `
             <div style="font-size: 11px; margin-bottom: 3px;">
-              <b>${c.knowledge_id}</b>: raw <span style="font-family: monospace; color: var(--accent-blue);">${c.raw_score}</span>
+              <b>${c.knowledge_id}</b>: raw <span style="font-family: monospace; color: var(--accent);">${c.raw_score}</span>
               <span class="table-badge ${c.status_flag === 'cleared_floor' ? 'badge-green' : (c.status_flag === 'marginal_low_confidence' ? 'badge-yellow' : 'badge-red')}">${c.status_flag}</span>
             </div>
           `).join('');
@@ -1598,41 +1840,41 @@
           candSummaryHtml = `<span style="color: var(--text-dim); font-size: 11px;">0 candidates searched</span>`;
         }
 
-        // Withheld summary
         if (t.withheld && t.withheld.length > 0) {
           candSummaryHtml += t.withheld.map(w => `
-            <div style="font-size: 11px; color: #fca5a5; margin-top: 4px; background: rgba(239, 68, 68, 0.1); padding: 2px 6px; border-radius: 4px;">
-              🚫 <b>Withheld:</b> ${w.knowledge_id} (${w.reason})
+            <div style="font-size: 11px; color: var(--red); margin-top: 4px; background: var(--red-dim); padding: 2px 6px; border-radius: 4px;">
+              Withheld: ${w.knowledge_id} (${w.reason})
             </div>
           `).join('');
         }
 
-        // Facts summary
         let factsSummaryHtml = '';
         if (t.facts_delivered && t.facts_delivered.length > 0) {
           factsSummaryHtml = t.facts_delivered.map(f => `
-            <div style="background: rgba(16, 185, 129, 0.1); border: 1px solid rgba(16, 185, 129, 0.25); border-radius: 4px; padding: 4px 6px; font-size: 11px; margin-bottom: 3px;">
+            <div style="background: var(--green-dim); border: 1px solid var(--green-border); border-radius: 4px; padding: 4px 6px; font-size: 11px; margin-bottom: 3px;">
               <div style="display: flex; justify-content: space-between;">
                 <b>${f.knowledge_id}</b>
-                <span style="color: var(--accent-green); font-size: 10px;">v${f.source_version || '1.0'}</span>
+                <span style="color: var(--green); font-size: 10px;">v${f.source_version || '1.0'}</span>
               </div>
-              <div style="color: #e2e8f0; font-size: 11px; margin-top: 2px;">${f.text}</div>
+              <div style="color: var(--text); font-size: 11px; margin-top: 2px;">${f.text}</div>
             </div>
           `).join('');
         } else {
           factsSummaryHtml = `<span style="color: var(--text-dim); font-size: 11px;">0 facts (0ms quiet / truthful fallback)</span>`;
         }
 
+        const isLlm = t.generation_source === 'llm';
+
         return `
           <tr class="table-clickable-row ${isChanged ? 'table-changed-row' : ''}" onclick="openTurnContextModal(${t.turn_index})" title="Click to open full 6-block context for Turn ${t.turn_index}">
-            <td style="font-weight: 800; color: var(--accent-blue);">${t.turn_index}</td>
+            <td style="font-weight: 800; color: var(--accent);">${t.turn_index}</td>
             <td>
-              <div style="font-weight: 600; color: #fff;">"${t.prospect_line}"</div>
+              <div style="font-weight: 600; color: var(--text);">"${t.prospect_line}"</div>
             </td>
             <td>
               <span class="badge-pill badge-blue" style="font-size: 11px;">${t.core_action}</span>
-              <div style="font-size: 11px; color: ${t.retrieval_needed ? '#34d399' : 'var(--text-dim)'}; margin-top: 4px;">
-                ${t.retrieval_needed ? '🎯 ' + t.core_trigger : '🔇 ' + t.core_trigger}
+              <div style="font-size: 11px; color: ${t.retrieval_needed ? 'var(--green)' : 'var(--text-dim)'}; margin-top: 4px; font-weight: 500;">
+                ${t.retrieval_needed ? 'Trigger: ' + t.core_trigger : 'Quiet: ' + t.core_trigger}
               </div>
             </td>
             <td>
@@ -1643,18 +1885,23 @@
             <td>${candSummaryHtml}</td>
             <td>${factsSummaryHtml}</td>
             <td>
-              <div style="font-size: 12px; color: #f8fafc; font-style: italic; margin-bottom: 4px;">"${t.teleprompter_line}"</div>
-              <span class="badge-pill ${t.hallucination_safe ? 'badge-green' : 'badge-red'}">
-                ${t.hallucination_safe ? '🛡️ Safe (0 violations)' : '⚠️ ' + t.hallucination_violations.length + ' Violations'}
-              </span>
+              <div style="font-size: 12px; color: var(--text); font-style: italic; margin-bottom: 4px;">"${t.teleprompter_line}"</div>
+              <div style="display: flex; gap: 6px; align-items: center;">
+                <span class="badge-pill ${t.hallucination_safe ? 'badge-green' : 'badge-red'}">
+                  ${t.hallucination_safe ? 'Safe (0 violations)' : t.hallucination_violations.length + ' Violations'}
+                </span>
+                <span class="table-badge ${isLlm ? 'badge-purple' : 'badge-blue'}" style="font-size: 10px;">
+                  ${isLlm ? 'Groq LLM' : 'Deterministic'}
+                </span>
+              </div>
             </td>
             <td>
-              <div style="font-size: 11px; color: var(--text-muted);">State: <b>v${t.state_version}</b></div>
-              <div style="font-family: monospace; font-size: 11px; color: var(--accent-blue); margin-top: 2px;">${t.latency_ms} ms</div>
+              <div style="font-size: 11px; color: var(--text-muted);">v${t.state_version}</div>
+              <div style="font-size: 11px; font-weight: 600; color: ${t.latency_ms > 200 ? 'var(--purple)' : (t.latency_ms > 25 ? 'var(--amber)' : 'var(--accent)')};">${t.latency_ms} ms</div>
             </td>
             <td>
-              <button class="btn" style="padding: 4px 8px; font-size: 11px;" onclick="event.stopPropagation(); openTurnContextModal(${t.turn_index})">
-                🔍 View
+              <button class="btn" style="padding: 3px 8px; font-size: 11px;" onclick="event.stopPropagation(); openTurnContextModal(${t.turn_index})">
+                Inspect
               </button>
             </td>
           </tr>
@@ -1662,75 +1909,81 @@
       }).join('');
     }
 
-    function openTurnContextModal(turnIndex) {
+    // Modal Inspection Functions
+    function openTurnContextModal(turnIdx) {
       if (!multiTurnRunData || !multiTurnRunData.turns) return;
-      const turn = multiTurnRunData.turns.find(t => t.turn_index === turnIndex);
+      const turn = multiTurnRunData.turns.find(t => t.turn_index === turnIdx);
       if (!turn) return;
 
       activeModalTurnData = turn;
-
-      document.getElementById('modalTurnTitle').textContent = `Turn ${turn.turn_index} Detailed Context Inspection`;
-      document.getElementById('modalTurnSubtitle').textContent = `Prospect: "${turn.prospect_line}"`;
+      document.getElementById('modalTurnTitle').textContent = `Turn ${turn.turn_index} Execution Inspection`;
+      document.getElementById('modalTurnSubtitle').textContent = `"${turn.prospect_line}"`;
 
       document.getElementById('modalBadgeAction').textContent = `Action: ${turn.core_action}`;
       document.getElementById('modalBadgeTrigger').textContent = `Trigger: ${turn.core_trigger}`;
       document.getElementById('modalBadgeGate').textContent = `Gate: ${turn.gate_result.toUpperCase()}`;
-      document.getElementById('modalBadgeSafety').textContent = turn.hallucination_safe ? '🛡️ Safe (0 violations)' : `⚠️ ${turn.hallucination_violations.length} Violations`;
-      document.getElementById('modalBadgeSafety').className = 'badge-pill ' + (turn.hallucination_safe ? 'badge-green' : 'badge-red');
-      document.getElementById('modalBadgeVersion').textContent = `State Ver: ${turn.state_version}`;
+      document.getElementById('modalBadgeGate').className = `badge-pill ${turn.gate_result === 'proceed' ? 'badge-green' : 'badge-blue'}`;
+      
+      const sourceBadge = document.getElementById('modalBadgeSource');
+      const isLlm = turn.generation_source === 'llm';
+      sourceBadge.textContent = isLlm ? 'Source: Groq Qwen-3.8-27B' : 'Source: Deterministic Verbalizer';
+      sourceBadge.className = `badge-pill ${isLlm ? 'badge-purple' : 'badge-blue'}`;
+
+      const safeBadge = document.getElementById('modalBadgeSafety');
+      safeBadge.textContent = turn.hallucination_safe ? 'Hallucination Safe (0)' : `${turn.hallucination_violations.length} Violations`;
+      safeBadge.className = `badge-pill ${turn.hallucination_safe ? 'badge-green' : 'badge-red'}`;
+
+      document.getElementById('modalBadgeVersion').textContent = `State Version: ${turn.state_version}`;
       document.getElementById('modalBadgeLatency').textContent = `Latency: ${turn.latency_ms}ms`;
 
-      // Tab 1: Render the 6 discrete blocks
+      // 1. Render 6 Blocks
       const blocksContainer = document.getElementById('modalBlocksContainer');
-      const blkDict = turn.context_blocks || {};
-      const blockLabels = {
-        'block_1': 'Block 1: Strategic Decision Contract',
-        'block_2': 'Block 2: Current Conversation Truth',
-        'block_3': 'Block 3: Grounded Knowledge Facts',
-        'block_4': 'Block 4: Playbook Methodology Constraints',
-        'block_5': 'Block 5: Conversational Pacing & Calibration',
-        'block_6': 'Block 6: Mandatory Generation Directives & Guardrails'
-      };
+      const b = turn.context_blocks || {};
+      const blockDefs = [
+        { key: 'block_1', title: 'Block 1: Strategic Decision Contract', desc: 'Core strategic action, posture, and objectives' },
+        { key: 'block_2', title: 'Block 2: Current Conversation Truth', desc: 'Stage, active objections, and recent conversational evidence' },
+        { key: 'block_3', title: 'Block 3: Verified Knowledge Facts', desc: 'Authoritative facts delivered with authority level and source chunk' },
+        { key: 'block_4', title: 'Block 4: Playbook & Methodology Constraints', desc: 'Active sales methodology and play constraints' },
+        { key: 'block_5', title: 'Block 5: Calibration & Delivery Constraints', desc: 'Word budget, urgency, and pacing rules' },
+        { key: 'block_6', title: 'Block 6: Generation Directives & Guardrails', desc: 'Fact-unavailability guards and strict anti-hallucination contract' },
+      ];
 
-      if (Object.keys(blkDict).length === 0 && turn.context_assembled) {
-        blocksContainer.innerHTML = `<div class="code-view">${turn.context_assembled}</div>`;
-      } else {
-        blocksContainer.innerHTML = Object.entries(blkDict).map(([k, v]) => `
-          <div class="step-card" style="margin-bottom: 8px;">
-            <div class="step-title" style="color: var(--accent-blue); font-size: 12px;">
-              ${blockLabels[k] || k.toUpperCase()}
+      blocksContainer.innerHTML = blockDefs.map((bd, idx) => {
+        const num = idx + 1;
+        const content = b['block_' + num] || b[bd.key] || b['block_' + num + '_operational_mode'] || b['block_' + num + '_strategic_intent'] || 'No content for block ' + num;
+        return `
+          <div style="background: #ffffff; border: 1px solid var(--border); border-radius: 8px; padding: 12px;">
+            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px;">
+              <b style="font-size: 13px; color: var(--text);">${bd.title}</b>
+              <span style="font-size: 11px; color: var(--text-dim);">${bd.desc}</span>
             </div>
-            <div style="font-family: 'JetBrains Mono', monospace; font-size: 11px; white-space: pre-wrap; color: #cbd5e1; line-height: 1.4;">
-              ${v}
-            </div>
+            <div style="background: #f8fafc; border: 1px solid var(--border); border-radius: 6px; padding: 8px 10px; font-family: 'JetBrains Mono', monospace; font-size: 11.5px; color: var(--text); white-space: pre-wrap;">${content}</div>
           </div>
-        `).join('');
-      }
+        `;
+      }).join('');
 
-      // Tab 2: Raw Contract
-      document.getElementById('modalRawContext').textContent = turn.context_assembled || 'No context assembled.';
+      // 2. Render Raw Assembled Contract
+      document.getElementById('modalRawContext').textContent = turn.context_assembled || 'No assembled contract text available.';
 
-      // Tab 3: Candidates
+      // 3. Render Candidates
       const candContainer = document.getElementById('modalCandidatesContainer');
       if (!turn.candidates || turn.candidates.length === 0) {
-        candContainer.innerHTML = '<div style="font-size: 12px; color: var(--text-dim); padding: 12px;">0 candidate chunks searched for this turn (0ms fast exit).</div>';
+        candContainer.innerHTML = `<div style="font-size: 12px; color: var(--text-dim); padding: 12px;">0 candidate chunks searched (turn was 0ms quiet or gate short-circuited).</div>`;
       } else {
         candContainer.innerHTML = `
           <table class="custom-table">
             <thead>
               <tr>
-                <th>Chunk ID / Source</th>
-                <th>Raw Similarity</th>
-                <th>Ranking Score</th>
+                <th>Chunk ID</th>
+                <th>Raw Sim</th>
                 <th>Floor Verdict</th>
               </tr>
             </thead>
             <tbody>
               ${turn.candidates.map(c => `
                 <tr>
-                  <td><b>${c.knowledge_id}</b><br><span style="font-size: 11px; color: var(--text-muted);">${c.source_title}</span></td>
-                  <td><span style="font-family: monospace;">${c.raw_score}</span></td>
-                  <td><span style="font-family: monospace; color: var(--accent-blue);">${c.ranking_score}</span></td>
+                  <td><b>${c.knowledge_id}</b></td>
+                  <td><span style="font-family: monospace; color: var(--accent); font-weight: 700;">${c.raw_score}</span></td>
                   <td>
                     <span class="table-badge ${c.status_flag === 'cleared_floor' ? 'badge-green' : (c.status_flag === 'marginal_low_confidence' ? 'badge-yellow' : 'badge-red')}">
                       ${c.status_flag}
@@ -1743,24 +1996,20 @@
         `;
       }
 
-      // Tab 4: Withheld Chunks
+      // 4. Render Withheld
       const withheldContainer = document.getElementById('modalWithheldContainer');
       if (!turn.withheld || turn.withheld.length === 0) {
-        withheldContainer.innerHTML = '<div style="font-size: 12px; color: var(--text-dim); padding: 12px;">0 chunks withheld for this turn.</div>';
+        withheldContainer.innerHTML = `<div style="font-size: 12px; color: var(--text-dim); padding: 12px;">No facts withheld in this turn.</div>`;
       } else {
-        withheldContainer.innerHTML = `
-          <div style="display: flex; flex-direction: column; gap: 8px;">
-            ${turn.withheld.map(w => `
-              <div style="background: rgba(239, 68, 68, 0.1); border: 1px solid rgba(239, 68, 68, 0.3); padding: 10px 14px; border-radius: 6px; font-size: 12px;">
-                <div style="display: flex; justify-content: space-between; margin-bottom: 4px;">
-                  <b>${w.knowledge_id}</b>
-                  <span class="table-badge badge-red">${w.reason.toUpperCase()}</span>
-                </div>
-                <div style="color: var(--text-muted); font-size: 12px;">${w.details || 'Fact withheld by conflict resolution rule.'}</div>
-              </div>
-            `).join('')}
+        withheldContainer.innerHTML = turn.withheld.map(w => `
+          <div style="background: var(--red-dim); border: 1px solid var(--red-border); border-radius: 6px; padding: 10px 14px; margin-bottom: 8px;">
+            <div style="display: flex; justify-content: space-between;">
+              <b style="color: var(--red);">${w.knowledge_id}</b>
+              <span class="table-badge badge-red">${w.reason.toUpperCase()}</span>
+            </div>
+            <div style="font-size: 12px; color: var(--text-muted); margin-top: 4px;">${w.details || 'Fact withheld by conflict resolution rule.'}</div>
           </div>
-        `;
+        `).join('');
       }
 
       switchModalTab('mtabBlocks');
@@ -1772,15 +2021,15 @@
     }
 
     function switchModalTab(tabId) {
-      document.querySelectorAll('#turnContextModal .tab-btn').forEach(b => b.classList.remove('active'));
-      document.querySelectorAll('.modal-tab-content').forEach(c => c.style.display = 'none');
-      const targetBtn = Array.from(document.querySelectorAll('#turnContextModal .tab-btn')).find(b => b.getAttribute('onclick')?.includes(tabId));
-      if (targetBtn) targetBtn.classList.add('active');
-      const el = document.getElementById(tabId);
-      if (el) el.style.display = 'block';
-    }
+      document.querySelectorAll('#turnContextModal .subtab-btn').forEach(b => b.classList.remove('active'));
+      document.querySelectorAll('#turnContextModal .modal-tab-content').forEach(c => c.style.display = 'none');
 
-    window.onload = init;
+      const btn = Array.from(document.querySelectorAll('#turnContextModal .subtab-btn')).find(b => b.getAttribute('onclick')?.includes(tabId));
+      if (btn) btn.classList.add('active');
+
+      const target = document.getElementById(tabId);
+      if (target) target.style.display = 'block';
+    }
   </script>
 </body>
 </html>
