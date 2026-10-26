@@ -352,9 +352,10 @@ def test_multi_turn_simulate_canonical_8_turn(client):
     # Verify stored 10 AM morning chunk was withheld due to conflict with live prospect constraint
     withheld_ids_t7 = [w["knowledge_id"] for w in t7["withheld"]]
     assert "chunk_stored_schedule" in withheld_ids_t7
-    # Verify rep grounds consultation hours without falsely agreeing to 3:00 PM
-    assert "weekday mornings" in t7["teleprompter_line"].lower()
+    # Verify rep checks availability without leaking withheld weekday mornings chunk or falsely agreeing to 3:00 PM
+    assert "weekday mornings" not in t7["teleprompter_line"].lower(), "Withheld morning schedule must NOT leak into teleprompter line"
     assert "3:00" in t7["teleprompter_line"] or "3 pm" in t7["teleprompter_line"].lower()
+    assert any(w in t7["teleprompter_line"].lower() for w in ("calendar", "check", "verify", "possible", "availability"))
     assert "works great" not in t7["teleprompter_line"].lower()
     assert "tuesday" not in t7["teleprompter_line"].lower()
     assert "thursday" not in t7["teleprompter_line"].lower()
@@ -563,6 +564,59 @@ def test_multi_turn_repeated_objection_script(client):
     # All three spoken lines must be distinct
     lines = [t["teleprompter_line"] for t in turns]
     assert len(set(lines)) == 3, f"Core repeated lines across recurrences: {lines}"
+
+
+def test_sentence_level_hallucination_grounding_checks():
+    """Doc 02 §9: Verifies that broad business claims (contract terms, market claims, staging) are flagged."""
+    from copilot.conditional_retrieval_models import RetrievedFact
+    from copilot.llm_response_gateway import validate_prompt_hallucinations
+
+    verified_fact = RetrievedFact(
+        knowledge_id="f1",
+        knowledge_class="pricing_packaging",
+        source_title="Pricing Policy",
+        text="Standard residential listing commission rate is 5.0% of gross purchase price.",
+    )
+
+    # 1. Contract claim without document support
+    is_safe, violations = validate_prompt_hallucinations(
+        "There is zero obligation—you can walk away anytime if you don't love our service.",
+        [verified_fact],
+    )
+    assert not is_safe
+    assert any("contract claim" in v.lower() for v in violations)
+
+    # 2. Market speed claim without document support
+    is_safe, violations = validate_prompt_hallucinations(
+        "Current market inventory is moving faster than last quarter, which directly impacts your pricing window.",
+        [verified_fact],
+    )
+    assert not is_safe
+    assert any("market claim" in v.lower() for v in violations)
+
+    # 3. Service inclusion / staging claim without document support
+    is_safe, violations = validate_prompt_hallucinations(
+        "Our standard residential listing commission rate is 5.0%, which includes full professional marketing and staging.",
+        [verified_fact],
+    )
+    assert not is_safe
+    assert any("service claim" in v.lower() for v in violations)
+
+    # 4. Scheduling assertion without verified consultation doc
+    is_safe, violations = validate_prompt_hallucinations(
+        "Our consultations are usually weekday mornings, so let me check whether tomorrow at 3:00 PM is possible.",
+        [verified_fact],
+    )
+    assert not is_safe
+    assert any("scheduling assertion" in v.lower() for v in violations)
+
+    # 5. Clean, strictly grounded prompt passes
+    is_safe, violations = validate_prompt_hallucinations(
+        "Our standard residential listing commission rate is 5.0% of gross purchase price.",
+        [verified_fact],
+    )
+    assert is_safe
+    assert len(violations) == 0
 
 
 

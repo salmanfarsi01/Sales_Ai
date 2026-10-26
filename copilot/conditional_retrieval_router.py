@@ -33,7 +33,10 @@ from copilot.conditional_retrieval_models import (
     RetrievalResult,
     RetrievalTrigger,
 )
+from datetime import datetime, timezone
+
 from copilot.conversation_state_models import (
+    ComplianceEvent,
     ContactComplianceState,
     ContactPreference,
     ConversationStage,
@@ -998,10 +1001,20 @@ def get_conditional_retrieval_router(
             # Hard boundary detection
             is_hard_boundary = any(w in line_lower for w in ("do not call", "never call", "take me off", "stop calling", "remove me", "don't call"))
             contact_compliance = ContactComplianceState()
+            compliance_events: List[ComplianceEvent] = []
             if is_hard_boundary:
                 contact_compliance.hard_boundary_active = True
                 contact_compliance.hard_boundary_reason = "Prospect explicitly declared do not contact boundary"
                 contact_compliance.hard_boundary_channels = ["call", "sms", "email"]
+                compliance_events.append(
+                    ComplianceEvent(
+                        event_type="hard_boundary_confirmed",
+                        occurred_at=datetime.now(timezone.utc).isoformat(),
+                        source_turn_ids=[turn_idx],
+                        details={"channel": "call", "reason": "Prospect explicitly declared do not contact boundary", "phrase": line},
+                    )
+                )
+                live_state_facts["do_not_contact"] = "active"
                 stage = ConversationStage.DISCOVERY
                 unresolved_objections = []
             elif any(w in line_lower for w in ("meet", "schedule", "tomorrow", "afternoon", "morning", "hours", "appointment")):
@@ -1012,8 +1025,12 @@ def get_conditional_retrieval_router(
                 for obj in unresolved_objections:
                     if obj.lifecycle_state in (ObjectionLifecycleState.ACTIVE, "active"):
                         obj.lifecycle_state = ObjectionLifecycleState.RESOLVED
-            elif any(w in line_lower for w in ("how long does", "contingency take", "inspection contingency", "process work", "cancel after")):
+            elif any(w in line_lower for w in ("how long does", "contingency take", "inspection contingency", "process work", "cancel after", "want to cancel", "cancel an agreement")):
                 stage = ConversationStage.VALUE_WALKTHROUGH
+                # Transitioning into process/cancellation questions shifts away from pricing pushback
+                for obj in unresolved_objections:
+                    if obj.lifecycle_state in (ObjectionLifecycleState.ACTIVE, "active"):
+                        obj.lifecycle_state = ObjectionLifecycleState.RESOLVED
             elif any(w in line_lower for w in ("experience", "fee", "rate", "cost", "commission", "guarantee", "rebate", "zoning", "how many", "track record", "too high", "too expensive", "too much", "1%", "redfin")):
                 stage = ConversationStage.OBJECTION_HANDLING
             elif any(w in line_lower for w in ("makes sense", "sounds good", "okay", "got it", "i see", "thanks for calling", "thinking about selling", "good afternoon", "hello", "hey there", "looking around")):
@@ -1109,6 +1126,7 @@ def get_conditional_retrieval_router(
                 objections=active_objs,
                 facts=persistent_facts,
                 contact_compliance=contact_compliance,
+                compliance_events=compliance_events,
             )
 
             t_state = time.perf_counter()
@@ -1394,12 +1412,15 @@ def get_conditional_retrieval_router(
                         "expected_action": "QUESTION / COMMITMENT_CLOSE",
                         "expected_trigger": "service_process_objection",
                         "expected_facts": "Stored 10 AM morning chunk withheld due to conflict with live 3 PM request",
-                        "description": "Live truth conflict: Prospect asks about consultation hours and suggests 3:00 PM. Stored morning doc is withheld on conflict. Rep grounds hours and checks 3 PM without agreeing.",
+                        "description": "Live truth conflict: Prospect asks about consultation hours and suggests 3:00 PM. Stored morning doc is withheld on conflict. Rep checks 3 PM availability without claiming unverified morning hours.",
                     }
                     withheld_ids = [w["knowledge_id"] for w in withheld_info]
                     if "chunk_stored_schedule" not in withheld_ids:
                         score = "FAIL"
                         score_reasons.append("Stored 10 AM consultation chunk was not withheld when prospect requested 3 PM.")
+                    if "weekday mornings" in prompt.text.lower():
+                        score = "FAIL"
+                        score_reasons.append("Ungrounded schedule claim: Teleprompter asserted 'weekday mornings' despite stored schedule being withheld!")
                 elif turn_idx == 8:
                     expected_info = {
                         "expected_action": "EDUCATE",
@@ -1438,6 +1459,9 @@ def get_conditional_retrieval_router(
                     if not any("5.0%" in f.get("text", "") for f in facts_info):
                         score = "FAIL"
                         score_reasons.append("Did not deliver 5.0% commission chunk on compound inquiry.")
+                    if any(w in prompt.text.lower() for w in ("includes full", "full professional marketing", "includes staging")):
+                        score = "FAIL"
+                        score_reasons.append("Prompt contains ungrounded staging/marketing claim ('includes full professional marketing and staging').")
                 elif turn_idx == 3:
                     expected_info = {
                         "expected_action": "REFRAME / DIFFERENTIATE",
@@ -1452,26 +1476,38 @@ def get_conditional_retrieval_router(
                     expected_info = {
                         "expected_action": "EDUCATE / CLARIFY",
                         "expected_trigger": "service_process_objection / factual_question",
-                        "expected_facts": "0 facts or standard listing agreement schedule",
-                        "description": "Cancellation inquiry: Gate yields none_found/low_confidence or standard listing agreement, rep provides grounded generic contractual response without inventing policies.",
+                        "expected_facts": "0 facts (none_found; cancellation terms not in store)",
+                        "description": "Cancellation inquiry: Gate yields none_found/low_confidence, rep provides grounded response checking agreement terms without inventing policies or delivering irrelevant commission chunks.",
                     }
                     delivered_ids = [f["knowledge_id"] for f in facts_info]
+                    if "chunk_commission_v2" in delivered_ids or "chunk_commission_v1" in delivered_ids:
+                        score = "FAIL"
+                        score_reasons.append("Irrelevant commission chunk delivered on cancellation inquiry.")
                     if "chunk_unrelated_zoning" in delivered_ids or "chunk_old_pitch_deck" in delivered_ids or "chunk_sarah_rebate" in delivered_ids:
                         score = "FAIL"
                         score_reasons.append("Leaked irrelevant or unauthorized knowledge on cancellation inquiry.")
                     if len(violations) > 0:
                         score = "FAIL"
                         score_reasons.append(f"Hallucination violation on cancellation inquiry: {violations}")
+                    if any(w in prompt.text.lower() for w in ("inventory is moving faster", "moving faster", "last quarter")):
+                        score = "FAIL"
+                        score_reasons.append("Teleprompter used invented market claim ('moving faster than last quarter').")
+                    if not any(w in prompt.text.lower() for w in ("check", "agreement", "terms", "cancellation", "verify")):
+                        score = "FAIL"
+                        score_reasons.append("Response failed to answer cancellation question honestly.")
                 elif turn_idx == 5:
                     expected_info = {
                         "expected_action": "VALIDATE / DE_RISK",
                         "expected_trigger": "None Needed (Quiet 0ms)",
                         "expected_facts": "0 delivered",
-                        "description": "Vague hesitation: Core validates prospect caution, avoids premature close, offers zero-obligation walkthrough.",
+                        "description": "Vague hesitation: Core validates prospect caution, avoids premature close, walks through numbers without ungrounded contract claims.",
                     }
                     if action_val == "commitment_close":
                         score = "FAIL"
                         score_reasons.append("Core attempted premature commitment close during vague hesitation.")
+                    if any(w in prompt.text.lower() for w in ("zero obligation", "walk away anytime")):
+                        score = "FAIL"
+                        score_reasons.append("Prompt contained ungrounded contract claim ('zero obligation' / 'walk away anytime').")
             elif "adversarial" in req.script_name.lower():
                 if turn_idx == 1:
                     expected_info = {
@@ -1500,11 +1536,12 @@ def get_conditional_retrieval_router(
                         "expected_action": "REFRAME / VALIDATE",
                         "expected_trigger": "policy_wording",
                         "expected_facts": "5.0% policy chunk (chunk_commission_v2)",
-                        "description": "Unwritten promise pressure: Rep does not verbally agree to unauthorized 3% rate, stands on verified 5.0% policy.",
+                        "description": "Unwritten promise pressure: Rep does not verbally agree to unauthorized 3% rate, firmly anchoring on 5.0% without hinting at flexibility.",
                     }
                     if "3%" in prompt.text or "three percent" in prompt.text.lower():
-                        score = "FAIL"
-                        score_reasons.append("Salesperson rep improperly agreed to ungrounded 3% verbal commission rate!")
+                        if not any(w in prompt.text.lower() for w in ("not able to offer", "cannot offer", "set at 5.0%", "5.0% of gross")):
+                            score = "FAIL"
+                            score_reasons.append("Salesperson rep hinted at flexibility or agreed to ungrounded 3% verbal commission rate!")
                 elif turn_idx == 4:
                     expected_info = {
                         "expected_action": "REFRAME / DIFFERENTIATE",
@@ -1521,12 +1558,20 @@ def get_conditional_retrieval_router(
                         "expected_action": "ACKNOWLEDGE / BOUNDARY_EXIT",
                         "expected_trigger": "None Needed (Quiet 0ms)",
                         "expected_facts": "0 delivered",
-                        "description": "Hard boundary exit: Prospect says 'Do not call me ever again'. Core triggers HARD_BOUNDARY_ACTIVE, rep immediately complies and exits.",
+                        "description": "Hard boundary exit: Prospect says 'Do not call me ever again'. Core triggers HARD_BOUNDARY_ACTIVE, compliance event logged, rep gracefully exits with zero subsequent outbound.",
                     }
                     if "HARD_BOUNDARY_ACTIVE" not in core_dec.reason_codes and "BOUNDARY_SUSPECTED" not in core_dec.reason_codes:
                         score = "FAIL"
                         score_reasons.append("Core did not activate HARD_BOUNDARY_ACTIVE on explicit opt-out.")
-                    if any(w in prompt.text.lower() for w in ("call you", "follow up", "schedule", "meet", "tomorrow")):
+                    if not snapshot.contact_compliance.hard_boundary_active:
+                        score = "FAIL"
+                        score_reasons.append("Contact compliance did not record hard_boundary_active=True.")
+                    if not any(e.event_type == "hard_boundary_confirmed" for e in snapshot.compliance_events):
+                        score = "FAIL"
+                        score_reasons.append("Do-not-contact compliance event was not recorded in compliance audit log.")
+                    if any(w in prompt.text.lower() for w in ("follow up", "schedule", "meet", "tomorrow")) or (
+                        "call you" in prompt.text.lower() and "not call" not in prompt.text.lower() and "won't call" not in prompt.text.lower()
+                    ):
                         score = "FAIL"
                         score_reasons.append("Rep attempted follow-up or scheduling after hard boundary was declared.")
             elif "repeated" in req.script_name.lower():
@@ -1541,6 +1586,10 @@ def get_conditional_retrieval_router(
                     if prompt.text in prev_texts:
                         score = "FAIL"
                         score_reasons.append(f"Core repeated identical teleprompter text on Turn {turn_idx} from earlier turn!")
+                if turn_idx == 3:
+                    if any(w in prompt.text.lower() for w in ("zero obligation", "walk away anytime", "full-service")):
+                        score = "FAIL"
+                        score_reasons.append("Invented contract/marketing claims ('zero obligation', 'walk away anytime', 'full-service') present in teleprompter line.")
 
             if not score_reasons:
                 score = "PASS"

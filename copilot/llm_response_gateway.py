@@ -209,6 +209,70 @@ def validate_prompt_hallucinations(
             if vg_text not in facts_combined:
                 violations.append(f"Unattested generalization of concrete metric: '{vg_match.group(0)}'")
 
+    # 13. Broad Grounding Checks: Contract terms & cancellation policies (Doc 02 §9)
+    contract_claim_patterns = [
+        r"\b(?:zero|no)\s+obligation\b",
+        r"\bwalk\s+away\s+anytime\b",
+        r"\bcancel\s+anytime\b",
+        r"\bno\s+cancellation\s+fee\b",
+        r"\bwithout\s+obligation\b",
+        r"\bno\s+(?:contractual\s+)?commitment\b",
+        r"\bfree\s+to\s+cancel\b",
+        r"\bno\s+penalty\b",
+        r"\bat\s+no\s+risk\b",
+    ]
+    for pat in contract_claim_patterns:
+        m = re.search(pat, text_clean, flags=re.IGNORECASE)
+        if m:
+            phrase = m.group(0).casefold()
+            if phrase not in facts_combined and phrase not in prospect_combined:
+                violations.append(f"Ungrounded contract claim: '{m.group(0)}' (unsupported cancellation/obligation terms)")
+
+    # 14. Broad Grounding Checks: Market claims and trends (Doc 02 §9)
+    market_claim_patterns = [
+        r"\b(?:inventory\s+is\s+moving\s+faster|market\s+is\s+moving\s+faster)\b",
+        r"\bmoving\s+faster\s+than\s+last\s+(?:quarter|year|month)\b",
+        r"\bfaster\s+than\s+last\s+(?:quarter|year|month)\b",
+        r"\bprices\s+are\s+(?:rising|dropping|climbing|falling)\b",
+        r"\b(?:buyer\s+demand\s+is\s+up|inventory\s+is\s+low|inventory\s+has\s+dropped)\b",
+    ]
+    for pat in market_claim_patterns:
+        m = re.search(pat, text_clean, flags=re.IGNORECASE)
+        if m:
+            phrase = m.group(0).casefold()
+            if phrase not in facts_combined and phrase not in prospect_combined:
+                violations.append(f"Ungrounded market claim: '{m.group(0)}' (unsupported market trend assertion)")
+
+    # 15. Broad Grounding Checks: Service process & marketing inclusions (Doc 02 §9)
+    service_claim_patterns = [
+        r"\bincludes?\s+(?:full\s+)?(?:professional\s+)?marketing\s+and\s+staging\b",
+        r"\bincludes?\s+(?:full\s+)?staging\b",
+        r"\bfree\s+staging\b",
+        r"\bstaging\s+is\s+included\b",
+        r"\bincludes?\s+professional\s+photography\b",
+        r"\bfull-service\s+marketing\b",
+        r"\bfull\s+service\s+marketing\b",
+    ]
+    for pat in service_claim_patterns:
+        m = re.search(pat, text_clean, flags=re.IGNORECASE)
+        if m:
+            phrase = m.group(0).casefold()
+            if phrase not in facts_combined and phrase not in prospect_combined:
+                violations.append(f"Ungrounded service claim: '{m.group(0)}' (unsupported service inclusion)")
+
+    # 16. Broad Grounding Checks: Company scheduling assertions (Doc 02 §9)
+    sched_claim_patterns = [
+        r"\bour\s+consultations\s+are\s+(?:usually|strictly)\s+weekday\s+mornings\b",
+        r"\bconsultations\s+are\s+strictly\s+conducted\b",
+        r"\bwe\s+only\s+meet\s+on\s+weekday\s+mornings\b",
+    ]
+    for pat in sched_claim_patterns:
+        m = re.search(pat, text_clean, flags=re.IGNORECASE)
+        if m:
+            phrase = m.group(0).casefold()
+            if "morning" not in facts_combined and phrase not in prospect_combined:
+                violations.append(f"Ungrounded scheduling assertion: '{m.group(0)}' (consultation schedule not verified in facts)")
+
     return (len(violations) == 0, violations)
 
 
@@ -612,7 +676,7 @@ class LLMResponseGateway:
         if self.llm_client and hasattr(self.llm_client, "chat"):
             try:
                 model = self.model_name
-                if model == "llama-3.1-8b-instant":
+                if model in ("llama-3.1-8b-instant", "openai/gpt-oss-20b"):
                     model = "qwen/qwen3.8-27b"
                 response = self.llm_client.chat.completions.create(
                     model=model,
@@ -629,7 +693,7 @@ class LLMResponseGateway:
                         {"role": "user", "content": context},
                     ],
                     temperature=0.2,
-                    max_tokens=60,
+                    max_tokens=80,
                 )
                 content = response.choices[0].message.content
                 if content and content.strip():
@@ -686,13 +750,22 @@ class LLMResponseGateway:
                 m_pct = re.search(r"\d+(?:\.\d+)?%", f_clean)
                 if m_pct:
                     pct = m_pct.group(0)
+
+                # Compound question checking: if prospect asked about staging, answer commission and defer staging
+                if "staging" in recent_prospect_text:
+                    return f"Our standard residential listing commission rate is {pct} of gross purchase price. Regarding staging, let me check our specific process and confirm for your home."
+
+                # If prospect pressures for ungrounded 3% verbal promise, firmly decline without hinting at flexibility
+                if any(w in recent_prospect_text for w in ("promise me 3%", "promise 3%", "verbally promise", "3% right now", "3 percent")):
+                    return f"Our commission rate is set at {pct} of gross purchase price; I'm not able to offer a 3% rate on this call, but we can review your full net sheet."
+
                 if action == StrategicAction.QUANTIFY:
                     return f"When we sit down together, we can walk through your exact net sheet numbers with our {pct} rate side by side."
                 elif action == StrategicAction.REFRAME:
                     return f"At {pct}, what matters most isn't just the fee percentage, but maximizing your final net proceeds."
                 elif action == StrategicAction.DE_RISK:
-                    return f"There is zero obligation—if our {pct} full-service marketing doesn't make total financial sense, you can walk away anytime."
-                return f"Our standard residential listing commission rate is {pct} of gross purchase price, which includes full professional marketing and staging."
+                    return f"I understand your concern about the fee—we can walk through your expected net proceeds breakdown together so you have complete clarity."
+                return f"Our standard residential listing commission rate is {pct} of gross purchase price."
 
             has_fact_inj, _ = detect_prompt_injection(f_clean)
             if not has_fact_inj and action in (
@@ -709,6 +782,9 @@ class LLMResponseGateway:
                 return f_clean
 
         # Context-specific answers when no external fact chunk is delivered
+        if any(w in recent_prospect_text for w in ("cancel", "cancelling", "cancellation", "walk away", "agreement terms")):
+            return "Let me check our listing agreement cancellation terms for you and confirm the exact details."
+
         if any(w in recent_prospect_text for w in ("guarantee", "7 days", "seven days")):
             return "I can't promise a specific timeline, but we price and market to sell as quickly as possible."
 
@@ -721,7 +797,7 @@ class LLMResponseGateway:
         # Scheduling requests: acknowledge prospect's requested time if provided; never invent ungrounded times (Doc 01 §10)
         if any(w in recent_prospect_text for w in ("3:00 pm", "3pm", "tomorrow afternoon", "consultation hours", "can we meet", "meet tomorrow")):
             if any(w in recent_prospect_text for w in ("consultation hours", "hours", "what are your")):
-                return "Our consultations are usually weekday mornings, so let me check whether tomorrow at 3:00 PM is possible."
+                return "Let me check our calendar to verify whether tomorrow at 3:00 PM is possible for a walkthrough."
             if any(w in recent_prospect_text for w in ("3:00 pm", "3pm", "tomorrow afternoon", "afternoon")):
                 return "Let me check our calendar to verify whether tomorrow at 3:00 PM is possible for a walkthrough."
             return "I'd be glad to coordinate a time that fits your schedule—let me check our availability and confirm what works best."
@@ -737,7 +813,7 @@ class LLMResponseGateway:
 
         if "DECISION_MAKER_ABSENT" in reasons or "STAKEHOLDER_CONCERN" in reasons:
             if "GENUINE_DEAL_RISK" in reasons:
-                return "I completely understand their caution—there's no obligation whatsoever, and we can address any concerns directly together."
+                return "I completely understand their caution—we can review all details directly together so everyone has full clarity."
             return "It makes total sense to coordinate with your partner—would it be helpful if we found a time when you are both available?"
 
         if "OBJECTION_DEFERRED_TO_MEETING" in reasons:
@@ -755,7 +831,7 @@ class LLMResponseGateway:
                 slot = fact.fact_value if fact else "our meeting"
             cleaned_slot = re.sub(r"\bAt\b", "at", str(slot or "our meeting"))
             if action == StrategicAction.VALIDATE or decision.secondary_action == StrategicAction.DE_RISK:
-                return f"I hear you—it's a significant investment. There's zero obligation on {cleaned_slot}; we'll walk through everything openly so you can decide what makes sense."
+                return f"I hear you—it's an important decision. When we meet on {cleaned_slot}, we'll review your net proceeds breakdown together so you can evaluate the numbers openly."
             return f"I completely understand your concern on the commission. When we meet on {cleaned_slot}, we'll look directly at your net proceeds breakdown together so you can see the exact bottom line."
 
         if action == StrategicAction.ACKNOWLEDGE:
@@ -784,13 +860,13 @@ class LLMResponseGateway:
         elif action == StrategicAction.REFRAME:
             return "What matters most isn't just the fee percentage, but what you walk away with in your pocket."
         elif action == StrategicAction.DE_RISK:
-            return "There is zero obligation—if our approach doesn't make total sense, you can walk away anytime."
+            return "I understand your perspective—let's walk through the numbers together so you have complete clarity on the process."
         elif action in (StrategicAction.COMMITMENT_CLOSE, StrategicAction.QUESTION) and (
             "STAGE_SCHEDULING" in reasons or (snapshot and "scheduling" in str(getattr(snapshot, "conversation_stage", "")).lower())
         ):
             # Scheduling Stage: Acknowledge prospect's requested time if provided; never invent ungrounded times (Doc 01 §10)
             if any(w in recent_prospect_text for w in ("consultation hours", "hours", "what are your")):
-                return "Our consultations are usually weekday mornings, so let me check whether tomorrow at 3:00 PM is possible."
+                return "Let me check our calendar to verify whether tomorrow at 3:00 PM is possible for a walkthrough."
             if any(w in recent_prospect_text for w in ("3:00 pm", "3pm", "tomorrow afternoon", "afternoon")):
                 return "Let me check our calendar to verify whether tomorrow at 3:00 PM is possible for a walkthrough."
             has_constraint = False
@@ -829,7 +905,9 @@ class LLMResponseGateway:
                 return "What would be the most important priority for you when evaluating your options?"
             return "What would be the most important outcome for you if you were to make a move?"
         elif action == StrategicAction.EDUCATE:
-            return "Current market inventory is moving faster than last quarter, which directly impacts your pricing window."
+            if any(w in recent_prospect_text for w in ("cancel", "cancelling", "agreement")):
+                return "Let me check our listing agreement cancellation terms for you and confirm the exact details."
+            return "Let me check the agreement terms for you and come back with the exact details."
         else:
             return "I appreciate you sharing that, let's explore what makes the most sense for your timeline."
 
