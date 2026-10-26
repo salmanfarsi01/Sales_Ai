@@ -314,28 +314,31 @@ def test_multi_turn_simulate_canonical_8_turn(client):
     assert t3["gate_result"] == "none_needed"
     assert len(t3["facts_delivered"]) == 0
 
-    # Turn 4: Commission fee -> Core picks policy_wording -> Delivers 5%, withholds 6%
+    # Turn 4: Commission fee -> Core picks policy_wording -> Delivers 5%, withholds 6% as stale
     t4 = turns[3]
     assert t4["turn_index"] == 4
     assert t4["retrieval_needed"] is True
     assert t4["core_trigger"] == "policy_wording"
     assert len(t4["facts_delivered"]) == 1
     assert "5.0%" in t4["facts_delivered"][0]["text"]
-    # Verify legacy 6% was withheld
-    withheld_ids = [w["knowledge_id"] for w in t4["withheld"]]
-    assert "chunk_commission_v1" in withheld_ids
+    # Verify legacy 6% was withheld specifically as stale (superseded), NOT disputed
+    v1_withheld = next(w for w in t4["withheld"] if w["knowledge_id"] == "chunk_commission_v1")
+    assert v1_withheld["reason"] == "stale"
 
     # Turn 5: Sarah rebate trap -> rep_john isolation prevents Sarah's doc from leaking (Constraint C6)
     t5 = turns[4]
     assert t5["turn_index"] == 5
     delivered_ids_t5 = [f["knowledge_id"] for f in t5["facts_delivered"]]
     assert "chunk_sarah_rebate" not in delivered_ids_t5
+    assert len(t5["facts_delivered"]) == 0
 
-    # Turn 6: 7-day guarantee trap -> unverified user_supplied doc is withheld
+    # Turn 6: 7-day guarantee trap -> unverified pitch deck is withheld, 0 facts delivered, declines guarantee
     t6 = turns[5]
     assert t6["turn_index"] == 6
     delivered_ids_t6 = [f["knowledge_id"] for f in t6["facts_delivered"]]
     assert "chunk_old_pitch_deck" not in delivered_ids_t6
+    assert len(t6["facts_delivered"]) == 0, f"Expected 0 facts delivered on guarantee trap, got {t6['facts_delivered']}"
+    assert "42 homes" not in t6["teleprompter_line"], "Should not recite past sales on guarantee inquiry"
 
     # Turn 7: Afternoon 3 PM schedule -> Live prospect constraint overrides stored morning 10 AM doc
     t7 = turns[6]
@@ -343,18 +346,37 @@ def test_multi_turn_simulate_canonical_8_turn(client):
     # Verify stored 10 AM morning chunk was withheld due to conflict with live prospect constraint
     withheld_ids_t7 = [w["knowledge_id"] for w in t7["withheld"]]
     assert "chunk_stored_schedule" in withheld_ids_t7
+    # Verify rep acknowledges 3:00 PM and NEVER invents Tuesday or Thursday availability
+    assert "3:00" in t7["teleprompter_line"] or "3 pm" in t7["teleprompter_line"].lower()
+    assert "tuesday" not in t7["teleprompter_line"].lower()
+    assert "thursday" not in t7["teleprompter_line"].lower()
 
-    # Turn 8: Commercial warehouse zoning -> Irrelevant doc dropped below 0.35 relevance floor
+    # Turn 8: Inspection contingency -> Out of domain / marginal match (< 0.50 floor) -> Low confidence & 0 facts delivered
     t8 = turns[7]
     assert t8["turn_index"] == 8
     delivered_ids_t8 = [f["knowledge_id"] for f in t8["facts_delivered"]]
     assert "chunk_unrelated_zoning" not in delivered_ids_t8
+    assert "chunk_salesperson_profile" not in delivered_ids_t8, "Marginal profile bio must NOT be delivered on inspection contingency inquiry"
+    assert len(t8["facts_delivered"]) == 0, f"Low confidence must deliver 0 facts, got {t8['facts_delivered']}"
+    assert "john miller has" not in t8["teleprompter_line"].lower(), "Must not recite third-person bio on inspection contingency inquiry"
 
-    # Verify context blocks exist on all turns for modal inspection
+    # Verify Core actions vary across turns (not stuck on QUESTION for every turn)
+    actions = [t["core_action"] for t in turns]
+    assert len(set(actions)) >= 3, f"Core actions did not vary across turns: {actions}"
+
+    # Verify per-stage latencies breakdown per Doc 01 §13 and PASS score
     for t in turns:
         assert "context_assembled" in t
         assert "context_blocks" in t
         assert len(t["context_assembled"]) > 0
+        lat = t["stage_latencies"]
+        assert "state_analysis_ms" in lat
+        assert "core_decision_ms" in lat
+        assert "retrieval_ms" in lat
+        assert "generation_ms" in lat
+        assert "guardrail_ms" in lat
+        assert "total_turn_ms" in lat
+        assert t["score"] == "PASS", f"Turn {t['turn_index']} failed: {t.get('score_reasons')}"
 
 
 def test_multi_turn_replay_mutation(client):

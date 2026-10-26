@@ -1460,11 +1460,8 @@ class PitchProXCoreIntelligenceEngine:
             r"\bclosed\s+(?:volume|transactions?|deals?)\b",
             r"\bhow\s+many\s+(?:listings|sales)\b",
             r"\bexperience\s+(?:in|with)\b",
-            r"\bguarantee\b",
-            r"\bpromise\b",
-            r"\bhow\s+fast\b",
-            r"\b7\s+days?\b",
-            r"\bseven\s+days?\b",
+            r"\btrack\s+record\s+in\b",
+            r"\bhow\s+many\s+homes\b",
         ]
         has_credibility_query = any(re.search(pat, t_lower) for pat in credibility_patterns)
         has_credibility_objection = any(
@@ -1472,12 +1469,10 @@ class PitchProXCoreIntelligenceEngine:
             for obj in snapshot.get_unresolved_objections()
         )
 
-        if has_credibility_query or (has_credibility_objection and action_val in ("quantify", "differentiate", "de_risk", "educate", "question", "clarify")):
+        if has_credibility_query or (has_credibility_objection and action_val in ("quantify", "differentiate", "de_risk", "educate", "question", "clarify", "validate")):
             topic_tags = ["experience", "sales", "track_record"]
             if "westlake" in t_lower:
                 topic_tags.insert(0, "westlake")
-            if "guarantee" in t_lower or "7 days" in t_lower:
-                topic_tags.extend(["guarantee", "ranking"])
             decision.retrieval_needed = True
             decision.retrieval_need = RetrievalNeed(
                 trigger=RetrievalTrigger.CREDIBILITY_OBJECTION,
@@ -1486,6 +1481,28 @@ class PitchProXCoreIntelligenceEngine:
             )
             decision.required_facts = [
                 RequiredFactScope(topic="experience", required_evidence_type="stats")
+            ]
+            return
+
+        # 2B. Check for Guarantee / Quick-Sale Promise (Doc 02 §6)
+        guarantee_patterns = [
+            r"\bguarantee\b",
+            r"\bpromise\b",
+            r"\b7\s+days?\b",
+            r"\bseven\s+days?\b",
+            r"\bguaranteed\b",
+            r"\bhow\s+fast\b",
+        ]
+        has_guarantee_query = any(re.search(pat, t_lower) for pat in guarantee_patterns)
+        if has_guarantee_query:
+            decision.retrieval_needed = True
+            decision.retrieval_need = RetrievalNeed(
+                trigger=RetrievalTrigger.POLICY_WORDING,
+                need_statement=f"Company policy on sale guarantees and promised timelines to support {action_val.upper()}",
+                topic_tags=["guarantee", "timeline", "policy", "terms"],
+            )
+            decision.required_facts = [
+                RequiredFactScope(topic="policy", required_evidence_type="policy")
             ]
             return
 
@@ -1501,13 +1518,10 @@ class PitchProXCoreIntelligenceEngine:
             r"\bcancellation\s+clause\b",
             r"\bconsultation\s+hours\b",
             r"\bhours\b",
-            r"\bwhen\s+can\s+we\s+meet\b",
-            r"\bappointment\b",
-            r"\bschedule\b",
         ]
         has_process_query = any(re.search(pat, t_lower) for pat in process_patterns)
         has_process_objection = any(
-            obj.canonical_category in ("process", "timeline", "inspection", "service_process", "contract_terms", "scheduling")
+            obj.canonical_category in ("process", "timeline", "inspection", "service_process", "contract_terms")
             for obj in snapshot.get_unresolved_objections()
         )
 
@@ -1523,7 +1537,29 @@ class PitchProXCoreIntelligenceEngine:
             ]
             return
 
-        # 4. Check for Commission / Fees / Pricing Policies
+        # 4. Check for Competitor Rebate / Matching Claim Inquiry
+        competitor_rebate_patterns = [
+            r"\banother\s+agent\b",
+            r"\bcompetitor\b",
+            r"\bmatch\s+that\b",
+            r"\bcan\s+you\s+match\b",
+            r"\bmatching\b",
+            r"\bsarah\b",
+        ]
+        has_competitor_rebate = any(re.search(pat, t_lower) for pat in competitor_rebate_patterns) and any(w in t_lower for w in ("rebate", "cash back", "cashback", "$5,000", "5000", "credit", "discount"))
+        if has_competitor_rebate:
+            decision.retrieval_needed = True
+            decision.retrieval_need = RetrievalNeed(
+                trigger=RetrievalTrigger.POLICY_WORDING,
+                need_statement=f"Authoritative commission policy regarding competitor rebates and fee matching to support {action_val.upper()}",
+                topic_tags=["rebate", "commission", "cashback", "matching", "pricing"],
+            )
+            decision.required_facts = [
+                RequiredFactScope(topic="commission", required_evidence_type="policy")
+            ]
+            return
+
+        # 5. Check for Commission / Fees / Pricing Policies
         pricing_patterns = [
             r"\bcommission\b",
             r"\bfee[s]?\b",
@@ -1539,7 +1575,7 @@ class PitchProXCoreIntelligenceEngine:
             for obj in snapshot.get_unresolved_objections()
         )
 
-        if has_pricing_query or (has_pricing_objection and action_val in ("educate", "quantify", "differentiate", "reframe", "question", "clarify")):
+        if has_pricing_query or (has_pricing_objection and action_val in ("educate", "quantify", "differentiate", "reframe", "question", "clarify", "validate")):
             decision.retrieval_needed = True
             decision.retrieval_need = RetrievalNeed(
                 trigger=RetrievalTrigger.POLICY_WORDING,
@@ -1551,7 +1587,7 @@ class PitchProXCoreIntelligenceEngine:
             ]
             return
 
-        # 5. Check for Social Proof / Testimonials / Case Studies
+        # 6. Check for Social Proof / Testimonials / Case Studies
         social_proof_patterns = [
             r"\btestimonials?\b",
             r"\breferences?\b",
@@ -1573,14 +1609,12 @@ class PitchProXCoreIntelligenceEngine:
             ]
             return
 
-        # 6. Check for Prior Claim / Promised Incentive Reference
+        # 7. Check for Prior Claim / Promised Incentive Reference (from this rep/company)
         claim_patterns = [
             r"\byou\s+said\b",
             r"\byou\s+mentioned\b",
             r"\byou\s+promised\b",
-            r"\brebate[s]?\b",
-            r"\bcash\s*back\b",
-            r"\bclosing\s+credit\b",
+            r"\bearlier\s+you\s+told\b",
         ]
         has_claim_query = any(re.search(pat, t_lower) for pat in claim_patterns)
         if has_claim_query:
@@ -1595,12 +1629,16 @@ class PitchProXCoreIntelligenceEngine:
             ]
             return
 
-        # 7. Check for Direct Factual Inquiry on Informational Actions or specific out-of-domain terms
+        # 8. Check for Direct Factual Inquiry on Informational Actions or specific out-of-domain terms
         filler_tokens = ("makes sense", "sounds good", "okay", "got it", "i see", "thanks for calling", "thinking about selling", "good afternoon", "hello")
         is_filler = any(t_lower == f or t_lower.startswith(f + ".") or t_lower.startswith(f + ",") for f in filler_tokens)
-        if not is_filler and (
+        is_scheduling_request = snapshot.conversation_stage == ConversationStage.SCHEDULING and any(
+            w in t_lower for w in ("meet", "schedule", "tomorrow", "afternoon", "morning", "appointment", "when can we", "what day", "what time")
+        ) and not any(w in t_lower for w in ("hours", "consultation hours", "office hours"))
+
+        if not is_filler and not is_scheduling_request and (
             action_val in ("educate", "quantify", "clarify", "question") and (
-                "?" in turn_text or any(t_lower.startswith(w) for w in ("what", "how", "where", "when", "which", "can you check", "tell me about", "can you tell"))
+                "?" in turn_text or any(t_lower.startswith(w) for w in ("what", "how", "where", "which", "can you check", "tell me about", "can you tell"))
                 or any(w in t_lower for w in ("zoning", "industrial", "warehouse", "commercial", "school", "taxes"))
             )
         ):

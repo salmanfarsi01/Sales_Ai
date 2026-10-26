@@ -39,6 +39,7 @@ from copilot.conversation_state_models import (
     DecisionStructure,
     ObjectionLifecycleState,
     ObjectionRecord,
+    PersistentFactRecord,
 )
 from copilot.core_intelligence_engine import PitchProXCoreIntelligenceEngine
 from copilot.core_intelligence_models import (
@@ -955,11 +956,18 @@ def get_conditional_retrieval_router(
             turn_start = time.perf_counter()
             line_lower = line.lower()
 
+            # Record prospect turn into conversation history
+            recent_turns.append({"speaker": "prospect", "text": line})
+
             # Stage detection
             if any(w in line_lower for w in ("meet", "schedule", "tomorrow", "afternoon", "morning", "hours", "appointment")):
                 stage = ConversationStage.SCHEDULING
                 if "afternoon" in line_lower or "3:00 pm" in line_lower or "3pm" in line_lower:
                     live_state_facts["scheduling_constraint"] = "prospect requested tomorrow afternoon at 3:00 PM"
+                # Prospect moving into scheduling resolves previous objections
+                for obj in unresolved_objections:
+                    if obj.lifecycle_state in (ObjectionLifecycleState.ACTIVE, "active"):
+                        obj.lifecycle_state = ObjectionLifecycleState.RESOLVED
             elif any(w in line_lower for w in ("experience", "fee", "rate", "cost", "commission", "guarantee", "rebate", "zoning", "how many", "track record")):
                 stage = ConversationStage.OBJECTION_HANDLING
             elif any(w in line_lower for w in ("makes sense", "sounds good", "okay", "got it", "i see", "thanks for calling", "thinking about selling", "good afternoon", "hello")):
@@ -972,7 +980,7 @@ def get_conditional_retrieval_router(
                 stage = ConversationStage.DISCOVERY
 
             # Objection detection & tracking across turns
-            if any(w in line_lower for w in ("experience", "track record", "how many homes", "how long")):
+            if any(w in line_lower for w in ("experience", "track record", "how many homes", "how long have you", "how long in business")):
                 unresolved_objections.append(
                     ObjectionRecord(
                         objection_id=f"obj_credibility_{turn_idx}",
@@ -1000,26 +1008,87 @@ def get_conditional_retrieval_router(
                         confidence=0.90,
                     )
                 )
+            elif any(w in line_lower for w in ("rebate", "cash back", "cashback", "match that", "can you match")):
+                unresolved_objections.append(
+                    ObjectionRecord(
+                        objection_id=f"obj_rebate_{turn_idx}",
+                        canonical_category="commission_fee",
+                        lifecycle_state=ObjectionLifecycleState.ACTIVE,
+                        initial_statement=line,
+                        latest_statement=line,
+                        first_turn_id=turn_idx,
+                        last_updated_turn_id=turn_idx,
+                        recurrence_count=2,
+                        confidence=0.85,
+                    )
+                )
+            elif any(w in line_lower for w in ("guarantee", "7 days", "seven days")):
+                unresolved_objections.append(
+                    ObjectionRecord(
+                        objection_id=f"obj_guarantee_{turn_idx}",
+                        canonical_category="timeline_guarantee",
+                        lifecycle_state=ObjectionLifecycleState.ACTIVE,
+                        initial_statement=line,
+                        latest_statement=line,
+                        first_turn_id=turn_idx,
+                        last_updated_turn_id=turn_idx,
+                        recurrence_count=1,
+                        confidence=0.85,
+                    )
+                )
+            elif any(w in line_lower for w in ("inspection", "contingency", "zoning", "process", "timeline")):
+                unresolved_objections.append(
+                    ObjectionRecord(
+                        objection_id=f"obj_process_{turn_idx}",
+                        canonical_category="contract_terms",
+                        lifecycle_state=ObjectionLifecycleState.ACTIVE,
+                        initial_statement=line,
+                        latest_statement=line,
+                        first_turn_id=turn_idx,
+                        last_updated_turn_id=turn_idx,
+                        recurrence_count=1,
+                        confidence=0.85,
+                    )
+                )
 
-            # Build state snapshot
+            # Build state snapshot with active objections & persistent facts
             active_objs = [o for o in unresolved_objections if o.lifecycle_state in (ObjectionLifecycleState.ACTIVE, "active")]
+            persistent_facts = [
+                PersistentFactRecord(
+                    fact_id=f"fact_{k}",
+                    fact_key=k,
+                    fact_value=str(v),
+                    category="logistical" if ("scheduling" in k or "constraint" in k) else "general",
+                    status="active",
+                    source_turn_id=turn_idx,
+                    timestamp_ms=int(time.time() * 1000),
+                )
+                for k, v in live_state_facts.items()
+            ]
             snapshot = ConversationStateSnapshot(
                 call_sid=req.call_id,
                 call_id=req.call_id,
                 state_version=turn_idx,
                 conversation_stage=stage,
                 decision_structure=DecisionStructure(decision_maker_present=True),
-                unresolved_objections=active_objs,
-                live_state_facts=dict(live_state_facts),
+                objections=active_objs,
+                facts=persistent_facts,
             )
 
+            t_state = time.perf_counter()
+            state_analysis_ms = max(0.05, round((t_state - turn_start) * 1000, 2))
+
             # Real Core Intelligence evaluation
+            t_core_0 = time.perf_counter()
             eval_res = core_engine.evaluate(
                 snapshot,
                 turn_speaker="prospect",
                 turn_text=line,
                 turn_id=turn_idx,
             )
+            t_core_1 = time.perf_counter()
+            core_decision_ms = max(0.05, round((t_core_1 - t_core_0) * 1000, 2))
+
             core_dec = eval_res.decision
             action_val = str(getattr(core_dec.primary_action, "value", core_dec.primary_action)).lower()
 
@@ -1027,6 +1096,7 @@ def get_conditional_retrieval_router(
             withheld_info: List[Dict[str, Any]] = []
             facts_info: List[Dict[str, Any]] = []
 
+            t_ret_0 = time.perf_counter()
             if not core_dec.retrieval_needed:
                 # Fast exit: 0ms vector search
                 gate_status = "none_needed"
@@ -1047,6 +1117,7 @@ def get_conditional_retrieval_router(
                     "conflict_resolution_ms": 0.0,
                     "total_ms": 0.05,
                 }
+                retrieval_ms = 0.05
             else:
                 # Core demands retrieval
                 retrieval_request = RetrievalRequest(
@@ -1099,6 +1170,7 @@ def get_conditional_retrieval_router(
                         request=retrieval_request,
                         allow_confidential=req.allow_confidential,
                     )
+                    gate_status = retrieval_result.status
                 else:
                     retrieval_result = RetrievalResult(
                         request_id=retrieval_request.request_id,
@@ -1116,14 +1188,16 @@ def get_conditional_retrieval_router(
                     "conflict_resolution_ms": max(0.05, round(retrieval_result.latency_ms * 0.2, 2)),
                     "total_ms": max(0.15, round(retrieval_result.latency_ms, 2)),
                 }
+                retrieval_ms = max(0.05, round((time.perf_counter() - t_ret_0) * 1000, 2))
 
                 # Withheld items
                 for w in retrieval_result.withheld:
                     withheld_info.append(w.model_dump())
 
-                # Facts delivered
-                for f in retrieval_result.facts:
-                    facts_info.append(f.model_dump())
+                # Facts delivered to teleprompter (suppressed on low_confidence or none_found)
+                if retrieval_result.status not in ("low_confidence", "none_found", "timed_out", "stale_discarded"):
+                    for f in retrieval_result.facts:
+                        facts_info.append(f.model_dump())
 
             # 6-Block Context assembly
             context_str = shared_gateway.assemble_context(
@@ -1155,6 +1229,7 @@ def get_conditional_retrieval_router(
                         blocks_dict[named_keys[blk_num - 1]] = blk_content
 
             # Teleprompter prompt generation
+            t_gen_0 = time.perf_counter()
             prompt = shared_gateway.generate_prompt(
                 decision=core_dec,
                 snapshot=snapshot,
@@ -1163,25 +1238,150 @@ def get_conditional_retrieval_router(
                 recent_turns=recent_turns,
                 use_llm=req.use_real_llm,
             )
+            t_gen_1 = time.perf_counter()
+            generation_ms = max(0.05, round((t_gen_1 - t_gen_0) * 1000, 2))
 
             # Hallucination Guardrail Check
+            t_guard_0 = time.perf_counter()
             is_safe, violations = validate_prompt_hallucinations(
                 prompt_text=prompt.text,
                 facts=retrieval_result.facts,
                 prospect_context=recent_turns,
             )
+            t_guard_1 = time.perf_counter()
+            guardrail_ms = max(0.05, round((t_guard_1 - t_guard_0) * 1000, 2))
 
-            turn_latency_ms = round((time.perf_counter() - turn_start) * 1000, 2)
-            if turn_latency_ms == 0.0:
-                turn_latency_ms = 0.15
+            turn_latency_ms = max(0.15, round((time.perf_counter() - turn_start) * 1000, 2))
 
-            # Append turns to history
-            recent_turns.append({"speaker": "prospect", "text": line})
+            # Append salesperson response to history
             recent_turns.append({"speaker": "salesperson", "text": prompt.text})
 
             chosen_trigger = "no retrieval needed"
             if core_dec.retrieval_needed and core_dec.retrieval_need:
                 chosen_trigger = core_dec.retrieval_need.trigger.value
+
+            full_stage_latencies = {
+                "state_analysis_ms": state_analysis_ms,
+                "core_decision_ms": core_decision_ms,
+                "retrieval_ms": retrieval_ms,
+                "generation_ms": generation_ms,
+                "guardrail_ms": guardrail_ms,
+                "total_turn_ms": turn_latency_ms,
+                "gate_evaluation_ms": stage_latencies.get("gate_evaluation_ms", 0.05),
+                "candidate_search_ms": stage_latencies.get("candidate_search_ms", 0.0),
+                "conflict_resolution_ms": stage_latencies.get("conflict_resolution_ms", 0.0),
+            }
+
+            # Expected Result & Pass/Fail evaluation per Doc 01 §13
+            expected_info: Dict[str, Any] = {}
+            score = "PASS"
+            score_reasons: List[str] = []
+
+            if "canonical" in req.script_name.lower():
+                if turn_idx == 1:
+                    expected_info = {
+                        "expected_action": "QUESTION / EXPLORE",
+                        "expected_trigger": "None Needed (Quiet 0ms)",
+                        "expected_facts": "0 delivered",
+                        "description": "Greeting turn: Core determines no retrieval needed (0ms fast exit), asks natural discovery question.",
+                    }
+                    if core_dec.retrieval_needed:
+                        score = "FAIL"
+                        score_reasons.append("Retrieval fired on non-factual greeting turn.")
+                elif turn_idx == 2:
+                    expected_info = {
+                        "expected_action": "VALIDATE / QUANTIFY",
+                        "expected_trigger": "credibility_objection",
+                        "expected_facts": "42 homes in Westlake (chunk_westlake_sales)",
+                        "description": "Credibility inquiry: Core triggers credibility_objection, delivers Westlake track record in first person.",
+                    }
+                    if not core_dec.retrieval_needed or chosen_trigger != "credibility_objection":
+                        score = "FAIL"
+                        score_reasons.append(f"Expected credibility_objection, got {chosen_trigger}")
+                    if not any("42" in f.get("text", "") for f in facts_info):
+                        score = "FAIL"
+                        score_reasons.append("Did not deliver 42 homes Westlake track record chunk.")
+                elif turn_idx == 3:
+                    expected_info = {
+                        "expected_action": "CLARIFY / QUESTION",
+                        "expected_trigger": "None Needed (Quiet 0ms)",
+                        "expected_facts": "0 delivered",
+                        "description": "Filler agreement: Core stays quiet (0ms), advances conversation without repeating Turn 1 canned line.",
+                    }
+                    if core_dec.retrieval_needed:
+                        score = "FAIL"
+                        score_reasons.append("Retrieval fired on positive agreement filler.")
+                elif turn_idx == 4:
+                    expected_info = {
+                        "expected_action": "REFRAME / QUANTIFY",
+                        "expected_trigger": "policy_wording",
+                        "expected_facts": "5.0% commission (chunk_commission_v2); withholds 6.0% (chunk_commission_v1) as stale",
+                        "description": "Pricing contradiction: Core triggers policy_wording, delivers current 5.0% policy, marks legacy 6.0% stale.",
+                    }
+                    if not core_dec.retrieval_needed or chosen_trigger != "policy_wording":
+                        score = "FAIL"
+                        score_reasons.append(f"Expected policy_wording, got {chosen_trigger}")
+                    if not any("5.0%" in f.get("text", "") for f in facts_info):
+                        score = "FAIL"
+                        score_reasons.append("Did not deliver 5.0% current commission rate.")
+                    stale_ids = [w["knowledge_id"] for w in withheld_info if w.get("reason") in ("stale", "superseded")]
+                    if "chunk_commission_v1" not in stale_ids:
+                        score = "FAIL"
+                        score_reasons.append("Legacy 6% chunk was not withheld as stale.")
+                elif turn_idx == 5:
+                    expected_info = {
+                        "expected_action": "REFRAME / DIFFERENTIATE",
+                        "expected_trigger": "policy_wording (competitor match)",
+                        "expected_facts": "0 rebate facts (Rep isolation C6 prevents leaking Sarah's doc)",
+                        "description": "Cross-rep leak trap: Sarah's $5,000 rebate is isolated under rep_sarah and must not leak. Rep addresses 'can you match that?'.",
+                    }
+                    delivered_ids = [f["knowledge_id"] for f in facts_info]
+                    if "chunk_sarah_rebate" in delivered_ids:
+                        score = "FAIL"
+                        score_reasons.append("Cross-rep data leakage: Sarah's private rebate chunk leaked to rep_john!")
+                elif turn_idx == 6:
+                    expected_info = {
+                        "expected_action": "VALIDATE / DE_RISK",
+                        "expected_trigger": "policy_wording (guarantee inquiry)",
+                        "expected_facts": "0 facts (Unverified pitch deck withheld; low confidence/none found delivers 0 facts)",
+                        "description": "7-day guarantee trap: Legacy unverified pitch deck is withheld. Rep declines artificial sale guarantees.",
+                    }
+                    delivered_ids = [f["knowledge_id"] for f in facts_info]
+                    if "chunk_old_pitch_deck" in delivered_ids:
+                        score = "FAIL"
+                        score_reasons.append("Delivered unverified 7-day guarantee pitch deck!")
+                    if len(facts_info) > 0:
+                        score = "FAIL"
+                        score_reasons.append("Expected 0 facts delivered on guarantee inquiry; irrelevant sales facts leaked.")
+                elif turn_idx == 7:
+                    expected_info = {
+                        "expected_action": "COMMITMENT_CLOSE / ACKNOWLEDGE",
+                        "expected_trigger": "service_process_objection",
+                        "expected_facts": "Stored 10 AM morning chunk withheld due to conflict with live 3 PM request",
+                        "description": "Live truth conflict: Prospect asks for tomorrow at 3:00 PM. Stored 10 AM doc is withheld. Rep confirms 3 PM request directly.",
+                    }
+                    withheld_ids = [w["knowledge_id"] for w in withheld_info]
+                    if "chunk_stored_schedule" not in withheld_ids:
+                        score = "FAIL"
+                        score_reasons.append("Stored 10 AM consultation chunk was not withheld when prospect requested 3 PM.")
+                elif turn_idx == 8:
+                    expected_info = {
+                        "expected_action": "EDUCATE / CLARIFY",
+                        "expected_trigger": "service_process_objection",
+                        "expected_facts": "0 facts (Low confidence score < 0.50 floor; bio chunk withheld, NOT delivered)",
+                        "description": "Out-of-domain inspection contingency: Top raw semantic score is below 0.50 floor. System returns low_confidence and delivers ZERO facts.",
+                    }
+                    delivered_ids = [f["knowledge_id"] for f in facts_info]
+                    if "chunk_salesperson_profile" in delivered_ids or len(facts_info) > 0:
+                        score = "FAIL"
+                        score_reasons.append("Delivered marginal salesperson bio chunk on inspection contingency inquiry!")
+                    if gate_status not in ("low_confidence", "none_found"):
+                        score = "FAIL"
+                        score_reasons.append(f"Expected low_confidence gate status, got {gate_status}")
+
+            if not score_reasons:
+                score = "PASS"
+                score_reasons = ["All criteria and invariants satisfied."]
 
             turn_results.append({
                 "turn_index": turn_idx,
@@ -1189,7 +1389,7 @@ def get_conditional_retrieval_router(
                 "core_action": action_val.upper(),
                 "core_trigger": chosen_trigger,
                 "retrieval_needed": core_dec.retrieval_needed,
-                "gate_result": "proceed" if (core_dec.retrieval_needed and gate_passed) else (gate_status if core_dec.retrieval_needed else "none_needed"),
+                "gate_result": "proceed" if (core_dec.retrieval_needed and gate_passed and gate_status not in ("low_confidence", "none_found")) else (gate_status if core_dec.retrieval_needed else "none_needed"),
                 "gate_reason": gate_reason,
                 "candidates": search_candidates_info,
                 "withheld": withheld_info,
@@ -1202,9 +1402,12 @@ def get_conditional_retrieval_router(
                 "hallucination_violations": violations,
                 "state_version": turn_idx,
                 "latency_ms": turn_latency_ms,
-                "stage_latencies": stage_latencies,
+                "stage_latencies": full_stage_latencies,
                 "context_assembled": context_str,
                 "context_blocks": blocks_dict,
+                "expected_info": expected_info,
+                "score": score,
+                "score_reasons": score_reasons,
             })
 
         total_sim_ms = round((time.perf_counter() - total_sim_start) * 1000, 2)
@@ -1219,6 +1422,9 @@ def get_conditional_retrieval_router(
             "retrieval_fired_count": sum(1 for t in turn_results if t["retrieval_needed"]),
             "retrieval_quiet_count": sum(1 for t in turn_results if not t["retrieval_needed"]),
             "total_violations": sum(len(t["hallucination_violations"]) for t in turn_results),
+            "passed_turns_count": sum(1 for t in turn_results if t.get("score") == "PASS"),
+            "failed_turns_count": sum(1 for t in turn_results if t.get("score") == "FAIL"),
+            "retrieval_budget_ms": req.deadline_ms,
             "avg_latency_ms": round(sum(t["latency_ms"] for t in turn_results) / max(1, len(turn_results)), 2),
             "total_sim_ms": total_sim_ms,
             "turns": turn_results,

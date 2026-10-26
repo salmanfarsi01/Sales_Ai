@@ -1223,7 +1223,7 @@ class ConditionalRetrievalEngine:
                             withheld.append(
                                 WithheldFact(
                                     knowledge_id=rec_j.knowledge_id,
-                                    reason="disputed",
+                                    reason="stale",
                                     details=f"Superseded by newer source version {rec_i.source_version} ('{rec_i.source_title}').",
                                 )
                             )
@@ -1232,7 +1232,7 @@ class ConditionalRetrievalEngine:
                             withheld.append(
                                 WithheldFact(
                                     knowledge_id=rec_i.knowledge_id,
-                                    reason="disputed",
+                                    reason="stale",
                                     details=f"Superseded by newer source version {rec_j.source_version} ('{rec_j.source_title}').",
                                 )
                             )
@@ -1572,17 +1572,19 @@ class ConditionalRetrievalEngine:
         accepted_raw_scores = [item[2] for item in candidates if item[0].knowledge_id in accepted_ids]
         top_raw_semantic = max(accepted_raw_scores) if accepted_raw_scores else 0.0
 
+        trigger_val = str(getattr(request.retrieval_need.trigger, "value", request.retrieval_need.trigger)).lower() if request.retrieval_need else ""
+        action_str = str(getattr(request.strategic_action, "value", request.strategic_action)).lower()
         if top_raw_semantic < cfg.marginal_threshold:
             status = "low_confidence"
-            if trigger_val in ("factual_question", "prior_claim_reference"):
+            if trigger_val in ("factual_question", "prior_claim_reference") or action_str == "question":
                 fallback_hint = "ask_clarifying_question"
             else:
                 fallback_hint = "use_generic_truthful"
+            final_facts = accepted_facts[:cfg.max_facts]
         else:
             status = "retrieved"
             fallback_hint = None
-
-        final_facts = accepted_facts[:cfg.max_facts]
+            final_facts = accepted_facts[:cfg.max_facts]
         packaging_ms = (time.perf_counter() - t_pkg_0) * 1000.0
         elapsed_ms = (time.perf_counter() - start_time) * 1000.0
 
@@ -1735,7 +1737,7 @@ class ConditionalRetrievalEngine:
                 for f in res.facts
             ]
             queries = [f"{t} proof" for t in request.retrieval_need.topic_tags] if request.retrieval_need else []
-            disputed = [w.knowledge_id for w in res.withheld if w.reason == "disputed"]
+            disputed = [w.knowledge_id for w in res.withheld if w.reason in ("disputed", "stale")]
             return RetrievalExecutionReport(
                 retrieval_needed=True,
                 decision_id=decision.decision_id,

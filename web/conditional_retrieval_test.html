@@ -684,23 +684,29 @@
       </div>
 
       <div style="overflow-x: auto;">
+        <div style="margin-bottom: 12px; padding: 10px 14px; background: #f8fafc; border: 1px solid var(--border); border-radius: 8px; font-size: 12px; color: var(--text-dim);">
+          <b>Doc 01 §13 Latency Contract:</b> The 250ms conversational deadline budget applies strictly to the <b>Retrieval Stage</b> (Gate + Vector Search + Conflict Resolution). Quiet turns exit at ~0.05ms without vector search.
+        </div>
+
         <table class="custom-table" id="multiTurnTable">
           <thead>
             <tr>
-              <th style="width: 40px;">Turn</th>
-              <th style="width: 220px;">Prospect Line</th>
-              <th style="width: 150px;">Core Action & Trigger</th>
-              <th style="width: 90px;">Gate Result</th>
-              <th style="width: 200px;">Candidates & Withheld</th>
-              <th style="width: 200px;">Facts Delivered</th>
-              <th>Spoken Teleprompter Response</th>
-              <th style="width: 110px;">Ver / Latency</th>
-              <th style="width: 80px;">Action</th>
+              <th style="width: 35px;">Turn</th>
+              <th style="width: 180px;">Prospect Line</th>
+              <th style="width: 130px;">Core Action & Trigger</th>
+              <th style="width: 80px;">Gate Result</th>
+              <th style="width: 170px;">Candidates & Floor</th>
+              <th style="width: 170px;">Facts Delivered</th>
+              <th style="width: 200px;">Spoken Teleprompter Response</th>
+              <th style="width: 170px;">Expected Behavior</th>
+              <th style="width: 65px;">Score</th>
+              <th style="width: 140px;">Doc 01 §13 Latencies</th>
+              <th style="width: 70px;">Action</th>
             </tr>
           </thead>
           <tbody id="multiTurnTableBody">
             <tr>
-              <td colspan="9" style="text-align: center; color: var(--text-dim); padding: 40px;">
+              <td colspan="11" style="text-align: center; color: var(--text-dim); padding: 40px;">
                 Select a benchmark script above and click <b>Run Multi-Turn Script Simulation</b>.
               </td>
             </tr>
@@ -1162,6 +1168,7 @@
 
       <!-- Quick Metrics Ribbon -->
       <div style="display: flex; gap: 8px; margin-bottom: 12px; flex-wrap: wrap;">
+        <span class="badge-pill badge-green" id="modalBadgeScore">Score: PASS</span>
         <span class="badge-pill badge-blue" id="modalBadgeAction">Action: —</span>
         <span class="badge-pill badge-green" id="modalBadgeTrigger">Trigger: —</span>
         <span class="badge-pill badge-blue" id="modalBadgeGate">Gate: —</span>
@@ -1865,6 +1872,40 @@
 
         const isLlm = t.generation_source === 'llm';
 
+        let expectedHtml = '';
+        if (t.expected_info && t.expected_info.description) {
+          expectedHtml = `
+            <div style="font-size: 11px; color: var(--text);">
+              <b>${t.expected_info.description}</b>
+              <div style="font-size: 10px; color: var(--text-dim); margin-top: 2px;">
+                Action: <code>${t.expected_info.expected_action || 'ANY'}</code> • Trigger: <code>${t.expected_info.expected_trigger || 'none'}</code>
+              </div>
+            </div>
+          `;
+        } else {
+          expectedHtml = `<span style="font-size: 11px; color: var(--text-dim);">Evaluated against live guardrails</span>`;
+        }
+
+        const scoreBadge = t.score === 'PASS'
+          ? `<span class="badge-pill badge-green" style="font-weight: 700;">PASS</span>`
+          : `<span class="badge-pill badge-red" style="font-weight: 700;">FAIL</span>`;
+
+        const lat = t.stage_latencies || {};
+        const retrMs = lat.retrieval_ms !== undefined ? lat.retrieval_ms : t.latency_ms;
+        const retrColor = retrMs <= 250 ? 'var(--green)' : 'var(--red)';
+        const latencyHtml = `
+          <div style="font-size: 11px; font-family: monospace;">
+            <div style="font-weight: 700; color: ${t.latency_ms > 500 ? 'var(--purple)' : 'var(--text)'};">${t.latency_ms} ms (v${t.state_version})</div>
+            <div style="color: var(--text-dim); font-size: 9.5px; line-height: 1.35; margin-top: 3px;">
+              State: ${lat.state_analysis_ms || 0}ms<br>
+              Core: ${lat.core_decision_ms || 0}ms<br>
+              <span style="color: ${retrColor}; font-weight: 600;">Retr: ${retrMs}ms</span> (Gate: ${lat.gate_evaluation_ms || 0}ms)<br>
+              Gen: ${lat.generation_ms || 0}ms<br>
+              Guard: ${lat.guardrail_ms || 0}ms
+            </div>
+          </div>
+        `;
+
         return `
           <tr class="table-clickable-row ${isChanged ? 'table-changed-row' : ''}" onclick="openTurnContextModal(${t.turn_index})" title="Click to open full 6-block context for Turn ${t.turn_index}">
             <td style="font-weight: 800; color: var(--accent);">${t.turn_index}</td>
@@ -1895,10 +1936,9 @@
                 </span>
               </div>
             </td>
-            <td>
-              <div style="font-size: 11px; color: var(--text-muted);">v${t.state_version}</div>
-              <div style="font-size: 11px; font-weight: 600; color: ${t.latency_ms > 200 ? 'var(--purple)' : (t.latency_ms > 25 ? 'var(--amber)' : 'var(--accent)')};">${t.latency_ms} ms</div>
-            </td>
+            <td>${expectedHtml}</td>
+            <td style="text-align: center;">${scoreBadge}</td>
+            <td>${latencyHtml}</td>
             <td>
               <button class="btn" style="padding: 3px 8px; font-size: 11px;" onclick="event.stopPropagation(); openTurnContextModal(${t.turn_index})">
                 Inspect
@@ -1933,8 +1973,15 @@
       safeBadge.textContent = turn.hallucination_safe ? 'Hallucination Safe (0)' : `${turn.hallucination_violations.length} Violations`;
       safeBadge.className = `badge-pill ${turn.hallucination_safe ? 'badge-green' : 'badge-red'}`;
 
+      const scoreEl = document.getElementById('modalBadgeScore');
+      if (scoreEl) {
+        scoreEl.textContent = `Score: ${turn.score || 'PASS'}`;
+        scoreEl.className = `badge-pill ${turn.score === 'PASS' ? 'badge-green' : 'badge-red'}`;
+      }
+
       document.getElementById('modalBadgeVersion').textContent = `State Version: ${turn.state_version}`;
-      document.getElementById('modalBadgeLatency').textContent = `Latency: ${turn.latency_ms}ms`;
+      const lat = turn.stage_latencies || {};
+      document.getElementById('modalBadgeLatency').textContent = `Total Latency: ${turn.latency_ms}ms (State: ${lat.state_analysis_ms || 0}ms | Core: ${lat.core_decision_ms || 0}ms | Retr: ${lat.retrieval_ms || 0}ms | Gen: ${lat.generation_ms || 0}ms | Guard: ${lat.guardrail_ms || 0}ms)`;
 
       // 1. Render 6 Blocks
       const blocksContainer = document.getElementById('modalBlocksContainer');
