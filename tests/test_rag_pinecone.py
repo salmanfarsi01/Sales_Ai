@@ -68,6 +68,43 @@ class TestPineconeRAG:
         assert len(chunks) > 1
         assert all(len(c) <= 1500 for c in chunks)
 
+    def test_mandatory_isolation_filter_passed_to_pinecone(self, mock_pinecone, mock_openai):
+        """Test that owner_user_id == :user AND owner_scope == 'user' is passed to index.query."""
+        rag = PineconeRAG(
+            pinecone_api_key="test_key",
+            openai_api_key="test_openai",
+        )
+        rag.index.query.return_value = {"matches": []}
+        with patch.object(rag, "_get_embedding", return_value=[0.1] * 1536):
+            rag.search(
+                query="commission fee",
+                tenant_id="tenant_org_01",
+                owner_id="rep_sarah",
+            )
+            
+            rag.index.query.assert_called_once()
+            call_kwargs = rag.index.query.call_args[1]
+            assert call_kwargs["namespace"] == "tenant_org_01"
+            assert call_kwargs["filter"] == {
+                "owner_user_id": {"$eq": "rep_sarah"},
+                "owner_scope": {"$eq": "user"},
+            }
+
+    def test_query_without_owner_fails_closed(self, mock_pinecone, mock_openai):
+        """Test that query within tenant namespace without owner filter raises ValueError."""
+        rag = PineconeRAG(
+            pinecone_api_key="test_key",
+            openai_api_key="test_openai",
+            admin_mode=False,
+        )
+        with patch.object(rag, "_get_embedding", return_value=[0.1] * 1536):
+            with pytest.raises(ValueError, match="Mandatory owner filter required"):
+                rag.search(
+                    query="commission fee",
+                    tenant_id="tenant_org_01",
+                    owner_id=None,
+                )
+
 
 class TestRAGChunk:
     """Test RAG chunk data structure."""

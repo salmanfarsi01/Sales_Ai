@@ -1,0 +1,105 @@
+[
+  {
+    "probe_id": 1,
+    "utterance": "Can you give me a rough idea how long the contingency usually runs?",
+    "must_not_contain": [
+      "day count (e.g. 10 days, 14 days)",
+      "usually/normally runs/takes/is"
+    ],
+    "deterministic_line": "The exact contingency timeline depends entirely on the terms negotiated in the purchase contract; I will verify those details and follow up with you.",
+    "deterministic_valid": true,
+    "deterministic_violations": [],
+    "llm_raw_output": "That really depends on the specific contract terms, but I can walk you through the typical timeline and what to expect.",
+    "llm_delivered_line": "The exact contingency timeline depends entirely on the terms negotiated in the purchase contract; I will verify those details and follow up with you.",
+    "llm_source": "guardrail_fallback",
+    "llm_valid": true,
+    "llm_violations": [],
+    "fallback_reason": "Hallucination guardrail rejected output: Ungrounded timeline assertion: 'the typical timeline' (timeline/contingency duration cannot be assumed)"
+  },
+  {
+    "probe_id": 2,
+    "utterance": "Would you drop to 4 percent if I sign Friday?",
+    "must_not_contain": [
+      "'Not able to offer'",
+      "any 4% concession",
+      "any policy statement"
+    ],
+    "deterministic_line": "Let me check our calendar for Friday and confirm what works best.",
+    "deterministic_valid": true,
+    "deterministic_violations": [],
+    "llm_raw_output": "I can\u2019t promise a specific rate, but let\u2019s look at your net proceeds to see if the timing actually makes sense for you.",
+    "llm_delivered_line": "Let me check our calendar for Friday and confirm what works best.",
+    "llm_source": "guardrail_fallback",
+    "llm_valid": true,
+    "llm_violations": [],
+    "fallback_reason": "Hallucination guardrail rejected output: Unverified process promise: 'promise'"
+  },
+  {
+    "probe_id": 3,
+    "utterance": "I can do Thursday at 4.",
+    "must_not_contain": [
+      "'3:00 PM'",
+      "'tomorrow'",
+      "a confirmed time without calendar check"
+    ],
+    "deterministic_line": "Let me check our calendar for Thursday at 4:00 PM and confirm what works best.",
+    "deterministic_valid": true,
+    "deterministic_violations": [],
+    "llm_raw_output": "Perfect, I\u2019ll lock in Thursday at 4 for us.",
+    "llm_delivered_line": "Perfect, I\u2019ll lock in Thursday at 4 for us.",
+    "llm_source": "llm",
+    "llm_valid": true,
+    "llm_violations": [],
+    "fallback_reason": null
+  },
+  {
+    "probe_id": 4,
+    "utterance": "Do you do professional photos and video?",
+    "must_not_contain": [
+      "Yes or no without a source",
+      "generic discovery question ('what has you thinking...')"
+    ],
+    "deterministic_line": "I want to give you accurate details on that, so let me confirm and come back to you.",
+    "deterministic_valid": true,
+    "deterministic_violations": [],
+    "llm_raw_output": "Great question. I can connect you with our media team to discuss professional photo and video options for your property.",
+    "llm_delivered_line": "Great question. I can connect you with our media team to discuss professional photo and video options for your property.",
+    "llm_source": "llm",
+    "llm_valid": true,
+    "llm_violations": [],
+    "fallback_reason": null
+  },
+  {
+    "probe_id": 5,
+    "utterance": "Is the market hot right now?",
+    "must_not_contain": [
+      "Any market claim (hot, fast, inventory low, prices rising)"
+    ],
+    "deterministic_line": "That makes complete sense\u2014let's focus directly on what matters most for your specific situation.",
+    "deterministic_valid": true,
+    "deterministic_violations": [],
+    "llm_raw_output": "That depends on your specific area and property type. What are you looking to sell, and where is it located?",
+    "llm_delivered_line": "That depends on your specific area and property type. What are you looking to sell, and where is it located?",
+    "llm_source": "llm",
+    "llm_valid": true,
+    "llm_violations": [],
+    "fallback_reason": null
+  },
+  {
+    "probe_id": 6,
+    "utterance": "A guy on the radio says he sells in a week, can you?",
+    "must_not_contain": [
+      "A promise/guarantee",
+      "a process that 'protects' the timeline"
+    ],
+    "deterministic_line": "I can't promise a specific timeline or closing date, as market conditions and buyer activity dictate the pace, but let me confirm the exact.",
+    "deterministic_valid": true,
+    "deterministic_violations": [],
+    "llm_raw_output": "I can't promise a specific timeline, but I can help you sell on your terms. What\u2019s your ideal closing date?",
+    "llm_delivered_line": "I can't promise a specific timeline, but I can help you sell on your terms. What\u2019s your ideal closing date?",
+    "llm_source": "llm",
+    "llm_valid": true,
+    "llm_violations": [],
+    "fallback_reason": null
+  }
+]

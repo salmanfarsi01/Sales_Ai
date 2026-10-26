@@ -53,7 +53,11 @@ from copilot.core_intelligence_models import (
     StrategicAction,
     StrategicDecision,
 )
-from copilot.llm_response_gateway import LLMResponseGateway, validate_prompt_hallucinations
+from copilot.llm_response_gateway import (
+    LLMResponseGateway,
+    extract_proposed_time_or_day,
+    validate_prompt_hallucinations,
+)
 
 LOGGER = logging.getLogger(__name__)
 
@@ -105,7 +109,7 @@ class SimulationRequest(BaseModel):
     time_sensitive: bool = False
     lead_type: Optional[str] = "residential_seller"
     prospect_type: Optional[str] = None
-    deadline_ms: Optional[float] = 250.0
+    deadline_ms: Optional[float] = 600.0
     allow_confidential: bool = False
     simulate_interruption: bool = False  # If True, increments state_version post-retrieval
     prospect_live_override: Optional[str] = None  # E.g. prospect says afternoon when doc says morning
@@ -119,7 +123,7 @@ class MultiTurnScriptRequest(BaseModel):
     prospect_lines: List[str] = Field(default_factory=list)
     lead_type: Optional[str] = "residential_seller"
     prospect_type: Optional[str] = None
-    deadline_ms: Optional[float] = 250.0
+    deadline_ms: Optional[float] = 600.0
     allow_confidential: bool = False
     use_real_llm: bool = False
 
@@ -518,11 +522,26 @@ def get_conditional_retrieval_router(
             if r.owner_user_id == user_id
         ]
         user_version = shared_engine.store.get_user_knowledge_version(user_id)
+        has_pinecone = shared_engine.store.pinecone_rag is not None
+        backend_info = {
+            "backend": "pinecone" if has_pinecone else "in_memory",
+            "index_name": getattr(shared_engine.store.pinecone_rag, "index_name", "subscriber-kb") if has_pinecone else "local_store",
+            "status": "connected" if has_pinecone else "active",
+            "badge_text": "Vector Backend: Pinecone (subscriber-kb)" if has_pinecone else "Vector Backend: Local In-Memory",
+        }
         return {
             "user_id": user_id,
             "user_knowledge_version": user_version,
             "total_records": len(records),
-            "records": [r.model_dump() for r in records],
+            "backend_info": backend_info,
+            "records": [
+                {
+                    **r.model_dump(),
+                    "vector_backend": "pinecone" if has_pinecone else "in_memory",
+                    "vector_status": "synced" if (has_pinecone and shared_engine.store.sync_to_pinecone) else "local_memory",
+                }
+                for r in records
+            ],
         }
 
     @router.post("/api/conditional-retrieval/records")
@@ -1036,8 +1055,9 @@ def get_conditional_retrieval_router(
                 unresolved_objections = []
             elif any(w in line_lower for w in ("meet", "schedule", "tomorrow", "afternoon", "morning", "hours", "appointment")):
                 stage = ConversationStage.SCHEDULING
-                if "afternoon" in line_lower or "3:00 pm" in line_lower or "3pm" in line_lower:
-                    live_state_facts["scheduling_constraint"] = "prospect requested tomorrow afternoon at 3:00 PM"
+                proposed_time = extract_proposed_time_or_day(line)
+                if proposed_time:
+                    live_state_facts["scheduling_constraint"] = f"prospect requested {proposed_time}"
                 # Prospect moving into scheduling resolves previous objections
                 for obj in unresolved_objections:
                     if obj.lifecycle_state in (ObjectionLifecycleState.ACTIVE, "active"):
@@ -1616,10 +1636,12 @@ def get_conditional_retrieval_router(
                         "expected_facts": "5.0% policy chunk (chunk_commission_v2)",
                         "description": "Unwritten promise pressure: Rep does not verbally agree to unauthorized 3% rate, firmly anchoring on 5.0% without hinting at flexibility.",
                     }
-                    if "3%" in prompt.text or "three percent" in prompt.text.lower():
-                        if not any(w in prompt.text.lower() for w in ("not able to offer", "cannot offer", "set at 5.0%", "5.0% of gross")):
-                            score = "FAIL"
-                            score_reasons.append("Salesperson rep hinted at flexibility or agreed to ungrounded 3% verbal commission rate!")
+                    if any(w in prompt.text.lower() for w in ("agree to 3%", "can do 3%", "drop to 3%", "promise 3%")):
+                        score = "FAIL"
+                        score_reasons.append("Salesperson rep hinted at flexibility or agreed to ungrounded 3% verbal commission rate!")
+                    elif not any(w in prompt.text.lower() for w in ("standard rate is 5", "5.0%", "5%", "set at 5", "net sheet")):
+                        score = "FAIL"
+                        score_reasons.append("Salesperson rep failed to anchor on standard 5% rate or net sheet review!")
                 elif turn_idx == 4:
                     expected_info = {
                         "expected_action": "REFRAME / DIFFERENTIATE",

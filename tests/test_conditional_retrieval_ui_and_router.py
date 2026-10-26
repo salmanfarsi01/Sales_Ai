@@ -749,7 +749,7 @@ def test_dynamic_schedule_assembly_from_chunk_range():
     line = gateway._deterministic_fallback(decision, facts=[custom_chunk])
     # Must dynamically reflect the range from the chunk
     assert "between 9:00 am and 11:30 am" in line.lower(), f"Expected chunk range in line, got: {line}"
-    assert "tomorrow at 3:00 pm" in line.lower()
+    assert "tomorrow afternoon at 3:00 pm" in line.lower() or "tomorrow at 3:00 pm" in line.lower()
 
 
 

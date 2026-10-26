@@ -101,6 +101,28 @@
       cursor: pointer;
     }
 
+    .backend-badge {
+      background: var(--green-dim);
+      border: 1px solid var(--green-border);
+      color: var(--green);
+      padding: 5px 12px;
+      border-radius: 20px;
+      font-size: 12px;
+      font-weight: 700;
+      display: inline-flex;
+      align-items: center;
+      gap: 7px;
+      letter-spacing: 0.02em;
+    }
+    .backend-badge .dot {
+      width: 7px;
+      height: 7px;
+      border-radius: 50%;
+      background: var(--green);
+      display: inline-block;
+      box-shadow: 0 0 6px rgba(5, 150, 105, 0.4);
+    }
+
     /* Buttons */
     .btn {
       background: var(--surface);
@@ -554,11 +576,15 @@
       <div class="brand-badge">PITCHPROX</div>
       <div>
         <div class="brand-title">PitchProX | Conditional Knowledge Retrieval Test Console</div>
-        <div class="brand-sub">Verification Test Bench • Doc 02 Section 6–13 & Constraint C6</div>
+        <div class="brand-sub">Real-Time Sales Copilot • Grounded Knowledge & Conversation Simulator</div>
       </div>
     </div>
     <div class="nav-actions">
-      <div class="user-pill" title="Active Salesman (Constraint C6 isolation enforced)">
+      <div id="backendBadge" class="backend-badge" title="Vector Store Integration Status">
+        <span class="dot"></span>
+        <span id="backendBadgeText">Vector Backend: Pinecone (subscriber-kb)</span>
+      </div>
+      <div class="user-pill" title="Active Sales Representative (Tenant-isolated knowledge partition)">
         <span>Active Salesman:</span>
         <select id="userSelect" onchange="onUserChange()">
           <option value="rep_john" selected>rep_john (John Miller)</option>
@@ -567,10 +593,10 @@
         </select>
       </div>
       <button class="btn btn-primary" onclick="switchMode('modeUpload')">
-        Upload Context as Salesman
+        Upload Documents
       </button>
       <button class="btn" id="btnLoadDummies" onclick="loadCanonicalDummies()">
-        Reset Canonical Dummy Docs
+        Load Sample Knowledge Base
       </button>
     </div>
   </header>
@@ -618,7 +644,7 @@
       <div style="display: flex; gap: 14px; align-items: flex-end; margin-bottom: 14px; flex-wrap: wrap;">
         <div style="flex: 1; min-width: 280px;">
           <label style="font-size: 11px; font-weight: 700; color: var(--text-muted); text-transform: uppercase; display: block; margin-bottom: 6px;">
-            Benchmark Regression Script
+            Simulated Call Scenario
           </label>
           <select class="form-select" id="multiTurnScriptSelect" onchange="onBenchmarkScriptSelected()">
             <!-- Populated dynamically via JS -->
@@ -631,10 +657,10 @@
           Replay Script (Check Diff)
         </button>
         <button class="btn" onclick="loadCanonicalDummiesAndReplay()">
-          Reset Rep John Dummies
+          Reset Sample Knowledge
         </button>
         <button class="btn" onclick="switchMode('modeUpload')">
-          Upload Context for this Salesman
+          Upload Custom Documents
         </button>
       </div>
 
@@ -684,10 +710,6 @@
       </div>
 
       <div style="overflow-x: auto;">
-        <div style="margin-bottom: 12px; padding: 10px 14px; background: #f8fafc; border: 1px solid var(--border); border-radius: 8px; font-size: 12px; color: var(--text-dim);">
-          <b>Doc 01 §13 Latency Contract:</b> The 250ms conversational deadline budget applies strictly to the <b>Retrieval Stage</b> (Gate + Vector Search + Conflict Resolution). Quiet turns exit at ~0.05ms without vector search.
-        </div>
-
         <table class="custom-table" id="multiTurnTable">
           <thead>
             <tr>
@@ -700,7 +722,7 @@
               <th style="width: 200px;">Spoken Teleprompter Response</th>
               <th style="width: 170px;">Expected Behavior</th>
               <th style="width: 65px;">Score</th>
-              <th style="width: 140px;">Doc 01 §13 Latencies</th>
+              <th style="width: 130px;">Retrieval Latency</th>
               <th style="width: 70px;">Action</th>
             </tr>
           </thead>
@@ -771,9 +793,9 @@
             <div class="form-group">
               <label>Verification Status</label>
               <select class="form-select" id="fileChunkVerification">
-                <option value="company_approved" selected>company_approved (Authority 3)</option>
-                <option value="self_attested">self_attested (Authority 2)</option>
-                <option value="user_supplied">user_supplied (Authority 1)</option>
+                <option value="company_approved" selected>Company Verified Policy (High Authority)</option>
+                <option value="self_attested">Sales Rep Confirmed (Medium Authority)</option>
+                <option value="user_supplied">Unverified Note (Low Authority)</option>
               </select>
             </div>
           </div>
@@ -825,9 +847,9 @@
             <div class="form-group">
               <label>Verification Status</label>
               <select class="form-select" id="uploadChunkVerification">
-                <option value="company_approved" selected>company_approved (Authority 3 - Verified)</option>
-                <option value="self_attested">self_attested (Authority 2 - Rep Attested)</option>
-                <option value="user_supplied">user_supplied (Authority 1 - Unverified Claim)</option>
+                <option value="company_approved" selected>Company Verified Policy (High Authority)</option>
+                <option value="self_attested">Sales Rep Confirmed (Medium Authority)</option>
+                <option value="user_supplied">Unverified Note (Low Authority)</option>
               </select>
             </div>
           </div>
@@ -847,7 +869,7 @@
               Upload Context as Text
             </button>
             <button class="btn" onclick="seedJohnDummiesFromUpload()">
-              Reset All Canonical Dummies
+              Reset Sample Knowledge
             </button>
           </div>
         </div>
@@ -871,7 +893,7 @@
         </div>
 
         <div style="margin-top: 16px; padding: 12px; background: #f8fafc; border: 1px solid var(--border); border-radius: 8px; font-size: 12px; color: var(--text-dim);">
-          <b>Constraint C6 Guarantee:</b> This context is partitioned strictly to the active salesman. Other salesmen will never receive or match this content.
+          <b>Private Rep Partition:</b> All uploaded documents and indexed facts are strictly private to this representative. Cross-user access is blocked.
         </div>
       </div>
 
@@ -932,7 +954,7 @@
         <div class="panel">
           <div class="panel-header">
             <h3>Core Strategic Intent</h3>
-            <span class="badge-pill badge-blue">Doc 02 Section 6</span>
+            <span class="badge-pill badge-blue">Decision Engine</span>
           </div>
 
           <div class="form-row">
@@ -1094,8 +1116,8 @@
         <div class="subtab-content" id="subtabContext">
           <div class="panel">
             <div class="panel-header">
-              <h3>Structured 6-Block Prompt Packaging</h3>
-              <span style="font-size: 11px; color: var(--text-dim);">Spec 11 Section 7</span>
+              <h3>Structured 6-Block Context Delivery</h3>
+              <span style="font-size: 11px; color: var(--text-dim);">Grounded Context Packaging</span>
             </div>
             <div class="code-view" id="rawContextViewer">Assembled 6-block context will appear here upon simulation...</div>
           </div>
@@ -1432,6 +1454,10 @@
         const data = await res.json();
         document.getElementById('storeCount').textContent = data.total_records;
 
+        if (data.backend_info && document.getElementById('backendBadgeText')) {
+          document.getElementById('backendBadgeText').textContent = data.backend_info.badge_text;
+        }
+
         const container = document.getElementById('storeChunksTableContainer');
         if (!data.records || data.records.length === 0) {
           container.innerHTML = `<div style="font-size: 13px; color: var(--text-dim); padding: 16px;">No active documents in store for ${activeUserId}. Use the form on the left or click 'Reset All Canonical Dummies'.</div>`;
@@ -1444,7 +1470,8 @@
               <tr>
                 <th>ID / Title</th>
                 <th>Class</th>
-                <th>Status</th>
+                <th>Verification</th>
+                <th>Vector Status</th>
                 <th>Text Snippet</th>
                 <th>Actions</th>
               </tr>
@@ -1462,7 +1489,12 @@
                       ${r.deleted ? 'DELETED' : r.verification_status}
                     </span>
                   </td>
-                  <td style="max-width: 320px; font-size: 11.5px; color: var(--text-muted);">${r.text}</td>
+                  <td>
+                    <span class="table-badge ${r.vector_status === 'synced' ? 'badge-green' : 'badge-blue'}">
+                      ⚡ ${r.vector_status === 'synced' ? 'Pinecone: Synced' : 'In-Memory Store'}
+                    </span>
+                  </td>
+                  <td style="max-width: 280px; font-size: 11.5px; color: var(--text-muted);">${r.text}</td>
                   <td>
                     <div style="display: flex; gap: 4px;">
                       <button class="btn btn-danger" style="padding: 3px 8px; font-size: 11px;" onclick="softDeleteRecord('${r.knowledge_id}')" title="Test Eventual Consistency">
@@ -1475,7 +1507,6 @@
                   </td>
                 </tr>
               `).join('')}
-            </tbody>
           </table>
         `;
       } catch (e) {
@@ -1632,7 +1663,7 @@
               <div style="background: var(--green-dim); border: 1px solid var(--green-border); padding: 10px 12px; border-radius: 6px; font-size: 12px;">
                 <div style="display: flex; justify-content: space-between; margin-bottom: 4px;">
                   <b>${f.knowledge_id}</b>
-                  <span class="table-badge badge-green">Authority ${f.authority_level || 3}</span>
+                  <span class="table-badge badge-green">Level ${f.authority_level || 3} Verified</span>
                 </div>
                 <div style="color: var(--text); font-size: 13px;">"${f.text}"</div>
               </div>
@@ -1997,12 +2028,12 @@
       const blocksContainer = document.getElementById('modalBlocksContainer');
       const b = turn.context_blocks || {};
       const blockDefs = [
-        { key: 'block_1', title: 'Block 1: Strategic Decision Contract', desc: 'Core strategic action, posture, and objectives' },
-        { key: 'block_2', title: 'Block 2: Current Conversation Truth', desc: 'Stage, active objections, and recent conversational evidence' },
-        { key: 'block_3', title: 'Block 3: Verified Knowledge Facts', desc: 'Authoritative facts delivered with authority level and source chunk' },
-        { key: 'block_4', title: 'Block 4: Playbook & Methodology Constraints', desc: 'Active sales methodology and play constraints' },
-        { key: 'block_5', title: 'Block 5: Calibration & Delivery Constraints', desc: 'Word budget, urgency, and pacing rules' },
-        { key: 'block_6', title: 'Block 6: Generation Directives & Guardrails', desc: 'Fact-unavailability guards and strict anti-hallucination contract' },
+        { key: 'block_1', title: 'Block 1: Strategic Decision', desc: 'Rep action, posture, and conversational objective' },
+        { key: 'block_2', title: 'Block 2: Conversation Context', desc: 'Call stage, active concerns, and validated prospect statements' },
+        { key: 'block_3', title: 'Block 3: Verified Knowledge Facts', desc: 'Company-verified factual knowledge retrieved for this turn' },
+        { key: 'block_4', title: 'Block 4: Playbook & Strategy Guidelines', desc: 'Recommended sales play and response framing' },
+        { key: 'block_5', title: 'Block 5: Tone, Urgency & Word Budget', desc: 'Conciseness constraints and conversational pacing' },
+        { key: 'block_6', title: 'Block 6: Safety Guardrails & Fallbacks', desc: 'Strict anti-hallucination rules and truthfulness enforcement' },
       ];
 
       blocksContainer.innerHTML = blockDefs.map((bd, idx) => {

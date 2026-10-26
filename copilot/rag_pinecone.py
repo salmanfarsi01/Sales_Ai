@@ -85,8 +85,8 @@ class PineconeRAG:
         
         return self.pc.Index(self.index_name)
 
-    def _get_embedding(self, text: str, timeout: float = 5.0) -> list[float]:
-        """Get OpenAI embedding for text with hard timeout."""
+    def _get_embedding(self, text: str, timeout: float = 0.35) -> list[float]:
+        """Get OpenAI embedding for text with 350ms timeout."""
         response = self.openai_client.embeddings.create(
             model=EMBEDDING_MODEL,
             input=text,
@@ -278,11 +278,20 @@ class PineconeRAG:
             LOGGER.error(f"Failed to embed query: {e}")
             return []
         
-        filter_dict = {}
-        if scope:
+        effective_user_id = owner_id
+        if not effective_user_id and not self.admin_mode:
+            raise ValueError(
+                "Mandatory owner filter required: queries within tenant namespace must specify owner_id / owner_user_id (Doc 02 Constraint C6)."
+            )
+
+        filter_dict: dict[str, Any] = {}
+        if effective_user_id:
+            # Enforce exact mandatory isolation filter at Pinecone query level (Doc 02 Constraint C6):
+            # owner_user_id == :user AND owner_scope == 'user'
+            filter_dict["owner_user_id"] = {"$eq": effective_user_id}
+            filter_dict["owner_scope"] = {"$eq": "user"}
+        elif scope:
             filter_dict["scope"] = {"$eq": scope}
-        if owner_id:
-            filter_dict["owner_id"] = {"$eq": owner_id}
 
         results = self.index.query(
             vector=query_embedding,
@@ -294,7 +303,7 @@ class PineconeRAG:
         )
         
         chunks = []
-        LOGGER.info("RAG search query: '%s' namespace: '%s'", query, tenant_id)
+        LOGGER.info("RAG search query: '%s' namespace: '%s' filter: %s", query, tenant_id, filter_dict)
         LOGGER.info("RAG search results (top_k=%d):", top_k)
         for match in results.get("matches", []):
             metadata = match.get("metadata", {})
@@ -302,11 +311,11 @@ class PineconeRAG:
             text_snippet = metadata.get("text", "").replace("\n", " ")[:100]
             LOGGER.info("  [%s] Score: %.4f | Source: %s | Snippet: %s...", match["id"], match["score"], source, text_snippet)
             
-            # Post-query exclusion: unmigrated vectors lacking owner keys or mismatching owner_id are excluded
-            if owner_id:
-                chunk_owner = metadata.get("owner_id") or metadata.get("owner_user_id")
-                if not chunk_owner or (chunk_owner != owner_id and chunk_owner != "admin"):
-                    LOGGER.warning("Excluding unmigrated or cross-user chunk '%s' lacking matching owner metadata.", match["id"])
+            # Strict defense-in-depth post-verification: chunk owner must strictly equal effective_user_id
+            if effective_user_id:
+                chunk_owner = metadata.get("owner_user_id") or metadata.get("owner_id")
+                if not chunk_owner or chunk_owner != effective_user_id:
+                    LOGGER.warning("Excluding cross-user chunk '%s' lacking matching owner metadata.", match["id"])
                     continue
 
             if match["score"] < min_score:

@@ -177,7 +177,7 @@ class RetrievalConfig(BaseModel):
     marginal_threshold: float = Field(default=0.50, description="Threshold between low_confidence and retrieved for raw semantic similarity")
     max_facts: int = Field(default=3, description="Maximum number of facts returned to LLM context (1-3)")
     allow_user_supplied_performance: bool = Field(default=False, description="Whether user_supplied performance claims are allowed or withheld until verified")
-    default_timeout_ms: Optional[float] = Field(default=250.0, description="Default latency budget deadline in milliseconds (Doc 01 §13)")
+    default_timeout_ms: Optional[float] = Field(default=600.0, description="Default latency budget deadline in milliseconds (Doc 01 §13 raised to 600ms per p95)")
     cache_enabled: bool = Field(default=True, description="Whether query-level caching is enabled (Doc 02 §11)")
     cache_ttl_seconds: int = Field(default=300, description="Maximum TTL for cached retrieval results in seconds")
     max_cache_size: int = Field(default=1000, description="Maximum number of cached retrieval entries")

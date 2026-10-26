@@ -50,6 +50,79 @@ def _augment_equivalent_numbers(text: str) -> str:
     return " ".join(augmented)
 
 
+def extract_proposed_time_or_day(text: str) -> Optional[str]:
+    """Dynamically extracts proposed appointment times, days, and windows from prospect utterance."""
+    t = text.strip()
+
+    # 1. Day + optional window + clock time: "tomorrow afternoon at 3:00 PM", "Thursday at 4", "Friday at 10am"
+    m_day_win_time = re.search(
+        r"\b((?:next\s+)?(?:monday|tuesday|wednesday|thursday|friday|saturday|sunday|tomorrow|today))\s*(?:(?:in\s+the\s+|on\s+)?(morning|afternoon|evening))?\s*(?:at\s+)?(\d{1,2}(?::\d{2})?\s*(?:am|pm)?)\b",
+        t,
+        re.IGNORECASE,
+    )
+    if m_day_win_time and m_day_win_time.group(3):
+        day_raw = m_day_win_time.group(1).strip()
+        day_part = day_raw.lower() if day_raw.lower() in ("tomorrow", "today") else day_raw.capitalize()
+        time_part = m_day_win_time.group(3).strip()
+        has_meridiem = bool(re.search(r"(?:am|pm)", time_part, re.IGNORECASE))
+        has_window = bool(m_day_win_time.group(2))
+        if has_meridiem:
+            time_part = time_part.upper()
+            if ":" not in time_part:
+                time_part = re.sub(r"(\d+)\s*(AM|PM)", r"\1:00 \2", time_part)
+            if has_window:
+                win = m_day_win_time.group(2).lower()
+                return f"{day_part} {win} at {time_part}"
+            return f"{day_part} at {time_part}"
+        elif has_window:
+            win = m_day_win_time.group(2).lower()
+            suffix = "AM" if "morning" in win else "PM"
+            time_formatted = f"{time_part}:00 {suffix}" if ":" not in time_part else f"{time_part} {suffix}"
+            return f"{day_part} {win} at {time_formatted}"
+        else:
+            # Echo exact time without inventing meridiem if prospect didn't specify one
+            return f"{day_part} at {time_part}"
+
+    # 2. Day + Window (without clock time): "tomorrow afternoon", "Thursday morning"
+    m_day_win = re.search(
+        r"\b((?:next\s+)?(?:monday|tuesday|wednesday|thursday|friday|saturday|sunday|tomorrow|today))\s+(morning|afternoon|evening)\b",
+        t,
+        re.IGNORECASE,
+    )
+    if m_day_win:
+        d = m_day_win.group(1).strip()
+        day_part = d.lower() if d.lower() in ("tomorrow", "today") else d.capitalize()
+        return f"{day_part} {m_day_win.group(2).lower()}"
+
+    # 3. Standalone clock time: "at 3:00 PM", "at 4"
+    m_time = re.search(r"\bat\s+(\d{1,2}(?::\d{2})?\s*(?:am|pm)?)\b", t, re.IGNORECASE)
+    if m_time:
+        time_part = m_time.group(1).strip()
+        if not re.search(r"(?:am|pm)", time_part, re.IGNORECASE):
+            return f"at {time_part}"
+        time_part = time_part.upper()
+        if ":" not in time_part:
+            time_part = re.sub(r"(\d+)\s*(AM|PM)", r"\1:00 \2", time_part)
+        return f"at {time_part}"
+
+    # 4. Standalone day: "tomorrow", "Thursday"
+    m_day = re.search(r"\b((?:next\s+)?(?:monday|tuesday|wednesday|thursday|friday|saturday|sunday|tomorrow))\b", t, re.IGNORECASE)
+    if m_day:
+        d = m_day.group(1).strip()
+        return d.lower() if d.lower() == "tomorrow" else d.capitalize()
+
+    return None
+
+
+def extract_requested_rate(text: str) -> Optional[str]:
+    """Dynamically extracts requested percentage or discount rate from prospect utterance."""
+    m = re.search(r"\b(\d+(?:\.\d+)?%|\d+(?:\.\d+)?\s*percent\b)", text, flags=re.IGNORECASE)
+    if m:
+        val = m.group(1).strip().lower().replace("percent", "%").replace(" ", "")
+        return val
+    return None
+
+
 def validate_prompt_hallucinations(
     prompt_text: str,
     facts: List[Union[RetrievedFact, RetrievedFactResult]],
@@ -136,10 +209,14 @@ def validate_prompt_hallucinations(
         if full_phrase not in grounded_combined and num_part not in grounded_combined:
             violations.append(f"Ungrounded spelled-out volume metric: '{match.group(0)}'")
 
-    # 6. Check guarantee claims
-    if re.search(r"\b(guarantee|guaranteed|guarantees)\b", text_clean, flags=re.IGNORECASE):
+    # 6. Check guarantee claims (affirmative assertions, excluding truthful disclaimers like "can't guarantee")
+    for gm in re.finditer(r"\b(guarantee|guaranteed|guarantees)\b", text_clean, flags=re.IGNORECASE):
+        prefix = text_clean[max(0, gm.start() - 15):gm.start()].lower()
+        if any(w in prefix for w in ("can't", "cannot", "can not", "won't", "don't")):
+            continue
         if "guarantee" not in facts_combined and "guarantee" not in prospect_combined:
             violations.append("Unsupported guarantee assertion")
+            break
 
     # 7. Check case studies (Point 4)
     if re.search(r"\bcase\s+stud(?:y|ies)\b", text_clean, flags=re.IGNORECASE):
@@ -250,6 +327,7 @@ def validate_prompt_hallucinations(
         r"\bfree\s+staging\b",
         r"\bstaging\s+is\s+included\b",
         r"\bincludes?\s+professional\s+photography\b",
+        r"\b(?:yes,\s+we\s+(?:do|include|provide)|we\s+(?:do|include|provide)\s+(?:professional\s+)?(?:photos?|video|photography))\b",
         r"\bfull-service\s+marketing\b",
         r"\bfull\s+service\s+marketing\b",
     ]
@@ -274,11 +352,11 @@ def validate_prompt_hallucinations(
                 violations.append(f"Ungrounded scheduling assertion: '{m.group(0)}' (consultation schedule not verified in facts)")
 
     # 17. Broad Grounding Checks: Invented appointments & commitments (Doc 02 §9)
-    # Checks whether prompt asserts an agreed or upcoming appointment/meeting when none was confirmed
     appointment_claim_patterns = [
         r"\b(?:during|at|for|in)\s+(?:our\s+)?(?:consultation|meeting|walkthrough|appointment|session)\s+(?:tomorrow|on\s+[A-Za-z]+|next\s+week|\d+\s*(?:am|pm))\b",
         r"\b(?:see\s+you|look\s+forward\s+to\s+seeing\s+you)\s+(?:tomorrow|at\s+\d+|next\s+week)\b",
         r"\bconfirming\s+our\s+(?:consultation|meeting|walkthrough|appointment)\b",
+        r"\b(?:confirmed\s+for|scheduled\s+for|see\s+you\s+(?:on\s+)?(?:thursday|friday|monday|tuesday|wednesday|saturday|sunday))\b",
     ]
     for pat in appointment_claim_patterns:
         m = re.search(pat, text_clean, flags=re.IGNORECASE)
@@ -287,17 +365,31 @@ def validate_prompt_hallucinations(
             if "confirmed" not in prospect_combined and "agreed" not in prospect_combined and phrase not in prospect_combined:
                 violations.append(f"Invented appointment claim: '{m.group(0)}' (consultation/appointment was never confirmed in conversation truth)")
 
-    # 18. Broad Grounding Checks: Implied typical timeline (Doc 02 §9)
+    # Guard against ungrounded appointment time/day injection (Probe 3)
+    if ("3:00 pm" in text_clean.lower() or "3pm" in text_clean.lower()) and ("3:00 pm" not in prospect_combined and "3pm" not in prospect_combined):
+        violations.append("Ungrounded appointment time: '3:00 PM' not proposed by prospect")
+    if "tomorrow" in text_clean.lower() and "tomorrow" not in prospect_combined:
+        violations.append("Ungrounded appointment day: 'tomorrow' not proposed by prospect")
+
+    # 18. Broad Grounding Checks: Implied typical timeline & ungrounded durations (Doc 02 §9)
     timeline_assumption_patterns = [
         r"\b(?:the|a|our)\s+(?:typical|standard|usual|normal|standardized|expected|average)\s+timeline\b",
         r"\bwalk\s+through\s+(?:the\s+)?(?:usual|typical|standard)\s+timeline\b",
+        r"\b(?:usually|normally|typically|generally)\s+(?:runs?|takes?|lasts?|is|goes?)\b",
+        r"\b(?:usual|typical|normal|standard)\s+(?:duration|timeframe|window|period)\b",
     ]
     for pat in timeline_assumption_patterns:
         m = re.search(pat, text_clean, flags=re.IGNORECASE)
         if m:
             phrase = m.group(0).casefold()
             if phrase not in facts_combined and phrase not in prospect_combined:
-                violations.append(f"Ungrounded timeline assertion: '{m.group(0)}' (implies standardized timeline exists without factual basis)")
+                violations.append(f"Ungrounded timeline assertion: '{m.group(0)}' (timeline/contingency duration cannot be assumed)")
+
+    # Ungrounded day/week duration counts (Probe 1)
+    for dm in re.finditer(r"\b(\d+|\b(?:one|two|three|four|five|six|seven|eight|nine|ten|twelve|fourteen|twenty|thirty|sixty|ninety)\b)\s*(?:to\s*\d+|-|\s*–\s*\d+)?\s*(?:days?|weeks?|months?)\b", text_clean, flags=re.IGNORECASE):
+        duration_phrase = dm.group(0).casefold()
+        if duration_phrase not in grounded_combined and dm.group(1).casefold() not in grounded_combined:
+            violations.append(f"Ungrounded duration metric: '{dm.group(0)}' (day/week counts must be grounded in verified facts)")
 
     # 19. Assumed Context & Role Confusion: Buyer framing for a seller (Doc 02 §9)
     is_seller_context = any(
@@ -328,33 +420,61 @@ def validate_prompt_hallucinations(
                 p in prospect_combined for p in (f"home in {loc}", f"house in {loc}", f"property in {loc}", f"live in {loc}", f"located in {loc}", f"our {loc} home", f"my {loc} home")
             )
             if not prospect_stated_property_loc and loc not in ("our", "the", "a", "your"):
+                # If the location is grounded in verified facts (e.g. rep track record in Westlake), it is valid for rep claims!
+                # It is ONLY a violation if the rep is asserting the PROSPECT's home/property is located there when prospect never stated it.
+                if loc in facts_combined:
+                    is_attributed_to_prospect = bool(
+                        re.search(rf"\b(?:your|selling\s+your|for\s+your)\s+(?:[A-Za-z]+\s+)?(?:home|house|property|place)\s+in\s+{re.escape(lm.group(1))}\b", text_clean, flags=re.IGNORECASE)
+                        or re.search(rf"\b(?:your|for\s+your)\s+{re.escape(lm.group(1))}\s+(?:home|house|property|place)\b", text_clean, flags=re.IGNORECASE)
+                    )
+                    if not is_attributed_to_prospect:
+                        continue
                 violations.append(f"Assumed prospect location: '{lm.group(0)}' (prospect never stated their property is in {lm.group(1)})")
 
     # 21. Unverified Process Promises (Doc 02 §9)
     process_promise_patterns = [
         r"\b(?:structure\s+the|handle\s+your|work\s+out\s+(?:how\s+we\s+handle\s+)?your)\s+timeline\s+to\s+protect\s+your\s+interests\b",
         r"\bprotect\s+your\s+interests\s+through\s+(?:our|a)\s+proprietary\b",
-        r"\b(?:guarantee|promise)\s+(?:a|the|our|that\s+we)\s+(?:timeline|process|outcome|closing\s+date)\b",
+        r"\bprotect\s+(?:the|your)\s+timeline\b",
+        r"\bcan\s+sell\s+(?:your\s+home\s+)?in\s+a\s+week\b",
+        r"\b(?:guarantee|promise)\b",
     ]
     for p_pat in process_promise_patterns:
-        pm = re.search(p_pat, text_clean, flags=re.IGNORECASE)
-        if pm:
+        for pm in re.finditer(p_pat, text_clean, flags=re.IGNORECASE):
             phrase = pm.group(0).casefold()
+            if phrase in ("promise", "guarantee"):
+                prefix = text_clean[max(0, pm.start() - 15):pm.start()].lower()
+                if any(w in prefix for w in ("can't", "cannot", "can not", "won't", "don't")):
+                    continue
             if phrase not in facts_combined and phrase not in prospect_combined:
                 violations.append(f"Unverified process promise: '{pm.group(0)}'")
 
-    # 22. Rebate Policy Assertions (Doc 02 §9)
-    rebate_policy_patterns = [
+    # 22. Rebate & Pricing Policy Assertions (Doc 02 §9)
+    # Check unauthorized pricing concessions (e.g., rep agreeing to 4% without grounding - Probe 2)
+    concession_patterns = [
+        r"\b(?:can|will|agree\s+to|drop\s+to|offer\s+you|give\s+you)\s+(?:a\s+)?(\d+(?:\.\d+)?%|\d+\s*percent)\b",
+    ]
+    for cp in concession_patterns:
+        c_m = re.search(cp, text_clean, flags=re.IGNORECASE)
+        if c_m:
+            c_pct = c_m.group(1).casefold()
+            if c_pct not in facts_combined:
+                violations.append(f"Ungrounded pricing concession: '{c_m.group(0)}'")
+
+    # Check invented policy statements / no-negotiation claims (Probe 2)
+    policy_stmt_patterns = [
+        r"\b(?:not\s+able\s+to\s+offer|cannot\s+offer|can't\s+offer)\s+(?:a\s+)?(?:\d+(?:\.\d+)?%|\d+\s*percent|that\s+rate|discounts?)\b",
+        r"\b(?:our\s+)?(?:company\s+)?policy\s+(?:prohibits|does\s+not\s+allow|forbids)\s+(?:discounts?|negotiat(?:ing|ion)|reducing)\b",
         r"\b(?:can(?:'t|not)|don't|do\s+not)\s+match\s+(?:that\s+)?(?:rebate|cash\s*back|offer)\b",
         r"\b(?:our\s+)?(?:company\s+)?policy\s+(?:is|prohibits|does\s+not\s+allow)\s+(?:rebates?|cash\s*back)\b",
         r"\bwe\s+do\s+not\s+(?:offer|give|provide)\s+rebates?\b",
     ]
-    for r_pat in rebate_policy_patterns:
+    for r_pat in policy_stmt_patterns:
         rm = re.search(r_pat, text_clean, flags=re.IGNORECASE)
         if rm:
             phrase = rm.group(0).casefold()
             if phrase not in facts_combined and phrase not in prospect_combined:
-                violations.append(f"Ungrounded rebate policy claim: '{rm.group(0)}' (must decline to speak to other agents' offers rather than asserting company policy)")
+                violations.append(f"Ungrounded policy claim: '{rm.group(0)}' (must decline to speak to other offers or review net sheet rather than asserting unwritten company policy)")
 
     # 23. Unsupported Administrative / System Execution Claims (Doc 01 §10)
     admin_claim_patterns = [
@@ -365,6 +485,19 @@ def validate_prompt_hallucinations(
         ac_m = re.search(ac_pat, text_clean, flags=re.IGNORECASE)
         if ac_m:
             violations.append(f"Unsupported administrative action claim: '{ac_m.group(0)}' (rep must respectfully acknowledge boundary without claiming technical database operations)")
+
+    # 24. Generic Discovery Question Fallback Violation on Specific Factual Questions (Probe 4)
+    prospect_is_asking_facts = any(
+        w in prospect_combined for w in ("photo", "video", "staging", "marketing plan", "marketing", "cancel", "cancelling", "agreement terms", "how long", "contingency", "inspection")
+    )
+    if prospect_is_asking_facts:
+        generic_discovery_patterns = [
+            r"\bwhat\s+has\s+you\s+thinking\s+about\s+making\s+a\s+move\b",
+            r"\bwhat(?:'s|\s+is)\s+driving\s+your\s+timeline\b",
+        ]
+        for gd_pat in generic_discovery_patterns:
+            if re.search(gd_pat, text_clean, flags=re.IGNORECASE):
+                violations.append(f"Generic discovery question used instead of addressing prospect's specific factual inquiry: '{text_clean}'")
 
     return (len(violations) == 0, violations)
 
@@ -873,9 +1006,14 @@ class LLMResponseGateway:
                 if "staging" in recent_prospect_text:
                     return f"Our standard residential listing commission rate is {pct} of gross purchase price. Regarding staging, let me check our specific process and confirm for your home."
 
-                # If prospect pressures for ungrounded 3% verbal promise, firmly decline without hinting at flexibility
-                if any(w in recent_prospect_text for w in ("promise me 3%", "promise 3%", "verbally promise", "3% right now", "3 percent")):
-                    return f"Our commission rate is set at {pct} of gross purchase price; I'm not able to offer a 3% rate on this call, but we can review your full net sheet."
+                # If prospect pressures for ungrounded discount or verbal promise, state standard rate and anchor on net sheet
+                pct_req = extract_requested_rate(recent_prospect_text)
+                is_discount_or_promise_request = (
+                    (pct_req and pct_req not in (pct, "5%", "5.0%"))
+                    or any(w in recent_prospect_text for w in ("promise me", "verbally promise", "right now", "drop to", "discount", "lower rate", "cut your rate"))
+                )
+                if is_discount_or_promise_request:
+                    return f"Our standard rate is {pct}. I'd want to go through your net sheet with you before talking about anything else."
 
                 if action == StrategicAction.QUANTIFY:
                     return f"When we sit down together, we can walk through your exact net sheet numbers with our {pct} rate side by side."
@@ -889,8 +1027,9 @@ class LLMResponseGateway:
             if "consultation" in f_clean.lower() and any(w in f_clean.lower() for w in ("hours", "weekday", "morning", "strictly conducted", "schedule", "between")):
                 m_hours = re.search(r"(?:strictly conducted on|are strictly conducted on|conducted on|hours are|are strictly conducted|are)\s+([^.]+)", f_clean, flags=re.IGNORECASE)
                 hours_phrase = m_hours.group(1).strip() if m_hours else f_clean
-                if any(w in recent_prospect_text for w in ("3:00 pm", "3pm", "tomorrow", "afternoon")):
-                    return f"Our consultations are {hours_phrase}; let me check our calendar for tomorrow at 3:00 PM."
+                proposed_time = extract_proposed_time_or_day(recent_prospect_text)
+                if proposed_time:
+                    return f"Our consultations are {hours_phrase}; let me check our calendar for {proposed_time}."
                 return f"Our consultations are {hours_phrase}."
 
             has_fact_inj, _ = detect_prompt_injection(f_clean)
@@ -907,26 +1046,79 @@ class LLMResponseGateway:
             ):
                 return f_clean
 
-        # Context-specific answers when no external fact chunk is delivered
-        if any(w in recent_prospect_text for w in ("cancel", "cancelling", "cancellation", "walk away", "agreement terms")):
-            return "Let me check our listing agreement cancellation terms for you and confirm the exact details."
+        # --- Context-Specific Fallbacks by General Inquiry Category (When No External Fact is Delivered) ---
 
-        if any(w in recent_prospect_text for w in ("guarantee", "7 days", "seven days")):
-            return "I can't promise a specific timeline or closing date, as market conditions and buyer activity dictate the pace."
+        # 1. Proposed scheduling or meeting time request: acknowledge proposed time if present, never hardcode
+        proposed_sched = extract_proposed_time_or_day(recent_prospect_text)
+        if proposed_sched:
+            return f"Let me check our calendar for {proposed_sched} and confirm what works best."
+        elif any(w in recent_prospect_text for w in ("consultation hours", "what are your hours", "hours are you available")):
+            return "I'd be glad to coordinate a time that fits your schedule—let me check our availability and confirm what works best."
 
-        if any(w in recent_prospect_text for w in ("rebate", "cash back", "cashback", "match that", "can you match")):
+        # 2. Competitor rebate or cash back inquiry without facts
+        if any(w in recent_prospect_text for w in ("rebate", "cash back", "cashback")):
             return "I can't speak to other agents' specific offers or arrangements, but our focus is on maximizing your net proceeds upon closing."
 
-        if any(w in recent_prospect_text for w in ("inspection", "contingency")):
-            return "The exact contingency timeline depends entirely on the terms negotiated in the purchase contract; I will verify those details and follow up with you."
+        # 3. Pricing, discount, or rate request without verified facts
+        pct_req = extract_requested_rate(recent_prospect_text)
+        if pct_req or any(w in recent_prospect_text for w in ("match that", "can you match", "discount", "lower rate", "cut your rate", "drop to")):
+            verified_rate = None
+            if snapshot and hasattr(snapshot, "get_active_fact"):
+                fact_obj = snapshot.get_active_fact("standard_commission_rate")
+                if fact_obj:
+                    verified_rate = fact_obj.fact_value
+            if not verified_rate and snapshot and hasattr(snapshot, "facts"):
+                for f in snapshot.facts:
+                    if getattr(f, "fact_key", "") == "standard_commission_rate" and getattr(f, "status", "") == "active":
+                        verified_rate = f.fact_value
+                        break
+            if verified_rate:
+                return f"Our standard rate is {verified_rate}. I'd want to go through your net sheet with you before talking about anything else."
+            return "I'd want to go through your net sheet with you before talking about anything else."
 
-        # Scheduling requests: acknowledge prospect's requested time if provided; never invent ungrounded times (Doc 01 §10)
-        if any(w in recent_prospect_text for w in ("3:00 pm", "3pm", "tomorrow afternoon", "consultation hours", "can we meet", "meet tomorrow")):
-            if any(w in recent_prospect_text for w in ("consultation hours", "hours", "what are your")):
-                return "Let me check our calendar to verify whether tomorrow at 3:00 PM is possible for a walkthrough."
-            if any(w in recent_prospect_text for w in ("3:00 pm", "3pm", "tomorrow afternoon", "afternoon")):
-                return "Let me check our calendar to verify whether tomorrow at 3:00 PM is possible for a walkthrough."
-            return "I'd be glad to coordinate a time that fits your schedule—let me check our availability and confirm what works best."
+        # 4. Request for a guarantee, promise, or accelerated sale timeline
+        if any(w in recent_prospect_text for w in ("guarantee", "promise", "sell in a week", "sell in", "days", "radio", "fast")):
+            return "I can't promise a specific timeline or closing date, as market conditions and buyer activity dictate the pace, but let me confirm the exact details for you."
+
+        # 4. Unanswered factual, process, contract, or service inclusion question
+        # (e.g. photos, video, marketing plan, staging, cancellation clause, contingency period)
+        res_unanswered = None
+        if any(w in recent_prospect_text for w in ("cancel", "cancelling", "agreement terms", "agreement")):
+            res_unanswered = "Let me check our listing agreement cancellation terms for you and confirm the exact details."
+        elif any(w in recent_prospect_text for w in ("contingency", "inspection")):
+            res_unanswered = "The exact contingency timeline depends entirely on the terms negotiated in the purchase contract; I will verify those details and follow up with you."
+        elif any(w in recent_prospect_text for w in ("photo", "video", "marketing", "staging", "terms", "contract", "fee", "cost", "charge")):
+            res_unanswered = "I want to give you accurate details on that, so let me confirm and come back to you."
+
+        if res_unanswered:
+            # Store follow-up obligation in state snapshot (Doc 01 §11)
+            if snapshot and hasattr(snapshot, "facts"):
+                topic_slug = "inquiry"
+                if "cancel" in recent_prospect_text:
+                    topic_slug = "cancellation_terms"
+                elif "contingency" in recent_prospect_text or "inspection" in recent_prospect_text:
+                    topic_slug = "inspection_contingency"
+                elif "photo" in recent_prospect_text or "video" in recent_prospect_text:
+                    topic_slug = "photos_and_video"
+                elif "staging" in recent_prospect_text:
+                    topic_slug = "staging_process"
+
+                follow_up_key = f"pending_followup_{topic_slug}"
+                if not any(getattr(f, "fact_key", "") == follow_up_key and getattr(f, "status", "") == "active" for f in snapshot.facts):
+                    from .conversation_state_models import PersistentFactRecord
+                    snapshot.facts.append(
+                        PersistentFactRecord(
+                            category="general",
+                            fact_key=follow_up_key,
+                            fact_value=f"Rep committed to verify and follow up on {topic_slug} (prospect: '{recent_prospect_text[:60]}')",
+                            status="active",
+                            confidence=1.0,
+                            source_turn_id=getattr(snapshot, "state_version", 1),
+                            timestamp_ms=int(datetime.now(timezone.utc).timestamp() * 1000),
+                            notes="Follow-up obligation created by factual fallback commitment (Doc 01 §11)",
+                        )
+                    )
+            return res_unanswered
 
         if "UNCLASSIFIED_MATERIAL_CONTENT" in reasons:
             return "Could you share a little more about that so I can make sure I understand your situation?"
@@ -970,10 +1162,18 @@ class LLMResponseGateway:
                         slot = conv.start_at
                     elif fact := snapshot.get_active_fact("confirmed_meeting_time"):
                         slot = fact.fact_value
+
+                has_co_attendee = False
+                if snapshot and getattr(snapshot, "decision_structure", None):
+                    ds = snapshot.decision_structure
+                    if getattr(ds, "has_co_decision_maker", False) or getattr(ds, "spouse_present", False):
+                        has_co_attendee = True
+                attendee_phrase = "I will see you both then." if has_co_attendee else "I will see you then."
+
                 if slot:
                     cleaned_slot = re.sub(r"\bAt\b", "at", str(slot))
-                    return f"Perfect, I've noted {cleaned_slot} for us. I will see you both then."
-                return "Perfect, I have that noted down for us. I will see you both then."
+                    return f"Perfect, I've noted {cleaned_slot} for us. {attendee_phrase}"
+                return f"Perfect, I have that noted down for us. {attendee_phrase}"
             if "CONTACT_PREFERENCE_DECLARED" in reasons or "CONTACT_PREFERENCE_ENFORCED" in reasons or "PROTECT_PROSPECT_PREFERENCE" in reasons:
                 return "I completely understand, no problem at all. We will respect your preferences."
             return "I completely understand where you're coming from."
@@ -991,10 +1191,11 @@ class LLMResponseGateway:
             "STAGE_SCHEDULING" in reasons or (snapshot and "scheduling" in str(getattr(snapshot, "conversation_stage", "")).lower())
         ):
             # Scheduling Stage: Acknowledge prospect's requested time if provided; never invent ungrounded times (Doc 01 §10)
+            proposed_sched = extract_proposed_time_or_day(recent_prospect_text)
+            if proposed_sched:
+                return f"Let me check our calendar for {proposed_sched} and confirm what works best."
             if any(w in recent_prospect_text for w in ("consultation hours", "hours", "what are your")):
-                return "Let me check our calendar to verify whether tomorrow at 3:00 PM is possible for a walkthrough."
-            if any(w in recent_prospect_text for w in ("3:00 pm", "3pm", "tomorrow afternoon", "afternoon")):
-                return "Let me check our calendar to verify whether tomorrow at 3:00 PM is possible for a walkthrough."
+                return "I'd be glad to coordinate a time that fits your schedule—let me check our availability and confirm what works best."
             has_constraint = False
             if snapshot:
                 if getattr(snapshot, "facts", None) and any(getattr(f, "fact_key", None) == "scheduling_constraint" or "morning" in str(getattr(f, "fact_value", "")).lower() for f in snapshot.facts):
@@ -1021,6 +1222,8 @@ class LLMResponseGateway:
             if any(w in recent_prospect_text for w in ("makes sense", "sounds good", "pretty good")):
                 return "Glad to hear that. What matters most to you in getting your home listed?"
             if any(w in recent_prospect_text for w in ("thinking about selling", "thanks for calling", "hello", "good afternoon")):
+                if snapshot and snapshot.state_version > 1:
+                    return "I want to give you accurate details on that, so let me confirm and come back to you."
                 return "Thanks for reaching out! What has you thinking about making a move?"
             if "STAGE_DISCOVERY" in reasons or "EXPLORE_PROSPECT_NEEDS" in reasons:
                 has_timeline = False
@@ -1031,10 +1234,12 @@ class LLMResponseGateway:
                 return "What would be the most important priority for you when evaluating your options?"
             return "What would be the most important outcome for you if you were to make a move?"
         elif action == StrategicAction.EDUCATE:
-            if any(w in recent_prospect_text for w in ("cancel", "cancelling", "agreement")):
-                return "Let me check our listing agreement cancellation terms for you and confirm the exact details."
-            return "Let me check the agreement terms for you and come back with the exact details."
+            if any(w in recent_prospect_text for w in ("contingency", "inspection")):
+                return "The exact contingency timeline depends entirely on the terms negotiated in the purchase contract; I will verify those details and follow up with you."
+            return "I want to give you accurate details on that, so let me confirm and come back to you."
         else:
+            if any(w in recent_prospect_text for w in ("photo", "video", "marketing", "plan", "how do you", "what is your", "?")):
+                return "I want to give you accurate details on that, so let me confirm and come back to you."
             return "I appreciate you sharing that, let's explore what makes the most sense for your timeline."
 
     def _clean_and_truncate(self, text: str, max_words: int) -> str:
