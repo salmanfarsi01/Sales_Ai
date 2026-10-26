@@ -331,6 +331,9 @@ def test_multi_turn_simulate_canonical_8_turn(client):
     delivered_ids_t5 = [f["knowledge_id"] for f in t5["facts_delivered"]]
     assert "chunk_sarah_rebate" not in delivered_ids_t5
     assert len(t5["facts_delivered"]) == 0
+    # Verify rep does not claim company rebate policy
+    assert "we don't offer cash back" not in t5["teleprompter_line"].lower()
+    assert "net proceeds" in t5["teleprompter_line"].lower()
 
     # Turn 6: 7-day guarantee trap -> unverified pitch deck is withheld, 0 facts delivered, declines guarantee
     t6 = turns[5]
@@ -339,6 +342,9 @@ def test_multi_turn_simulate_canonical_8_turn(client):
     assert "chunk_old_pitch_deck" not in delivered_ids_t6
     assert len(t6["facts_delivered"]) == 0, f"Expected 0 facts delivered on guarantee trap, got {t6['facts_delivered']}"
     assert "42 homes" not in t6["teleprompter_line"], "Should not recite past sales on guarantee inquiry"
+    # Verify rep does not state unsupported company stance
+    assert "we don't make artificial" not in t6["teleprompter_line"].lower()
+    assert "can't promise a specific timeline" in t6["teleprompter_line"].lower()
 
     # Turn 7: Afternoon 3 PM schedule -> Live prospect constraint overrides stored morning 10 AM doc
     t7 = turns[6]
@@ -346,19 +352,23 @@ def test_multi_turn_simulate_canonical_8_turn(client):
     # Verify stored 10 AM morning chunk was withheld due to conflict with live prospect constraint
     withheld_ids_t7 = [w["knowledge_id"] for w in t7["withheld"]]
     assert "chunk_stored_schedule" in withheld_ids_t7
-    # Verify rep acknowledges 3:00 PM and NEVER invents Tuesday or Thursday availability
+    # Verify rep grounds consultation hours without falsely agreeing to 3:00 PM
+    assert "weekday mornings" in t7["teleprompter_line"].lower()
     assert "3:00" in t7["teleprompter_line"] or "3 pm" in t7["teleprompter_line"].lower()
+    assert "works great" not in t7["teleprompter_line"].lower()
     assert "tuesday" not in t7["teleprompter_line"].lower()
     assert "thursday" not in t7["teleprompter_line"].lower()
 
-    # Turn 8: Inspection contingency -> Out of domain / marginal match (< 0.50 floor) -> Low confidence & 0 facts delivered
+    # Turn 8: Inspection contingency -> Educational inquiry routes to EDUCATE, 0 facts delivered, generic grounded line
     t8 = turns[7]
     assert t8["turn_index"] == 8
+    assert t8["core_action"] == "EDUCATE", f"Expected EDUCATE for educational inquiry, got {t8['core_action']}"
     delivered_ids_t8 = [f["knowledge_id"] for f in t8["facts_delivered"]]
     assert "chunk_unrelated_zoning" not in delivered_ids_t8
     assert "chunk_salesperson_profile" not in delivered_ids_t8, "Marginal profile bio must NOT be delivered on inspection contingency inquiry"
     assert len(t8["facts_delivered"]) == 0, f"Low confidence must deliver 0 facts, got {t8['facts_delivered']}"
     assert "john miller has" not in t8["teleprompter_line"].lower(), "Must not recite third-person bio on inspection contingency inquiry"
+    assert "10 to 14 days" not in t8["teleprompter_line"], "Must not invent 10 to 14 days inspection timeline"
 
     # Verify Core actions vary across turns (not stuck on QUESTION for every turn)
     actions = [t["core_action"] for t in turns]
@@ -487,6 +497,72 @@ def test_timing_precision_and_context_blocks(client):
     # Verify teleprompter source badge field
     assert "teleprompter_source" in turn
     assert turn["teleprompter_source"] == "deterministic"
+
+
+def test_multi_turn_messy_unstructured_script(client):
+    """Verifies that the Messy & Unstructured script executes with independent pass criteria."""
+    client.post("/api/conditional-retrieval/load-canonical-dummies?user_id=rep_john")
+    scripts = client.get("/api/conditional-retrieval/scripts").json()
+    script = next(s for s in scripts if s["id"] == "messy_unstructured_5_turn")
+    req = {
+        "user_id": "rep_john",
+        "call_id": "call_messy_test",
+        "script_name": script["name"],
+        "prospect_lines": script["lines"],
+    }
+    res = client.post("/api/conditional-retrieval/multi-turn-simulate", json=req)
+    assert res.status_code == 200
+    data = res.json()
+    assert data["total_turns"] == 5
+    assert data["total_violations"] == 0
+    assert data["passed_turns_count"] == 5
+    for t in data["turns"]:
+        assert t["score"] == "PASS"
+
+
+def test_multi_turn_adversarial_security_script(client):
+    """Verifies prompt injection neutralization, C6 isolation, and hard boundary compliance."""
+    client.post("/api/conditional-retrieval/load-canonical-dummies?user_id=rep_john")
+    scripts = client.get("/api/conditional-retrieval/scripts").json()
+    script = next(s for s in scripts if s["id"] == "adversarial_security_traps_5_turn")
+    req = {
+        "user_id": "rep_john",
+        "call_id": "call_adversarial_test",
+        "script_name": script["name"],
+        "prospect_lines": script["lines"],
+    }
+    res = client.post("/api/conditional-retrieval/multi-turn-simulate", json=req)
+    assert res.status_code == 200
+    data = res.json()
+    assert data["total_turns"] == 5
+    assert data["total_violations"] == 0
+    assert data["passed_turns_count"] == 5
+    # Turn 5: Hard boundary exit verified
+    t5 = data["turns"][4]
+    assert "respect that" in t5["teleprompter_line"].lower()
+    assert "call" not in t5["teleprompter_line"].lower() or "not" in t5["teleprompter_line"].lower()
+
+
+def test_multi_turn_repeated_objection_script(client):
+    """Verifies objection ladder progression and non-repetition across 3 recurrences."""
+    client.post("/api/conditional-retrieval/load-canonical-dummies?user_id=rep_john")
+    scripts = client.get("/api/conditional-retrieval/scripts").json()
+    script = next(s for s in scripts if s["id"] == "repeated_objection_3_turn")
+    req = {
+        "user_id": "rep_john",
+        "call_id": "call_repeated_test",
+        "script_name": script["name"],
+        "prospect_lines": script["lines"],
+    }
+    res = client.post("/api/conditional-retrieval/multi-turn-simulate", json=req)
+    assert res.status_code == 200
+    data = res.json()
+    assert data["total_turns"] == 3
+    assert data["passed_turns_count"] == 3
+    turns = data["turns"]
+    # All three spoken lines must be distinct
+    lines = [t["teleprompter_line"] for t in turns]
+    assert len(set(lines)) == 3, f"Core repeated lines across recurrences: {lines}"
 
 
 

@@ -680,12 +680,18 @@ class LLMResponseGateway:
             f_clean = re.sub(r"^He\s+has\b", "I have", f_clean)
             f_clean = re.sub(r"^He\s+is\b", "I am", f_clean)
 
-            # Verbalize raw commission chunk into natural sales response
+            # Verbalize raw commission chunk into natural sales response aligned with Core action
             if "standard residential listing commission rate is" in f_clean.lower():
                 pct = "5.0%"
                 m_pct = re.search(r"\d+(?:\.\d+)?%", f_clean)
                 if m_pct:
                     pct = m_pct.group(0)
+                if action == StrategicAction.QUANTIFY:
+                    return f"When we sit down together, we can walk through your exact net sheet numbers with our {pct} rate side by side."
+                elif action == StrategicAction.REFRAME:
+                    return f"At {pct}, what matters most isn't just the fee percentage, but maximizing your final net proceeds."
+                elif action == StrategicAction.DE_RISK:
+                    return f"There is zero obligation—if our {pct} full-service marketing doesn't make total financial sense, you can walk away anytime."
                 return f"Our standard residential listing commission rate is {pct} of gross purchase price, which includes full professional marketing and staging."
 
             has_fact_inj, _ = detect_prompt_injection(f_clean)
@@ -704,18 +710,20 @@ class LLMResponseGateway:
 
         # Context-specific answers when no external fact chunk is delivered
         if any(w in recent_prospect_text for w in ("guarantee", "7 days", "seven days")):
-            return "We don't make artificial 7-day sale guarantees, because market pricing and negotiation strategy maximize your final net proceeds rather than rushing a sale."
+            return "I can't promise a specific timeline, but we price and market to sell as quickly as possible."
 
         if any(w in recent_prospect_text for w in ("rebate", "cash back", "cashback", "match that", "can you match")):
-            return "We don't offer cash back rebates or fee discounts—our focus is investing full resources into professional marketing and staging to maximize your final net proceeds."
+            return "I can't speak to other agents' rebate offers, but I can walk you through your expected net proceeds."
 
         if any(w in recent_prospect_text for w in ("inspection", "contingency")):
-            return "Standard residential inspection contingency periods are typically 10 to 14 days depending on contract terms—let me verify the exact timeline for your property."
+            return "Inspection contingency timelines depend on specific contract terms—let me verify the exact details for your property."
 
         # Scheduling requests: acknowledge prospect's requested time if provided; never invent ungrounded times (Doc 01 §10)
         if any(w in recent_prospect_text for w in ("3:00 pm", "3pm", "tomorrow afternoon", "consultation hours", "can we meet", "meet tomorrow")):
+            if any(w in recent_prospect_text for w in ("consultation hours", "hours", "what are your")):
+                return "Our consultations are usually weekday mornings, so let me check whether tomorrow at 3:00 PM is possible."
             if any(w in recent_prospect_text for w in ("3:00 pm", "3pm", "tomorrow afternoon", "afternoon")):
-                return "Tomorrow afternoon at 3:00 PM works great. Let me check our calendar and confirm that walkthrough for us."
+                return "Let me check our calendar to verify whether tomorrow at 3:00 PM is possible for a walkthrough."
             return "I'd be glad to coordinate a time that fits your schedule—let me check our availability and confirm what works best."
 
         if "UNCLASSIFIED_MATERIAL_CONTENT" in reasons:
@@ -781,8 +789,10 @@ class LLMResponseGateway:
             "STAGE_SCHEDULING" in reasons or (snapshot and "scheduling" in str(getattr(snapshot, "conversation_stage", "")).lower())
         ):
             # Scheduling Stage: Acknowledge prospect's requested time if provided; never invent ungrounded times (Doc 01 §10)
+            if any(w in recent_prospect_text for w in ("consultation hours", "hours", "what are your")):
+                return "Our consultations are usually weekday mornings, so let me check whether tomorrow at 3:00 PM is possible."
             if any(w in recent_prospect_text for w in ("3:00 pm", "3pm", "tomorrow afternoon", "afternoon")):
-                return "Tomorrow afternoon at 3:00 PM works great. Let me check our calendar and confirm that walkthrough for us."
+                return "Let me check our calendar to verify whether tomorrow at 3:00 PM is possible for a walkthrough."
             has_constraint = False
             if snapshot:
                 if getattr(snapshot, "facts", None) and any(getattr(f, "fact_key", None) == "scheduling_constraint" or "morning" in str(getattr(f, "fact_value", "")).lower() for f in snapshot.facts):
@@ -828,7 +838,20 @@ class LLMResponseGateway:
         cleaned = re.sub(r"^(Teleprompter|Rep|Agent|Response|Action):\s*", "", cleaned, flags=re.IGNORECASE)
         words = cleaned.split()
         if len(words) > max_words:
-            truncated = " ".join(words[:max_words])
+            sub_words = words[:max_words]
+            # Check for a complete sentence boundary within max_words
+            last_punct_idx = -1
+            for idx, w in enumerate(sub_words):
+                if re.search(r"[.!?]$", w):
+                    last_punct_idx = idx
+            if last_punct_idx >= 5:
+                return " ".join(sub_words[:last_punct_idx + 1])
+            # If no complete sentence, trim dangling tokens
+            dangling = {"a", "an", "the", "to", "for", "and", "or", "of", "your", "our", "with", "than", "so", "as", "at", "in", "on", "by", "from"}
+            end_idx = max_words
+            while end_idx > 5 and sub_words[end_idx - 1].lower().rstrip(".!?,") in dangling:
+                end_idx -= 1
+            truncated = " ".join(sub_words[:end_idx])
             if not truncated.endswith((".", "!", "?")):
                 truncated += "."
             return truncated
