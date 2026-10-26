@@ -346,14 +346,14 @@ def test_multi_turn_simulate_canonical_8_turn(client):
     assert "we don't make artificial" not in t6["teleprompter_line"].lower()
     assert "can't promise a specific timeline" in t6["teleprompter_line"].lower()
 
-    # Turn 7: Afternoon 3 PM schedule -> Live prospect constraint overrides stored morning 10 AM doc
+    # Turn 7: Afternoon 3 PM schedule request -> Stored schedule chunk is delivered; rep states hours and checks 3 PM
     t7 = turns[6]
     assert t7["turn_index"] == 7
-    # Verify stored 10 AM morning chunk was withheld due to conflict with live prospect constraint
-    withheld_ids_t7 = [w["knowledge_id"] for w in t7["withheld"]]
-    assert "chunk_stored_schedule" in withheld_ids_t7
-    # Verify rep checks availability without leaking withheld weekday mornings chunk or falsely agreeing to 3:00 PM
-    assert "weekday mornings" not in t7["teleprompter_line"].lower(), "Withheld morning schedule must NOT leak into teleprompter line"
+    # Verify stored schedule chunk is delivered so rep can state official consultation hours
+    delivered_ids_t7 = [f["knowledge_id"] for f in t7["facts_delivered"]]
+    assert "chunk_stored_schedule" in delivered_ids_t7
+    # Verify rep states weekday morning hours and offers to check calendar for 3 PM
+    assert any(w in t7["teleprompter_line"].lower() for w in ("weekday mornings", "10:00 am", "morning")), "Must state stored consultation hours"
     assert "3:00" in t7["teleprompter_line"] or "3 pm" in t7["teleprompter_line"].lower()
     assert any(w in t7["teleprompter_line"].lower() for w in ("calendar", "check", "verify", "possible", "availability"))
     assert "works great" not in t7["teleprompter_line"].lower()
@@ -617,6 +617,140 @@ def test_sentence_level_hallucination_grounding_checks():
     )
     assert is_safe
     assert len(violations) == 0
+
+    # 6. Invented appointment paraphrase check (Item 2)
+    is_safe_app, v_app = validate_prompt_hallucinations(
+        "I look forward to seeing you tomorrow at 3 to discuss the listing details.",
+        [verified_fact],
+    )
+    assert not is_safe_app
+    assert any("invented appointment" in v.lower() for v in v_app)
+
+    # 7. Unsupported administrative action claim (Item 7)
+    is_safe_adm, v_adm = validate_prompt_hallucinations(
+        "I understand. I have removed your number from our contact list permanently.",
+        [verified_fact],
+    )
+    assert not is_safe_adm
+    assert any("administrative" in v.lower() for v in v_adm)
+
+
+def test_additional_live_truth_conflicts_property_type_and_relationship():
+    """Item 4: Verifies live truth conflict detection for property type (condo vs house) and relationship history."""
+    from copilot.conditional_retrieval import ConditionalRetrievalEngine
+    from copilot.conditional_retrieval_models import KnowledgeRecord, RetrievalRequest, RetrievalNeed, KnowledgeClass
+
+    engine = ConditionalRetrievalEngine()
+
+    # 1. Stored 3-bedroom single-family house script
+    engine.store.add_record(
+        KnowledgeRecord(
+            knowledge_id="chunk_sfh_script",
+            owner_scope="user",
+            owner_user_id="rep_john",
+            knowledge_class=KnowledgeClass.SERVICE_PROCESS.value,
+            source_title="Single Family Home Listing Pitch",
+            source_version="1.0",
+            topic_tags=["listing", "house"],
+            text="When selling your 3-bedroom home, we showcase the detached home and sprawling yard to family buyers.",
+            verification_status="company_approved",
+            sensitivity="normal",
+        )
+    )
+
+    # Prospect live truth: selling a condo downtown
+    req_condo = RetrievalRequest(
+        call_id="call_condo_test",
+        state_version=2,
+        user_id="rep_john",
+        strategic_action="educate",
+        retrieval_need=RetrievalNeed(
+            trigger="service_process_objection",
+            need_statement="marketing process for listing",
+            topic_tags=["listing"],
+        ),
+        conversation_evidence="I'm selling our downtown condo unit, so we don't have a yard.",
+        live_state_facts=[{"fact_key": "property_type", "fact_value": "condo"}],
+    )
+
+    res_condo = engine.retrieve_for_request(req_condo)
+    withheld_ids = [w.knowledge_id for w in res_condo.withheld]
+    assert "chunk_sfh_script" in withheld_ids, "Stored single-family script must be withheld when prospect states condo"
+
+    # 2. Stored first-call greeting script
+    engine.store.add_record(
+        KnowledgeRecord(
+            knowledge_id="chunk_first_call_intro",
+            owner_scope="user",
+            owner_user_id="rep_john",
+            knowledge_class=KnowledgeClass.SERVICE_PROCESS.value,
+            source_title="First Call Introduction",
+            source_version="1.0",
+            topic_tags=["intro", "welcome"],
+            text="Nice to meet you for the first time! As a new prospective client, let me introduce our team.",
+            verification_status="company_approved",
+            sensitivity="normal",
+        )
+    )
+
+    # Prospect live truth: already met last week
+    req_prior = RetrievalRequest(
+        call_id="call_prior_test",
+        state_version=2,
+        user_id="rep_john",
+        strategic_action="educate",
+        retrieval_need=RetrievalNeed(
+            trigger="service_process_objection",
+            need_statement="team introduction",
+            topic_tags=["intro"],
+        ),
+        conversation_evidence="Good to speak with you again John, we already met last week at the open house.",
+        live_state_facts=[{"fact_key": "relationship_status", "fact_value": "already_met"}],
+    )
+
+    res_prior = engine.retrieve_for_request(req_prior)
+    withheld_ids_prior = [w.knowledge_id for w in res_prior.withheld]
+    assert "chunk_first_call_intro" in withheld_ids_prior, "Stored first-call introduction must be withheld when prospect already met the rep"
+
+
+def test_dynamic_schedule_assembly_from_chunk_range():
+    """Item 3: Verifies that consultation schedule line is built dynamically from chunk text, not a hardcoded template."""
+    from copilot.conditional_retrieval_models import RetrievedFact
+    from copilot.core_intelligence_models import StrategicAction, StrategicDecision
+    from copilot.llm_response_gateway import LLMResponseGateway
+
+    gateway = LLMResponseGateway()
+
+    # Chunk with a time range instead of 10:00 AM
+    custom_chunk = RetrievedFact(
+        knowledge_id="chunk_custom_sched",
+        knowledge_class="service_process",
+        source_title="Consultation Policy 2026",
+        text="Initial consultations are strictly conducted on weekday mornings between 9:00 AM and 11:30 AM.",
+        confidence=0.9,
+    )
+
+    decision = StrategicDecision(
+        call_sid="call_dyn_sched",
+        call_id="call_dyn_sched",
+        turn_id=7,
+        source_state_version=7,
+        primary_action=StrategicAction.QUESTION,
+        secondary_action=None,
+        strategic_objective="Coordinate consultation scheduling",
+        retrieval_needed=True,
+    )
+
+    # Set prospect history requesting 3:00 PM
+    gateway._last_recent_turns = [
+        {"speaker": "prospect", "text": "What are your consultation hours? Can we meet tomorrow afternoon at 3:00 PM?"}
+    ]
+
+    line = gateway._deterministic_fallback(decision, facts=[custom_chunk])
+    # Must dynamically reflect the range from the chunk
+    assert "between 9:00 am and 11:30 am" in line.lower(), f"Expected chunk range in line, got: {line}"
+    assert "tomorrow at 3:00 pm" in line.lower()
+
 
 
 

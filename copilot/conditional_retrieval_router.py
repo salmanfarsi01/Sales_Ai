@@ -7,6 +7,7 @@ management, and stage-by-stage pipeline inspection for conditional retrieval.
 from __future__ import annotations
 
 import logging
+import re
 import time
 import uuid
 from pathlib import Path
@@ -241,7 +242,7 @@ def seed_canonical_dummy_documents(store: KnowledgeStore, user_id: str = "rep_jo
         )
     )
 
-    # 6. Stored Consultation Hours (Live truth conflict test)
+    # 6. Stored Consultation Hours (Schedule document)
     store.add_record(
         KnowledgeRecord(
             knowledge_id="chunk_stored_schedule",
@@ -252,6 +253,22 @@ def seed_canonical_dummy_documents(store: KnowledgeStore, user_id: str = "rep_jo
             source_version="1.0",
             topic_tags=["schedule", "consultation", "hours", "appointment"],
             text="Initial consultations are strictly conducted on weekday mornings at 10:00 AM.",
+            verification_status="company_approved",
+            sensitivity="normal",
+        )
+    )
+
+    # 7. Stored First-Time Buyer Script (Real Live-Truth Conflict Test: Prospect is 20-year owner selling)
+    store.add_record(
+        KnowledgeRecord(
+            knowledge_id="chunk_stored_first_time_buyer",
+            owner_scope="user",
+            owner_user_id=user_id,
+            knowledge_class=KnowledgeClass.SERVICE_PROCESS.value,
+            source_title="First-Time Buyer Consultation Script",
+            source_version="1.0",
+            topic_tags=["first_time_buyer", "buyer", "down_payment", "escrow"],
+            text="Congratulations on your first purchase! We guide first-time buyers step-by-step through down payments and escrow.",
             verification_status="company_approved",
             sensitivity="normal",
         )
@@ -465,14 +482,14 @@ def get_conditional_retrieval_router(
                 "title": "Scenario 13: Live Truth Over Stored Fact",
                 "category": "Live Truth Priority",
                 "user_id": "rep_john",
-                "prospect_utterance": "I can only meet tomorrow afternoon at 3:00 PM.",
-                "strategic_action": "question",
+                "prospect_utterance": "I've owned this home for 20 years and I'm selling it to downsize.",
+                "strategic_action": "validate",
                 "trigger": "service_process_objection",
-                "need_statement": "consultation hours schedule",
-                "topic_tags": ["schedule"],
-                "state_version": 4,
-                "prospect_live_override": "I can only meet tomorrow afternoon at 3:00 PM.",
-                "expected": "Stored morning chunk contradicts prospect's live statement -> stored chunk withheld (disputed). Live truth wins.",
+                "need_statement": "first time buyer down payment and escrow process",
+                "topic_tags": ["first_time_buyer", "buyer", "down_payment"],
+                "state_version": 2,
+                "prospect_live_override": "I've owned this home for 20 years and I'm selling it to downsize.",
+                "expected": "Stored first-time buyer script (chunk_stored_first_time_buyer) contradicts prospect's 20-year ownership truth -> stored script withheld (disputed). Live truth wins.",
             },
             {
                 "id": "scenario_14",
@@ -1334,20 +1351,27 @@ def get_conditional_retrieval_router(
             if "canonical" in req.script_name.lower():
                 if turn_idx == 1:
                     expected_info = {
-                        "expected_action": "QUESTION / EXPLORE",
+                        "expected_action": "QUESTION",
                         "expected_trigger": "None Needed (Quiet 0ms)",
                         "expected_facts": "0 delivered",
-                        "description": "Greeting turn: Core determines no retrieval needed (0ms fast exit), asks natural discovery question.",
+                        "description": "Greeting turn: Core stays quiet (0ms), asks one open question about their situation without company, location, or claims.",
                     }
                     if core_dec.retrieval_needed:
                         score = "FAIL"
                         score_reasons.append("Retrieval fired on non-factual greeting turn.")
+                    p_lower = prompt.text.lower()
+                    if prompt.text.count("?") > 1:
+                        score = "FAIL"
+                        score_reasons.append("Turn 1 asked two questions instead of one open question.")
+                    if any(w in p_lower for w in ("westlake", "premier realty", "pitchprox", "top agent", "#1")):
+                        score = "FAIL"
+                        score_reasons.append("Turn 1 named a company, location, or claim.")
                 elif turn_idx == 2:
                     expected_info = {
-                        "expected_action": "VALIDATE / QUANTIFY",
+                        "expected_action": "VALIDATE",
                         "expected_trigger": "credibility_objection",
                         "expected_facts": "42 homes in Westlake (chunk_westlake_sales)",
-                        "description": "Credibility inquiry: Core triggers credibility_objection, delivers Westlake track record in first person.",
+                        "description": "Credibility inquiry: Core triggers credibility_objection, delivers Westlake track record in first person without volume or rankings.",
                     }
                     if not core_dec.retrieval_needed or chosen_trigger != "credibility_objection":
                         score = "FAIL"
@@ -1355,50 +1379,81 @@ def get_conditional_retrieval_router(
                     if not any("42" in f.get("text", "") for f in facts_info):
                         score = "FAIL"
                         score_reasons.append("Did not deliver 42 homes Westlake track record chunk.")
+                    p_lower = prompt.text.lower()
+                    if not ("42" in p_lower or "forty-two" in p_lower or "forty two" in p_lower):
+                        score = "FAIL"
+                        score_reasons.append("Line failed to state 42 homes closed.")
+                    if not ("18" in p_lower or "eighteen" in p_lower):
+                        score = "FAIL"
+                        score_reasons.append("Line failed to state 18 days on market.")
+                    if any(w in p_lower for w in ("$18.5m", "18.5m", "sales volume", "#1", "top producer", "ranking")):
+                        score = "FAIL"
+                        score_reasons.append("Line added unverified volume, rankings, or 'top' claims.")
                 elif turn_idx == 3:
                     expected_info = {
-                        "expected_action": "CLARIFY / QUESTION",
+                        "expected_action": "QUESTION",
                         "expected_trigger": "None Needed (Quiet 0ms)",
                         "expected_facts": "0 delivered",
-                        "description": "Filler agreement: Core stays quiet (0ms), advances conversation without repeating Turn 1 canned line.",
+                        "description": "Positive agreement filler: Core stays quiet (0ms), acknowledges briefly, asks one seller-side question without buyer framing or Westlake.",
                     }
                     if core_dec.retrieval_needed:
                         score = "FAIL"
                         score_reasons.append("Retrieval fired on positive agreement filler.")
+                    p_lower = prompt.text.lower()
+                    if any(w in p_lower for w in ("finding the right home", "buying", "buyers", "purchasing a home", "buyer search", "home search", "when you buy")):
+                        score = "FAIL"
+                        score_reasons.append("Line used buyer framing when prospect is selling.")
+                    if "westlake" in p_lower:
+                        score = "FAIL"
+                        score_reasons.append("Line assumed prospect is in Westlake (location not provided by prospect).")
                 elif turn_idx == 4:
                     expected_info = {
-                        "expected_action": "REFRAME / QUANTIFY",
+                        "expected_action": "VALIDATE",
                         "expected_trigger": "policy_wording",
                         "expected_facts": "5.0% commission (chunk_commission_v2); withholds 6.0% (chunk_commission_v1) as stale",
-                        "description": "Pricing contradiction: Core triggers policy_wording, delivers current 5.0% policy, marks legacy 6.0% stale.",
+                        "description": "Pricing contradiction: Core triggers policy_wording, delivers current 5.0% policy, marks legacy 6.0% stale, states 5% without 6% or negotiability.",
                     }
                     if not core_dec.retrieval_needed or chosen_trigger != "policy_wording":
                         score = "FAIL"
                         score_reasons.append(f"Expected policy_wording, got {chosen_trigger}")
-                    if not any("5.0%" in f.get("text", "") for f in facts_info):
+                    if not any("5.0%" in f.get("text", "") or "5%" in f.get("text", "") for f in facts_info):
                         score = "FAIL"
                         score_reasons.append("Did not deliver 5.0% current commission rate.")
                     stale_ids = [w["knowledge_id"] for w in withheld_info if w.get("reason") in ("stale", "superseded")]
                     if "chunk_commission_v1" not in stale_ids:
                         score = "FAIL"
                         score_reasons.append("Legacy 6% chunk was not withheld as stale.")
+                    p_lower = prompt.text.lower()
+                    if not ("5%" in p_lower or "5.0%" in p_lower or "five percent" in p_lower):
+                        score = "FAIL"
+                        score_reasons.append("Line failed to state 5% commission rate.")
+                    if any(w in p_lower for w in ("6%", "6.0%", "six percent", "includes staging", "full marketing", "negotiable", "meet in the middle")):
+                        score = "FAIL"
+                        score_reasons.append("Line mentioned 6%, inclusions, or negotiability.")
                 elif turn_idx == 5:
                     expected_info = {
-                        "expected_action": "REFRAME / DIFFERENTIATE",
+                        "expected_action": "REFRAME",
                         "expected_trigger": "policy_wording (competitor match)",
                         "expected_facts": "0 rebate facts (Rep isolation C6 prevents leaking Sarah's doc)",
-                        "description": "Cross-rep leak trap: Sarah's $5,000 rebate is isolated under rep_sarah and must not leak. Rep pivots to net proceeds without asserting ungrounded company rebate policy.",
+                        "description": "Cross-rep leak trap: Sarah's $5,000 rebate is isolated under rep_sarah. Rep neither confirms nor denies other agent's offer without rebate policy claims.",
                     }
                     delivered_ids = [f["knowledge_id"] for f in facts_info]
                     if "chunk_sarah_rebate" in delivered_ids:
                         score = "FAIL"
                         score_reasons.append("Cross-rep data leakage: Sarah's private rebate chunk leaked to rep_john!")
+                    p_lower = prompt.text.lower()
+                    if "sarah" in p_lower:
+                        score = "FAIL"
+                        score_reasons.append("Line mentioned Sarah (cross-rep data breach).")
+                    if any(w in p_lower for w in ("can't match that rebate", "cannot match that rebate", "our rebate policy", "we do not offer rebates")):
+                        score = "FAIL"
+                        score_reasons.append("Line asserted ungrounded company rebate policy instead of declining to speak for other agents.")
                 elif turn_idx == 6:
                     expected_info = {
-                        "expected_action": "VALIDATE / DE_RISK",
+                        "expected_action": "DE_RISK",
                         "expected_trigger": "policy_wording (guarantee inquiry)",
                         "expected_facts": "0 facts (Unverified pitch deck withheld; low confidence/none found delivers 0 facts)",
-                        "description": "7-day guarantee trap: Legacy unverified pitch deck is withheld. Rep declines to promise specific timelines without asserting unsupported company stances.",
+                        "description": "7-day guarantee trap: Legacy unverified pitch deck is withheld. Rep declines to promise specific timelines without promising processes or outcomes.",
                     }
                     delivered_ids = [f["knowledge_id"] for f in facts_info]
                     if "chunk_old_pitch_deck" in delivered_ids:
@@ -1407,26 +1462,39 @@ def get_conditional_retrieval_router(
                     if len(facts_info) > 0:
                         score = "FAIL"
                         score_reasons.append("Expected 0 facts delivered on guarantee inquiry; irrelevant sales facts leaked.")
+                    p_lower = prompt.text.lower()
+                    if any(w in p_lower for w in ("structure the timeline to protect your interests", "promise that we will")) or (
+                        "guarantee" in p_lower and not any(neg in p_lower for neg in ("can't guarantee", "cannot guarantee", "don't guarantee", "do not guarantee", "no guarantee", "won't guarantee"))
+                    ):
+                        score = "FAIL"
+                        score_reasons.append("Line promised an ungrounded process or outcome.")
                 elif turn_idx == 7:
                     expected_info = {
-                        "expected_action": "QUESTION / COMMITMENT_CLOSE",
+                        "expected_action": "QUESTION",
                         "expected_trigger": "service_process_objection",
-                        "expected_facts": "Stored 10 AM morning chunk withheld due to conflict with live 3 PM request",
-                        "description": "Live truth conflict: Prospect asks about consultation hours and suggests 3:00 PM. Stored morning doc is withheld on conflict. Rep checks 3 PM availability without claiming unverified morning hours.",
+                        "expected_facts": "Stored schedule delivered (chunk_stored_schedule); 10 AM weekday mornings",
+                        "description": "Consultation schedule delivery: Prospect asks for consultation hours and proposes 3 PM. Stored schedule chunk is delivered. Rep states weekday mornings hours and offers to check 3 PM availability.",
                     }
-                    withheld_ids = [w["knowledge_id"] for w in withheld_info]
-                    if "chunk_stored_schedule" not in withheld_ids:
+                    delivered_ids = [f["knowledge_id"] for f in facts_info]
+                    if "chunk_stored_schedule" not in delivered_ids:
                         score = "FAIL"
-                        score_reasons.append("Stored 10 AM consultation chunk was not withheld when prospect requested 3 PM.")
-                    if "weekday mornings" in prompt.text.lower():
+                        score_reasons.append("Stored consultation hours chunk was not delivered when prospect asked for hours.")
+                    p_lower = prompt.text.lower()
+                    if not ("morning" in p_lower or "10:00 am" in p_lower or "10 am" in p_lower):
                         score = "FAIL"
-                        score_reasons.append("Ungrounded schedule claim: Teleprompter asserted 'weekday mornings' despite stored schedule being withheld!")
+                        score_reasons.append("Line failed to state the stored consultation hours (weekday mornings / 10 AM).")
+                    if not any(w in p_lower for w in ("check", "verify", "see if", "possible", "can't do", "cannot do", "accommodate")):
+                        score = "FAIL"
+                        score_reasons.append("Line failed to state that it will check/verify 3:00 PM availability.")
+                    if any(w in p_lower for w in ("3:00 pm works for us", "confirmed for 3", "see you at 3", "does 3:00 pm work for you", "does 3 pm work for you")):
+                        score = "FAIL"
+                        score_reasons.append("Line confirmed 3 PM prematurely or flipped the question to the prospect.")
                 elif turn_idx == 8:
                     expected_info = {
                         "expected_action": "EDUCATE",
                         "expected_trigger": "service_process_objection / factual_question",
                         "expected_facts": "0 facts (Low confidence score < 0.50 floor; bio chunk withheld, NOT delivered)",
-                        "description": "Out-of-domain inspection contingency: Top raw semantic score is below 0.50 floor. System returns low_confidence and delivers ZERO facts.",
+                        "description": "Inspection contingency inquiry: Out of domain, top semantic match is below 0.50 floor. Delivers 0 facts. Rep says contingency depends on contract terms and will confirm without inventing an appointment or typical timeline.",
                     }
                     delivered_ids = [f["knowledge_id"] for f in facts_info]
                     if "chunk_salesperson_profile" in delivered_ids or len(facts_info) > 0:
@@ -1435,9 +1503,19 @@ def get_conditional_retrieval_router(
                     if gate_status not in ("low_confidence", "none_found"):
                         score = "FAIL"
                         score_reasons.append(f"Expected low_confidence gate status, got {gate_status}")
-                    if action_val != "educate":
+                    p_lower = prompt.text.lower()
+                    if any(w in p_lower for w in ("consultation tomorrow", "appointment tomorrow", "meeting tomorrow", "walkthrough tomorrow", "when we meet tomorrow")):
                         score = "FAIL"
-                        score_reasons.append(f"Expected core_action EDUCATE for educational inquiry, got {action_val.upper()}")
+                        score_reasons.append("Line invented an unconfirmed appointment ('during our consultation tomorrow').")
+                    if "typical timeline" in p_lower or "the typical" in p_lower:
+                        score = "FAIL"
+                        score_reasons.append("Line asserted an ungrounded 'typical timeline'.")
+                    if re.search(r"\b\d+\s+days\b", p_lower):
+                        score = "FAIL"
+                        score_reasons.append("Line asserted ungrounded day counts for contingency timeline.")
+                    if not any(w in p_lower for w in ("contract", "terms", "agreement", "depend", "negotiat")):
+                        score = "FAIL"
+                        score_reasons.append("Line failed to state that contingency depends on contract terms.")
             elif "messy" in req.script_name.lower():
                 if turn_idx == 1:
                     expected_info = {
@@ -1610,6 +1688,8 @@ def get_conditional_retrieval_router(
                 "prompt_status": prompt.status,
                 "teleprompter_source": getattr(prompt, "generation_source", "deterministic"),
                 "generation_source": getattr(prompt, "generation_source", "deterministic"),
+                "raw_llm_output": getattr(prompt, "raw_llm_output", None),
+                "fallback_reason": getattr(prompt, "fallback_reason", None),
                 "hallucination_safe": is_safe,
                 "hallucination_violations": violations,
                 "state_version": turn_idx,

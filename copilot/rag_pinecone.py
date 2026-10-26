@@ -4,8 +4,9 @@ from __future__ import annotations
 
 import hashlib
 import logging
+import uuid
 from dataclasses import dataclass
-from typing import Optional, Callable
+from typing import Any, Callable, Optional
 
 import openai
 from pinecone import Pinecone
@@ -40,6 +41,7 @@ class PineconeRAG:
         pinecone_api_key: str,
         openai_api_key: str,
         index_name: str = "subscriber-kb",
+        admin_mode: bool = False,
     ):
         """Initialize Pinecone RAG.
         
@@ -47,10 +49,12 @@ class PineconeRAG:
             pinecone_api_key: Pinecone API key
             openai_api_key: OpenAI API key
             index_name: The single Pinecone index name to use
+            admin_mode: Whether this instance operates in admin mode
         """
         self.pc = Pinecone(api_key=pinecone_api_key)
         self.openai_client = openai.OpenAI(api_key=openai_api_key)
         self.index_name = index_name
+        self.admin_mode = admin_mode
         self.index = self._get_or_create_index()
 
     def _get_or_create_index(self):
@@ -187,6 +191,62 @@ class PineconeRAG:
             "total_size": len(extracted.text),
             "file_type": extracted.file_type,
         }
+
+    def upsert_text_chunk(
+        self,
+        chunk_id: str,
+        text: str,
+        tenant_id: str,
+        metadata: Optional[dict[str, Any]] = None,
+        timeout: float = 5.0,
+    ) -> bool:
+        """Upsert a single text chunk into Pinecone index under tenant namespace."""
+        try:
+            embedding = self._get_embedding(text, timeout=timeout)
+            meta = {
+                "text": text,
+                "tenant_id": tenant_id,
+                "source": metadata.get("source_title", metadata.get("source", "knowledge_record")) if metadata else "knowledge_record",
+                "file_type": "text",
+                **(metadata or {}),
+            }
+            self.index.upsert(
+                vectors=[(chunk_id, embedding, meta)],
+                namespace=tenant_id,
+            )
+            LOGGER.info("Upserted chunk %s to Pinecone (namespace: %s)", chunk_id, tenant_id)
+            return True
+        except Exception as e:
+            LOGGER.error("Failed to upsert text chunk %s to Pinecone: %s", chunk_id, e)
+            return False
+
+    def upsert_record(self, record: Any, tenant_id: Optional[str] = None) -> bool:
+        """Upsert a KnowledgeRecord directly into Pinecone index."""
+        try:
+            ns = tenant_id or getattr(record, "owner_user_id", "default")
+            meta = {
+                "text": record.text,
+                "source": getattr(record, "source_title", "knowledge_record"),
+                "source_title": getattr(record, "source_title", "knowledge_record"),
+                "source_version": getattr(record, "source_version", "1.0"),
+                "knowledge_class": getattr(record, "knowledge_class", "general"),
+                "verification_status": getattr(record, "verification_status", "company_approved"),
+                "sensitivity": getattr(record, "sensitivity", "normal"),
+                "owner_user_id": getattr(record, "owner_user_id", ns),
+                "owner_id": getattr(record, "owner_user_id", ns),
+                "scope": getattr(record, "owner_scope", "user"),
+                "owner_scope": getattr(record, "owner_scope", "user"),
+                "topic_tags": getattr(record, "topic_tags", []),
+            }
+            return self.upsert_text_chunk(
+                chunk_id=getattr(record, "knowledge_id", str(uuid.uuid4().hex[:16])),
+                text=record.text,
+                tenant_id=ns,
+                metadata=meta,
+            )
+        except Exception as e:
+            LOGGER.error("Failed to upsert KnowledgeRecord to Pinecone: %s", e)
+            return False
 
     def search(
         self,

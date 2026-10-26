@@ -273,6 +273,99 @@ def validate_prompt_hallucinations(
             if "morning" not in facts_combined and phrase not in prospect_combined:
                 violations.append(f"Ungrounded scheduling assertion: '{m.group(0)}' (consultation schedule not verified in facts)")
 
+    # 17. Broad Grounding Checks: Invented appointments & commitments (Doc 02 §9)
+    # Checks whether prompt asserts an agreed or upcoming appointment/meeting when none was confirmed
+    appointment_claim_patterns = [
+        r"\b(?:during|at|for|in)\s+(?:our\s+)?(?:consultation|meeting|walkthrough|appointment|session)\s+(?:tomorrow|on\s+[A-Za-z]+|next\s+week|\d+\s*(?:am|pm))\b",
+        r"\b(?:see\s+you|look\s+forward\s+to\s+seeing\s+you)\s+(?:tomorrow|at\s+\d+|next\s+week)\b",
+        r"\bconfirming\s+our\s+(?:consultation|meeting|walkthrough|appointment)\b",
+    ]
+    for pat in appointment_claim_patterns:
+        m = re.search(pat, text_clean, flags=re.IGNORECASE)
+        if m:
+            phrase = m.group(0).casefold()
+            if "confirmed" not in prospect_combined and "agreed" not in prospect_combined and phrase not in prospect_combined:
+                violations.append(f"Invented appointment claim: '{m.group(0)}' (consultation/appointment was never confirmed in conversation truth)")
+
+    # 18. Broad Grounding Checks: Implied typical timeline (Doc 02 §9)
+    timeline_assumption_patterns = [
+        r"\b(?:the|a|our)\s+(?:typical|standard|usual|normal|standardized|expected|average)\s+timeline\b",
+        r"\bwalk\s+through\s+(?:the\s+)?(?:usual|typical|standard)\s+timeline\b",
+    ]
+    for pat in timeline_assumption_patterns:
+        m = re.search(pat, text_clean, flags=re.IGNORECASE)
+        if m:
+            phrase = m.group(0).casefold()
+            if phrase not in facts_combined and phrase not in prospect_combined:
+                violations.append(f"Ungrounded timeline assertion: '{m.group(0)}' (implies standardized timeline exists without factual basis)")
+
+    # 19. Assumed Context & Role Confusion: Buyer framing for a seller (Doc 02 §9)
+    is_seller_context = any(
+        w in prospect_combined for w in ("selling", "sell my", "sell our", "thinking about selling", "listing", "residential_seller")
+    )
+    if is_seller_context:
+        buyer_patterns = [
+            r"\b(?:finding|find|search(?:ing)?\s+for|look(?:ing)?\s+for|buying|purchas(?:ing|e))\s+(?:the\s+right|your\s+next|a\s+new|a|another)\s+(?:home|house|property|place|condo)\b",
+            r"\bhelp\s+you\s+find\s+your\s+next\s+place\b",
+            r"\bwhen\s+you\s+buy\b",
+            r"\bhome\s+search\b",
+        ]
+        for b_pat in buyer_patterns:
+            bm = re.search(b_pat, text_clean, flags=re.IGNORECASE)
+            if bm:
+                violations.append(f"Role confusion / buyer framing for seller: '{bm.group(0)}' (prospect is selling, not buying)")
+
+    # 20. Assumed Prospect Location (Doc 02 §9)
+    location_assumption_patterns = [
+        r"\b(?:in|for|at)\s+(?:your\s+)?([A-Z][a-z]+)\s+(?:home|house|property|condo|place)\b",
+        r"\b(?:selling|listing|moving\s+from)\s+(?:your\s+)?(?:home\s+in|property\s+in)\s+([A-Z][a-z]+)\b",
+    ]
+    for l_pat in location_assumption_patterns:
+        lm = re.search(l_pat, text_clean)
+        if lm:
+            loc = lm.group(1).casefold()
+            prospect_stated_property_loc = any(
+                p in prospect_combined for p in (f"home in {loc}", f"house in {loc}", f"property in {loc}", f"live in {loc}", f"located in {loc}", f"our {loc} home", f"my {loc} home")
+            )
+            if not prospect_stated_property_loc and loc not in ("our", "the", "a", "your"):
+                violations.append(f"Assumed prospect location: '{lm.group(0)}' (prospect never stated their property is in {lm.group(1)})")
+
+    # 21. Unverified Process Promises (Doc 02 §9)
+    process_promise_patterns = [
+        r"\b(?:structure\s+the|handle\s+your|work\s+out\s+(?:how\s+we\s+handle\s+)?your)\s+timeline\s+to\s+protect\s+your\s+interests\b",
+        r"\bprotect\s+your\s+interests\s+through\s+(?:our|a)\s+proprietary\b",
+        r"\b(?:guarantee|promise)\s+(?:a|the|our|that\s+we)\s+(?:timeline|process|outcome|closing\s+date)\b",
+    ]
+    for p_pat in process_promise_patterns:
+        pm = re.search(p_pat, text_clean, flags=re.IGNORECASE)
+        if pm:
+            phrase = pm.group(0).casefold()
+            if phrase not in facts_combined and phrase not in prospect_combined:
+                violations.append(f"Unverified process promise: '{pm.group(0)}'")
+
+    # 22. Rebate Policy Assertions (Doc 02 §9)
+    rebate_policy_patterns = [
+        r"\b(?:can(?:'t|not)|don't|do\s+not)\s+match\s+(?:that\s+)?(?:rebate|cash\s*back|offer)\b",
+        r"\b(?:our\s+)?(?:company\s+)?policy\s+(?:is|prohibits|does\s+not\s+allow)\s+(?:rebates?|cash\s*back)\b",
+        r"\bwe\s+do\s+not\s+(?:offer|give|provide)\s+rebates?\b",
+    ]
+    for r_pat in rebate_policy_patterns:
+        rm = re.search(r_pat, text_clean, flags=re.IGNORECASE)
+        if rm:
+            phrase = rm.group(0).casefold()
+            if phrase not in facts_combined and phrase not in prospect_combined:
+                violations.append(f"Ungrounded rebate policy claim: '{rm.group(0)}' (must decline to speak to other agents' offers rather than asserting company policy)")
+
+    # 23. Unsupported Administrative / System Execution Claims (Doc 01 §10)
+    admin_claim_patterns = [
+        r"\b(?:have|will)\s+remove(?:d)?\s+(?:your\s+number|you\s+from\s+(?:our|the)\s+contact\s+list)\b",
+        r"\b(?:purged|deleted)\s+your\s+information\s+from\s+our\s+database\b",
+    ]
+    for ac_pat in admin_claim_patterns:
+        ac_m = re.search(ac_pat, text_clean, flags=re.IGNORECASE)
+        if ac_m:
+            violations.append(f"Unsupported administrative action claim: '{ac_m.group(0)}' (rep must respectfully acknowledge boundary without claiming technical database operations)")
+
     return (len(violations) == 0, violations)
 
 
@@ -292,6 +385,8 @@ class Prompt(BaseModel):
     max_prompt_words: int = 24
     confidence: float = 1.0
     generation_source: Optional[str] = "deterministic"
+    raw_llm_output: Optional[str] = None
+    fallback_reason: Optional[str] = None
 
 
 class LLMResponseGateway:
@@ -601,16 +696,26 @@ class LLMResponseGateway:
         )
 
         gen_source = "deterministic"
+        raw_llm_output = None
+        fallback_reason = None
+
         if use_llm and (self.generator_func or (self.llm_client and hasattr(self.llm_client, "chat"))):
             if self.generator_func:
                 raw_text = self.generator_func(context, working_decision.max_prompt_words)
+                raw_llm_output = raw_text
                 gen_source = "generator_func"
             else:
-                raw_text, used_llm = self._call_llm(context, working_decision, snapshot=snapshot, facts=facts)
-                gen_source = "llm" if used_llm else "deterministic"
+                raw_text, used_llm, call_reason = self._call_llm(context, working_decision, snapshot=snapshot, facts=facts)
+                if used_llm:
+                    raw_llm_output = raw_text
+                    gen_source = "llm"
+                else:
+                    gen_source = "deterministic"
+                    fallback_reason = call_reason or "LLM call failed or returned empty content"
         else:
             raw_text = self._deterministic_fallback(working_decision, snapshot=snapshot, facts=facts)
             gen_source = "deterministic"
+            fallback_reason = "Deterministic mode requested (use_llm=False)"
 
         cleaned_text = self._clean_and_truncate(raw_text, working_decision.max_prompt_words)
 
@@ -618,6 +723,7 @@ class LLMResponseGateway:
         has_inj, inj_pattern = detect_prompt_injection(cleaned_text)
         if has_inj:
             LOGGER.warning("Prompt injection instruction ('%s') detected in generated output; neutralizing with fallback.", inj_pattern)
+            fallback_reason = f"Prompt injection detected in generated output: {inj_pattern}"
             cleaned_text = self._deterministic_fallback(working_decision, snapshot=snapshot, facts=facts)
             cleaned_text = self._clean_and_truncate(cleaned_text, working_decision.max_prompt_words)
             gen_source = "neutralized_fallback"
@@ -630,6 +736,7 @@ class LLMResponseGateway:
                 "Hallucination guardrail triggered on prompt: violations=%s. Replacing with prospect-focused truthful fallback.",
                 violations,
             )
+            fallback_reason = f"Hallucination guardrail rejected output: {'; '.join(violations)}"
             cleaned_text = self._deterministic_fallback(working_decision, snapshot=snapshot, facts=facts)
             cleaned_text = self._clean_and_truncate(cleaned_text, working_decision.max_prompt_words)
             gen_source = "guardrail_fallback"
@@ -652,6 +759,8 @@ class LLMResponseGateway:
                 confidence=working_decision.confidence,
                 status="stale_discarded",
                 generation_source=gen_source,
+                raw_llm_output=raw_llm_output,
+                fallback_reason=f"Conversation state advanced from v{snapshot.state_version} to v{effective_post_version} during generation",
             )
 
         return Prompt(
@@ -663,6 +772,8 @@ class LLMResponseGateway:
             max_prompt_words=working_decision.max_prompt_words,
             confidence=working_decision.confidence,
             generation_source=gen_source,
+            raw_llm_output=raw_llm_output,
+            fallback_reason=fallback_reason,
         )
 
     def _call_llm(
@@ -671,7 +782,7 @@ class LLMResponseGateway:
         decision: StrategicDecision,
         snapshot: Optional[ConversationStateSnapshot] = None,
         facts: Optional[List[Any]] = None,
-    ) -> Tuple[str, bool]:
+    ) -> Tuple[str, bool, Optional[str]]:
         # If client is configured and not mock, execute real LLM call
         if self.llm_client and hasattr(self.llm_client, "chat"):
             try:
@@ -685,9 +796,14 @@ class LLMResponseGateway:
                             "role": "system",
                             "content": (
                                 "You are PitchProX Spoken Teleprompter Assistant. "
-                                "Formulate a single, direct, natural spoken sentence for the salesperson to say right now. "
-                                "CRITICAL CONSTRAINT: You must strictly ground any facts, percentages, numbers, or terms ONLY in the provided verified facts in Block 3. "
-                                "Never fabricate or exaggerate. Output ONLY the exact sentence to speak."
+                                "Formulate a single, direct, natural spoken sentence for the salesperson to say right now.\n"
+                                "CRITICAL ARCHITECTURAL CONSTRAINTS:\n"
+                                "1. Strict Grounding: Use ONLY verified facts from Block 3 for quantitative metrics, transaction history, fees, and operational policies.\n"
+                                "2. Conversation Truth Integrity: Align strictly with conversation state and recent dialogue in Block 2. Never invent appointments, meetings, or commitments not explicitly confirmed by the prospect.\n"
+                                "3. Role & Context Respect: Align strictly with the prospect's transaction role (seller vs. buyer) and declared property details. Never assume locations or transaction roles not stated by the prospect.\n"
+                                "4. Zero Fabricated Assurances: Never fabricate unwritten company policies, proprietary process promises, or guaranteed timelines. Coordinate prospect requests truthfully based only on delivered facts.\n"
+                                "5. Boundary & Compliance Priority: Respect all prospect boundaries and compliance rules without claiming technical administrative actions.\n"
+                                "6. Spoken Format: Output ONLY the single spoken sentence without quotes, preambles, or coaching labels."
                             ),
                         },
                         {"role": "user", "content": context},
@@ -697,12 +813,14 @@ class LLMResponseGateway:
                 )
                 content = response.choices[0].message.content
                 if content and content.strip():
-                    return content.strip().strip('"'), True
+                    return content.strip().strip('"'), True, None
+                return self._deterministic_fallback(decision, snapshot=snapshot, facts=facts), False, "LLM returned empty content or token budget exhausted"
             except Exception as e:
                 LOGGER.warning("LLM call failed, falling back to deterministic formulation: %s", e)
+                return self._deterministic_fallback(decision, snapshot=snapshot, facts=facts), False, f"LLM API error: {e}"
 
         # Fallback deterministic formulation matching the strategic action
-        return self._deterministic_fallback(decision, snapshot=snapshot, facts=facts), False
+        return self._deterministic_fallback(decision, snapshot=snapshot, facts=facts), False, "No active LLM client configured"
 
     def _deterministic_fallback(
         self,
@@ -767,6 +885,14 @@ class LLMResponseGateway:
                     return f"I understand your concern about the fee—we can walk through your expected net proceeds breakdown together so you have complete clarity."
                 return f"Our standard residential listing commission rate is {pct} of gross purchase price."
 
+            # Stored consultation schedule chunk: dynamically extract stored hours from chunk and verify requested time
+            if "consultation" in f_clean.lower() and any(w in f_clean.lower() for w in ("hours", "weekday", "morning", "strictly conducted", "schedule", "between")):
+                m_hours = re.search(r"(?:strictly conducted on|are strictly conducted on|conducted on|hours are|are strictly conducted|are)\s+([^.]+)", f_clean, flags=re.IGNORECASE)
+                hours_phrase = m_hours.group(1).strip() if m_hours else f_clean
+                if any(w in recent_prospect_text for w in ("3:00 pm", "3pm", "tomorrow", "afternoon")):
+                    return f"Our consultations are {hours_phrase}; let me check our calendar for tomorrow at 3:00 PM."
+                return f"Our consultations are {hours_phrase}."
+
             has_fact_inj, _ = detect_prompt_injection(f_clean)
             if not has_fact_inj and action in (
                 StrategicAction.QUANTIFY,
@@ -786,13 +912,13 @@ class LLMResponseGateway:
             return "Let me check our listing agreement cancellation terms for you and confirm the exact details."
 
         if any(w in recent_prospect_text for w in ("guarantee", "7 days", "seven days")):
-            return "I can't promise a specific timeline, but we price and market to sell as quickly as possible."
+            return "I can't promise a specific timeline or closing date, as market conditions and buyer activity dictate the pace."
 
         if any(w in recent_prospect_text for w in ("rebate", "cash back", "cashback", "match that", "can you match")):
-            return "I can't speak to other agents' rebate offers, but I can walk you through your expected net proceeds."
+            return "I can't speak to other agents' specific offers or arrangements, but our focus is on maximizing your net proceeds upon closing."
 
         if any(w in recent_prospect_text for w in ("inspection", "contingency")):
-            return "Inspection contingency timelines depend on specific contract terms—let me verify the exact details for your property."
+            return "The exact contingency timeline depends entirely on the terms negotiated in the purchase contract; I will verify those details and follow up with you."
 
         # Scheduling requests: acknowledge prospect's requested time if provided; never invent ungrounded times (Doc 01 §10)
         if any(w in recent_prospect_text for w in ("3:00 pm", "3pm", "tomorrow afternoon", "consultation hours", "can we meet", "meet tomorrow")):

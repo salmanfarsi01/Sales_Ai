@@ -397,10 +397,26 @@ class RetrievalCache:
 class KnowledgeStore:
     """In-memory user-partitioned knowledge repository enforcing Doc 02 hard pre-filters."""
 
-    def __init__(self, cache: Optional[RetrievalCache] = None) -> None:
+    def __init__(
+        self,
+        cache: Optional[RetrievalCache] = None,
+        pinecone_rag: Optional[Any] = None,
+        sync_to_pinecone: bool = True,
+    ) -> None:
         self._records: Dict[str, KnowledgeRecord] = {}
         self._user_knowledge_versions: Dict[str, int] = {}
         self.cache: Optional[RetrievalCache] = cache
+        self.pinecone_rag = pinecone_rag
+        self.sync_to_pinecone = sync_to_pinecone
+        if self.pinecone_rag is None and self.sync_to_pinecone:
+            pk = os.getenv("PINECONE_API_KEY")
+            ok = os.getenv("OPENAI_API_KEY")
+            if pk and ok and not pk.startswith("mock") and not ok.startswith("mock"):
+                try:
+                    from .rag_pinecone import PineconeRAG
+                    self.pinecone_rag = PineconeRAG(pinecone_api_key=pk, openai_api_key=ok)
+                except Exception as exc:
+                    LOGGER.debug("Could not initialize PineconeRAG for KnowledgeStore: %s", exc)
 
     def get_user_knowledge_version(self, user_id: str) -> int:
         return self._user_knowledge_versions.get(user_id, 1)
@@ -458,6 +474,13 @@ class KnowledgeStore:
 
         self._records[record.knowledge_id] = record
         self._notify_invalidation(record.owner_user_id)
+
+        # Sync to Pinecone index when configured
+        if self.pinecone_rag and self.sync_to_pinecone:
+            try:
+                self.pinecone_rag.upsert_record(record, tenant_id=record.owner_user_id)
+            except Exception as e:
+                LOGGER.debug("Could not sync record %s to Pinecone: %s", record.knowledge_id, e)
 
     def delete_record(self, knowledge_id: str, soft: bool = True) -> bool:
         """Deletes a knowledge chunk. If soft=True, marks tombstone per Step 10."""
@@ -604,6 +627,64 @@ class KnowledgeStore:
         w = weights or RankingWeights()
 
         scored_candidates: List[Tuple[KnowledgeRecord, float]] = []
+
+        # Try Pinecone vector search first if configured and enabled
+        if self.pinecone_rag and os.getenv("ENABLE_PINECONE_RETRIEVAL", "0") == "1":
+            try:
+                rag_matches = self.pinecone_rag.search(
+                    query=query,
+                    tenant_id=user_id,
+                    top_k=top_k * 2,
+                    min_score=min_score,
+                    owner_id=user_id,
+                )
+                if rag_matches:
+                    for rm in rag_matches:
+                        auth_rec = self.get_record(rm.id)
+                        if not auth_rec:
+                            auth_rec = KnowledgeRecord(
+                                knowledge_id=rm.id,
+                                owner_scope="user",
+                                owner_user_id=user_id,
+                                knowledge_class=rm.metadata.get("knowledge_class", "general"),
+                                source_title=rm.metadata.get("source_title", rm.source),
+                                source_version=rm.metadata.get("source_version", "1.0"),
+                                topic_tags=rm.metadata.get("topic_tags", []),
+                                text=rm.text,
+                                verification_status=rm.metadata.get("verification_status", "company_approved"),
+                                sensitivity=rm.metadata.get("sensitivity", "normal"),
+                            )
+
+                        if auth_rec.owner_scope != "user" or auth_rec.owner_user_id != user_id:
+                            continue
+                        if auth_rec.deleted or auth_rec.superseded_by is not None:
+                            continue
+                        if auth_rec.sensitivity == "restricted":
+                            continue
+                        if auth_rec.sensitivity == "confidential" and not allow_confidential:
+                            continue
+                        if auth_rec.lead_type_tags and lead_type and lead_type not in auth_rec.lead_type_tags:
+                            continue
+
+                        raw_semantic = min(1.0, max(0.0, getattr(rm, "score", 0.75)))
+                        if raw_semantic < min_score:
+                            continue
+
+                        score = raw_semantic * w.semantic_weight
+                        if auth_rec.lead_type_tags and lead_type and lead_type in auth_rec.lead_type_tags:
+                            score += w.lead_type_boost
+                        if auth_rec.verification_status in ("company_approved", "system_validated"):
+                            score += w.verification_boost
+                        elif auth_rec.verification_status == "self_attested":
+                            score += round(0.4 * w.verification_boost, 3)
+
+                        scored_candidates.append((auth_rec, score, raw_semantic))
+
+                    if scored_candidates:
+                        scored_candidates.sort(key=lambda x: x[1], reverse=True)
+                        return scored_candidates[:top_k]
+            except Exception as exc:
+                LOGGER.warning("Pinecone candidate search encountered error, falling back to local store: %s", exc)
 
         for rec in self._records.values():
             # --- Hard Pre-Filters (Step 4 & Constraint C6) ---
@@ -1083,16 +1164,40 @@ class ConditionalRetrievalEngine:
 
                 chunk_text_lower = rec.text.casefold()
 
-                # Timing / Scheduling contradiction
+                # Timing / Scheduling contradiction:
+                # Asking for consultation hours with a proposed meeting time is a request, not a factual contradiction.
+                # Only a firm negative constraint contradicts stored schedule.
+                is_asking_hours = any(w in live_evidence for w in ("consultation hours", "hours", "what are your", "when are consultations"))
                 timing_contradiction = False
-                if ("afternoon" in live_evidence or "afternoon" in live_facts_dict.get("scheduling_constraint", "") or "3 pm" in live_evidence or "3:00 pm" in live_evidence) and (
-                    "morning" in chunk_text_lower or "10 am" in chunk_text_lower or "9 am" in chunk_text_lower
+                if not is_asking_hours:
+                    has_afternoon_only = ("afternoon" in live_evidence and "only" in live_evidence) or "afternoons only" in live_evidence or "never morning" in live_evidence or live_facts_dict.get("scheduling_constraint") in ("afternoon_only", "afternoons_only", "never_mornings")
+                    has_morning_only = ("morning" in live_evidence and "only" in live_evidence) or "mornings only" in live_evidence or live_facts_dict.get("scheduling_constraint") in ("morning_only", "mornings_only", "never_afternoons")
+                    if has_afternoon_only and ("morning" in chunk_text_lower or "10 am" in chunk_text_lower or "9 am" in chunk_text_lower):
+                        timing_contradiction = True
+                    elif has_morning_only and ("afternoon" in chunk_text_lower or "evening" in chunk_text_lower):
+                        timing_contradiction = True
+
+                # Property tenure / Buyer vs Seller contradiction (Doc 02 §8):
+                # Stored script claiming first-time buyer conflicts with live owner of 20 years selling their home
+                tenure_contradiction = False
+                if ("20 years" in live_evidence or "owned for" in live_evidence or "selling" in live_evidence or live_facts_dict.get("ownership_duration") == "20_years") and (
+                    "first-time buyer" in chunk_text_lower or "first purchase" in chunk_text_lower or "first home purchase" in chunk_text_lower
                 ):
-                    timing_contradiction = True
-                elif ("morning" in live_evidence or "morning" in live_facts_dict.get("scheduling_constraint", "")) and (
-                    "afternoon" in chunk_text_lower or "evening" in chunk_text_lower
-                ):
-                    timing_contradiction = True
+                    tenure_contradiction = True
+
+                # Property type contradiction (Doc 02 §8):
+                # Stored script assuming 3-bedroom single-family house conflicts with prospect declaring condo/townhome
+                property_type_contradiction = False
+                is_condo = any(w in live_evidence for w in ("condo", "condominium", "townhouse", "townhome", "apartment", "unit")) or live_facts_dict.get("property_type") in ("condo", "townhouse", "apartment")
+                if is_condo and any(w in chunk_text_lower for w in ("single-family home", "single family", "3-bedroom home", "3 bedroom house", "detached home", "large yard", "sprawling yard")):
+                    property_type_contradiction = True
+
+                # Relationship history contradiction (Doc 02 §8):
+                # Stored first-call/introduction script conflicts with prospect who already met or worked with the rep
+                relationship_history_contradiction = False
+                has_prior_relationship = any(w in live_evidence for w in ("already met", "met last week", "worked together before", "sold our last", "spoke yesterday", "already worked with")) or live_facts_dict.get("relationship_status") in ("prior_client", "already_met")
+                if has_prior_relationship and any(w in chunk_text_lower for w in ("nice to meet you", "first time speaking", "first-time caller", "first call", "introducing our team", "new prospective client")):
+                    relationship_history_contradiction = True
 
                 # Stakeholder / Decision Maker contradiction
                 stakeholder_contradiction = False
@@ -1103,12 +1208,19 @@ class ConditionalRetrievalEngine:
 
                 # Contact preference contradiction
                 channel_contradiction = False
-                if ("email only" in live_evidence or "do not call" in live_evidence or live_facts_dict.get("contact_preference") == "email_only") and (
-                    "daily phone calls" in chunk_text_lower or "call prospect daily" in chunk_text_lower
+                if ("email only" in live_evidence or "do not call" in live_evidence or "no daily text" in live_evidence or "don't text" in live_evidence or live_facts_dict.get("contact_preference") in ("email_only", "no_sms")) and (
+                    "daily phone calls" in chunk_text_lower or "call prospect daily" in chunk_text_lower or "daily text" in chunk_text_lower
                 ):
                     channel_contradiction = True
 
-                if timing_contradiction or stakeholder_contradiction or channel_contradiction:
+                if (
+                    timing_contradiction
+                    or tenure_contradiction
+                    or property_type_contradiction
+                    or relationship_history_contradiction
+                    or stakeholder_contradiction
+                    or channel_contradiction
+                ):
                     withheld.append(
                         WithheldFact(
                             knowledge_id=rec.knowledge_id,

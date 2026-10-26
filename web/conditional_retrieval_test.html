@@ -1927,7 +1927,17 @@
             <td>${factsSummaryHtml}</td>
             <td>
               <div style="font-size: 12px; color: var(--text); font-style: italic; margin-bottom: 4px;">"${t.teleprompter_line}"</div>
-              <div style="display: flex; gap: 6px; align-items: center;">
+              ${t.raw_llm_output && t.raw_llm_output !== t.teleprompter_line ? `
+                <div style="font-size: 11px; color: var(--text-dim); margin-bottom: 4px; background: #f8fafc; border: 1px dashed var(--border); padding: 4px 6px; border-radius: 4px;">
+                  <b>Raw LLM:</b> "${t.raw_llm_output}"
+                </div>
+              ` : ''}
+              ${t.fallback_reason ? `
+                <div style="font-size: 10px; color: var(--amber); margin-bottom: 4px; background: var(--amber-dim); border: 1px solid var(--amber-border); padding: 3px 6px; border-radius: 4px;">
+                  <b>Fallback:</b> ${t.fallback_reason}
+                </div>
+              ` : ''}
+              <div style="display: flex; gap: 6px; align-items: center; flex-wrap: wrap;">
                 <span class="badge-pill ${t.hallucination_safe ? 'badge-green' : 'badge-red'}">
                   ${t.hallucination_safe ? 'Safe (0 violations)' : t.hallucination_violations.length + ' Violations'}
                 </span>
