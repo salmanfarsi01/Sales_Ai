@@ -1,0 +1,20 @@
+Hi, thank you. I reviewed the ConversationState replay and the overall structure is moving in the right direction. I can see the Before State → Evidence/Reasoning → Applied Mutations → After State architecture, objection lifecycle, persistent facts, dimensions, auditability, and state versioning.
+Before we consider ConversationState complete, I want to run one more controlled stress test. I don't want another straightforward conversation that naturally progresses toward an appointment, because that won't fully test the difficult parts of state management.
+Please create a dummy conversation specifically designed to test the following behaviors:
+1. Current truth supersession — The prospect states something as true early in the conversation and later provides information that materially changes or contradicts it. The old statement should remain in history, but the current state must reflect the newer truth.
+2. Dynamic Conversation Stage — The conversation should progress toward a later stage, then new information should legitimately move it back into Discovery or Objection Resolution. Stage must represent what is happening now, not the furthest stage previously reached.
+3. Objection reactivation — Raise an objection, partially/resolved it, then have the prospect raise the same underlying concern later using completely different language. It should be recognized as the same objection becoming reactivated rather than a brand-new unrelated objection.
+4. Decision structure change — Initially make the prospect appear to be the sole decision maker. Later reveal that a spouse/partner must also agree. That fact should persist for the remainder of the call and appropriately affect readiness/current blockers.
+5. Independent dimensions — Include a point where the prospect is highly engaged and talking openly, but Momentum or Readiness should actually decline because new complications have surfaced. Trust, Engagement, Momentum and Readiness should not mechanically rise and fall together.
+6. Persistent facts — Introduce important information such as motivation, timing, decision maker, scheduling constraint or contact preference. Confirm that these remain available in state until legitimately superseded.
+7. Soft preference/boundary — Include something like, “Please don't start texting me every day before we meet.” This should persist as a contact preference but should NOT trigger the hard compliance/do-not-contact behavior.
+8. Hard boundary distinction — Separately confirm that an actual statement such as “Don't call me again” still triggers the appropriate hard-boundary/compliance behavior. The system must clearly distinguish this from the soft preference above.
+9. Specific commitment after uncertainty — Toward the end, move from vague future language such as “maybe next week” to a specific appointment such as “Thursday at 3 works, and my wife will be there.” The state should recognize the material increase in specificity and commitment.
+10. Explainability — At each important change, I want the replay to clearly show:
+State Before → New Evidence → What Changed → Why It Changed → State After
+Please also make sure state_version increments with each meaningful state mutation and that the replay preserves the historical states.
+The most important thing I want this test to prove is that ConversationState is not simply accumulating information or progressing through a sales funnel. It should continuously represent:
+“Given everything that has happened so far, what is currently true about this conversation?”
+So the test should intentionally be messy. The prospect should change direction, reveal information late, reopen something we thought was resolved, and become more engaged at a moment when readiness actually decreases.
+Once this controlled stress test is available, I'll review the state transitions turn by turn. If it handles these correctly, I think we'll have much stronger validation of ConversationState before connecting it deeper into the Strategic Decision Engine.
+Also, please keep the current detailed debug/replay view. It is useful for QA

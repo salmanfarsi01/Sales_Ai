@@ -23,17 +23,12 @@ class ConversationScoringConfig(BaseModel):
     future_operational_behavior_weight: float = Field(0.15, ge=0.0, le=1.0, description="15%: Operational planning, calendar language")
     commitment_behavior_weight: float = Field(0.10, ge=0.0, le=1.0, description="10%: Agreement, forward commitments, next steps")
 
-    # -------------------------------------------------------------------------
-    # 2. Readiness Dimension Weights (Base Composite Mean: Sum = 100%)
-    # -------------------------------------------------------------------------
     emotional_readiness_weight: float = Field(0.25, ge=0.0, le=1.0, description="Emotional safety, trust, low tension")
     logical_readiness_weight: float = Field(0.25, ge=0.0, le=1.0, description="Value alignment, clear rationale, problem urgency")
     logistical_readiness_weight: float = Field(0.25, ge=0.0, le=1.0, description="Timeline viability, scheduling feasibility")
     decision_readiness_weight: float = Field(0.25, ge=0.0, le=1.0, description="Decision authority present and aligned")
 
-    # -------------------------------------------------------------------------
-    # 3. Deterministic Blocker Caps (Ceilings on 0 - 100 Scale)
-    # -------------------------------------------------------------------------
+
     absent_decision_maker_ceiling: float = Field(
         55.0,
         ge=0.0,

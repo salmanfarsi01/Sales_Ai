@@ -1,11 +1,13 @@
 from __future__ import annotations
 
+import asyncio
 import logging
 import os
 import re
+import time
 import uuid
 from datetime import datetime, timezone
-from typing import Any, Callable, Dict, List, Literal, Optional, Tuple, Union
+from typing import Any, AsyncIterator, Callable, Dict, Iterator, List, Literal, Optional, Tuple, Union
 from pydantic import BaseModel, Field
 
 from .core_intelligence_models import StrategicAction, StrategicDecision
@@ -510,6 +512,14 @@ class Prompt(BaseModel):
     text: str
     strategic_action: StrategicAction
     strategic_objective: str
+    immediate_directive: Optional[str] = None
+    strategic_posture: Optional[str] = None
+    push_strength: Optional[str] = None
+    target_wpm: Optional[int] = None
+    brevity_mode: Optional[str] = None
+    playbook_id: Optional[str] = None
+    lineage: Optional[Dict[str, Any]] = None
+    latency_metrics: Optional[Dict[str, Any]] = None
     generated_at: str = Field(default_factory=lambda: datetime.now(timezone.utc).isoformat())
     displayed_at: Optional[str] = None
     status: Literal["generated", "displayed", "consumed", "skipped", "cancelled", "stale", "stale_discarded"] = "generated"
@@ -546,6 +556,34 @@ class LLMResponseGateway:
         if self.model_name == "llama-3.1-8b-instant":
             self.model_name = "qwen/qwen3.8-27b"
 
+    def build_immediate_directive(
+        self,
+        decision: StrategicDecision,
+        snapshot: Optional[ConversationStateSnapshot] = None,
+    ) -> str:
+        """Constructs Tier 1 instant tactical directive card for teleprompter (Spec 11 & clarification.md §6).
+        Delivered in < 15ms so the salesperson immediately knows what tactical stance to take within 450ms.
+        """
+        action_val = getattr(decision.primary_action, "value", str(decision.primary_action))
+        action_str = str(action_val).upper().replace("_", " ")
+        posture_str = str(getattr(decision, "strategic_posture", "explore")).upper()
+        if decision.secondary_action:
+            sec_val = getattr(decision.secondary_action, "value", str(decision.secondary_action))
+            sec_str = str(sec_val).upper().replace("_", " ")
+            action_tag = f"[{posture_str}: {action_str} + {sec_str}]"
+        else:
+            action_tag = f"[{posture_str}: {action_str}]"
+
+        directive_parts = [decision.strategic_objective]
+        if decision.what_to_protect:
+            protect_str = ", ".join(decision.what_to_protect[:2])
+            directive_parts.append(f"protect: {protect_str}")
+        if decision.do_not_do:
+            do_not_str = ", ".join(decision.do_not_do[:2]).replace("_", " ")
+            directive_parts.append(f"avoid: {do_not_str}")
+
+        return f"{action_tag} {'; '.join(directive_parts)}"
+
     def assemble_context(
         self,
         decision: StrategicDecision,
@@ -553,6 +591,8 @@ class LLMResponseGateway:
         facts: Optional[List[Union[RetrievedFactResult, RetrievedFact]]] = None,
         recent_turns: Optional[List[Dict[str, str]]] = None,
         retrieval_result: Optional[RetrievalResult] = None,
+        playbook: Optional[Union[Dict[str, Any], Any]] = None,
+        calibration: Optional[Union[Dict[str, Any], Any]] = None,
     ) -> str:
         """Assembles the 6-block bounded context contract required by Spec 11 §7."""
         if facts is None:
@@ -654,19 +694,82 @@ class LLMResponseGateway:
         )
 
         # Block 4: Playbook Methodology Constraints
-        playbook_text = "Standard PitchProX sales methodology."
-        if decision.playbook_influence:
-            playbook_text = f"Methodology: {decision.playbook_influence.get('methodology', 'standard')} (ID: {decision.playbook_influence.get('playbook_id')})"
+        methodology = None
+        playbook_id = None
+        required_topics: List[str] = []
+        prohibited_phrasing: List[str] = []
+        technique_rules: List[str] = []
+
+        if playbook:
+            if isinstance(playbook, dict):
+                methodology = playbook.get("methodology")
+                playbook_id = playbook.get("id") or playbook.get("playbook_id")
+                required_topics = playbook.get("required_topics", [])
+                prohibited_phrasing = playbook.get("prohibited_phrasing", [])
+                technique_rules = playbook.get("technique_rules", [])
+            else:
+                methodology = getattr(playbook, "methodology", None)
+                playbook_id = getattr(playbook, "id", None) or getattr(playbook, "playbook_id", None)
+                required_topics = getattr(playbook, "required_topics", [])
+                prohibited_phrasing = getattr(playbook, "prohibited_phrasing", [])
+                technique_rules = getattr(playbook, "technique_rules", [])
+
+        if not methodology and decision.playbook_influence:
+            methodology = decision.playbook_influence.get("methodology")
+            playbook_id = decision.playbook_influence.get("playbook_id", "default")
+
+        playbook_lines = []
+        if methodology:
+            playbook_lines.append(f"Methodology: {str(methodology).lower()} (ID: {playbook_id or 'default'})")
+        elif decision.playbook_influence:
+            playbook_lines.append(f"Methodology: {decision.playbook_influence.get('methodology', 'standard')} (ID: {decision.playbook_influence.get('playbook_id', 'default')})")
+        else:
+            playbook_lines.append("Standard PitchProX sales methodology.")
+
+        if required_topics:
+            playbook_lines.append(f"Required Emphases: {', '.join(required_topics)}")
+        if prohibited_phrasing:
+            playbook_lines.append(f"Prohibited Playbook Phrasing: {', '.join(prohibited_phrasing)}")
+        if technique_rules:
+            playbook_lines.append(f"Technique Guidelines: {'; '.join(technique_rules)}")
 
         block4 = (
             "### BLOCK 4: PLAYBOOK CONSTRAINTS\n"
-            f"- {playbook_text}\n"
+            + "\n".join([f"- {line}" for line in playbook_lines])
+            + "\n"
         )
 
         # Block 5: Calibration Delivery Constraints
+        brevity_mode = None
+        target_wpm = None
+        if calibration:
+            if isinstance(calibration, dict):
+                brevity_mode = calibration.get("brevity_mode")
+                target_wpm = calibration.get("target_wpm")
+            else:
+                brevity_mode = getattr(calibration, "brevity_mode", None)
+                target_wpm = getattr(calibration, "target_wpm", None)
+
+        if not brevity_mode and decision.calibration_influence:
+            brevity_mode = decision.calibration_influence.get("brevity_mode")
+        if not target_wpm and decision.calibration_influence:
+            target_wpm = decision.calibration_influence.get("target_wpm")
+
+        brevity_mode = brevity_mode or "standard"
+        target_wpm = target_wpm or 130
+
+        cadence_desc = "Balanced conversational delivery"
+        if brevity_mode == "concise":
+            cadence_desc = "Punchy, immediate declarative phrasing with zero unnecessary words"
+        elif brevity_mode == "detailed":
+            cadence_desc = "Consultative, explanatory phrasing with structured context"
+
         block5 = (
             "### BLOCK 5: CALIBRATION DELIVERY CONSTRAINTS\n"
             f"- Maximum Prompt Words: {decision.max_prompt_words}\n"
+            f"- Brevity Mode: {brevity_mode.upper()}\n"
+            f"- Target Speaking Pace: {target_wpm} WPM\n"
+            f"- Cadence Profile: {cadence_desc}\n"
             f"- Urgency: {decision.urgency.upper()}\n"
             f"- Mode: Concise, conversational, spoken delivery\n"
         )
@@ -736,6 +839,20 @@ class LLMResponseGateway:
                 "You MUST maintain the playbook's conversational technique / strategy (e.g., objection reframe, value anchoring), but strictly substitute the company policy's factual terms, fees, and rules. Do NOT offer unauthorized waivers.\n"
             )
 
+        brevity_directive = ""
+        if brevity_mode == "concise":
+            brevity_directive = f"10. BREVITY MODE CONCISE: Formulate a tight, punchy spoken response strictly under {decision.max_prompt_words} words without preamble or filler.\n"
+        elif brevity_mode == "detailed":
+            brevity_directive = f"10. BREVITY MODE DETAILED: Formulate a consultative, well-articulated spoken response (up to {decision.max_prompt_words} words) explaining the approach.\n"
+
+        playbook_method_directive = ""
+        if methodology and "challenger" in str(methodology).lower():
+            playbook_method_directive = "11. PLAYBOOK METHODOLOGY (CHALLENGER): Reframe the prospect's perspective with constructive commercial insight; do not yield position prematurely.\n"
+        elif methodology and "sandler" in str(methodology).lower():
+            playbook_method_directive = "11. PLAYBOOK METHODOLOGY (SANDLER): Maintain high nurturing and low pressure; use an upfront contract or soft reverse question.\n"
+        elif methodology and any(m in str(methodology).lower() for m in ("consultative", "nepq")):
+            playbook_method_directive = "11. PLAYBOOK METHODOLOGY (CONSULTATIVE): Anchor on the prospect's priorities and situation before recommending next steps.\n"
+
         prohibited_line = f"7. MANDATORY CONSTRAINTS: Strictly obey all DO NOT DO prohibitions from Block 1: {', '.join(decision.do_not_do)}.\n" if decision.do_not_do else ""
 
         block6 = (
@@ -760,6 +877,8 @@ class LLMResponseGateway:
             f"{attested_directive}"
             f"{policy_sub_directive}"
             f"{contact_pref_directive}"
+            f"{brevity_directive}"
+            f"{playbook_method_directive}"
             f"{prohibited_line}"
         )
 
@@ -774,8 +893,11 @@ class LLMResponseGateway:
         retrieval_result: Optional[RetrievalResult] = None,
         post_generation_state_version: Optional[int] = None,
         use_llm: bool = False,
+        playbook: Optional[Union[Dict[str, Any], Any]] = None,
+        calibration: Optional[Union[Dict[str, Any], Any]] = None,
     ) -> Prompt:
         """Executes LLM language construction adhering to the strategic decision contract."""
+        gen_start_time = time.monotonic()
         self._last_recent_turns = recent_turns
         working_decision = decision
         if facts is None:
@@ -806,14 +928,65 @@ class LLMResponseGateway:
                 working_decision = decision.model_copy(deep=True)
             working_decision.secondary_action = None
 
+        # Resolve calibration brevity adjustments if passed explicitly
+        brevity_mode_val = None
+        target_wpm_val = None
+        if calibration:
+            if isinstance(calibration, dict):
+                brevity_mode_val = calibration.get("brevity_mode")
+                target_wpm_val = calibration.get("target_wpm")
+            else:
+                brevity_mode_val = getattr(calibration, "brevity_mode", None)
+                target_wpm_val = getattr(calibration, "target_wpm", None)
+
+            if brevity_mode_val == "concise":
+                if working_decision is decision:
+                    working_decision = decision.model_copy(deep=True)
+                working_decision.max_prompt_words = min(working_decision.max_prompt_words, 16)
+            elif brevity_mode_val == "detailed":
+                if working_decision is decision:
+                    working_decision = decision.model_copy(deep=True)
+                working_decision.max_prompt_words = min(working_decision.max_prompt_words + 8, 36)
+
+        if not brevity_mode_val and working_decision.calibration_influence:
+            brevity_mode_val = working_decision.calibration_influence.get("brevity_mode")
+        if not target_wpm_val and working_decision.calibration_influence:
+            target_wpm_val = working_decision.calibration_influence.get("target_wpm")
+
+        playbook_id_val = None
+        if playbook:
+            playbook_id_val = playbook.get("id") or playbook.get("playbook_id") if isinstance(playbook, dict) else getattr(playbook, "id", None)
+        elif working_decision.playbook_influence:
+            playbook_id_val = working_decision.playbook_influence.get("playbook_id")
+
+        immediate_directive = self.build_immediate_directive(working_decision, snapshot)
+
+        lineage = {
+            "call_id": getattr(snapshot, "call_sid", getattr(working_decision, "call_id", None)),
+            "state_version": snapshot.state_version,
+            "source_state_version": working_decision.source_state_version,
+            "decision_id": working_decision.decision_id,
+            "source_event_id": getattr(working_decision, "source_event_id", None),
+            "source_turn_id": getattr(working_decision, "source_turn_id", None),
+            "retrieval_id": getattr(retrieval_result, "request_id", None) if retrieval_result else None,
+        }
+
         # Point 8: Allow WAIT / HOLD / no prompt at all
         if not working_decision.should_prompt or working_decision.primary_action in (StrategicAction.WAIT_SILENCE, StrategicAction.HOLD):
             return Prompt(
                 decision_id=working_decision.decision_id,
                 source_state_version=working_decision.source_state_version,
                 text="",
+                immediate_directive=immediate_directive,
                 strategic_action=working_decision.primary_action,
                 strategic_objective=working_decision.strategic_objective,
+                strategic_posture=getattr(working_decision, "strategic_posture", "explore"),
+                push_strength=str(working_decision.push_strength),
+                target_wpm=target_wpm_val,
+                brevity_mode=brevity_mode_val,
+                playbook_id=playbook_id_val,
+                lineage=lineage,
+                latency_metrics={"total_ms": 1, "source": "skipped"},
                 max_prompt_words=working_decision.max_prompt_words,
                 confidence=working_decision.confidence,
                 status="skipped",
@@ -826,6 +999,8 @@ class LLMResponseGateway:
             facts=facts,
             recent_turns=recent_turns,
             retrieval_result=retrieval_result,
+            playbook=playbook,
+            calibration=calibration,
         )
 
         gen_source = "deterministic"
@@ -886,8 +1061,16 @@ class LLMResponseGateway:
                 decision_id=working_decision.decision_id,
                 source_state_version=effective_post_version,
                 text="",
+                immediate_directive=immediate_directive,
                 strategic_action=working_decision.primary_action,
                 strategic_objective=working_decision.strategic_objective,
+                strategic_posture=getattr(working_decision, "strategic_posture", "explore"),
+                push_strength=str(working_decision.push_strength),
+                target_wpm=target_wpm_val,
+                brevity_mode=brevity_mode_val,
+                playbook_id=playbook_id_val,
+                lineage=lineage,
+                latency_metrics={"total_ms": int((time.monotonic() - gen_start_time) * 1000), "source": gen_source},
                 max_prompt_words=working_decision.max_prompt_words,
                 confidence=working_decision.confidence,
                 status="stale_discarded",
@@ -896,18 +1079,389 @@ class LLMResponseGateway:
                 fallback_reason=f"Conversation state advanced from v{snapshot.state_version} to v{effective_post_version} during generation",
             )
 
+        latency_metrics = {
+            "total_ms": int((time.monotonic() - gen_start_time) * 1000),
+            "source": gen_source,
+        }
+
         return Prompt(
             decision_id=working_decision.decision_id,
             source_state_version=working_decision.source_state_version,
             text=cleaned_text,
+            immediate_directive=immediate_directive,
             strategic_action=working_decision.primary_action,
             strategic_objective=working_decision.strategic_objective,
+            strategic_posture=getattr(working_decision, "strategic_posture", "explore"),
+            push_strength=str(working_decision.push_strength),
+            target_wpm=target_wpm_val,
+            brevity_mode=brevity_mode_val,
+            playbook_id=playbook_id_val,
+            lineage=lineage,
+            latency_metrics=latency_metrics,
             max_prompt_words=working_decision.max_prompt_words,
             confidence=working_decision.confidence,
             generation_source=gen_source,
             raw_llm_output=raw_llm_output,
             fallback_reason=fallback_reason,
         )
+
+    def generate_prompt_stream_sync(
+        self,
+        decision: StrategicDecision,
+        snapshot: ConversationStateSnapshot,
+        facts: Optional[List[Union[RetrievedFact, RetrievedFactResult]]] = None,
+        recent_turns: Optional[List[Dict[str, str]]] = None,
+        retrieval_result: Optional[RetrievalResult] = None,
+        playbook: Optional[Union[Dict[str, Any], Any]] = None,
+        calibration: Optional[Union[Dict[str, Any], Any]] = None,
+        use_llm: bool = False,
+        is_cancelled_callback: Optional[Callable[[], bool]] = None,
+        state_version_checker: Optional[Callable[[], int]] = None,
+    ) -> Iterator[Dict[str, Any]]:
+        """Synchronously streams Two-Track response construction with in-flight cancellation (Spec 11 §7 & clarification.md).
+        Emits:
+          1. 'track1_directive': Instant visual guidance card (< 15ms)
+          2. 'track2_token': Streamed spoken words as generated
+          3. 'prompt_complete' or 'guardrail_fallback': Final verified prompt machine object
+          4. 'cancelled': In-flight cancellation if prospect speaks or state version changes
+        """
+        gen_start_time = time.monotonic()
+        prompt_id = f"prm_{uuid.uuid4().hex[:10]}"
+        working_decision = decision
+        if facts is None:
+            facts = []
+
+        if retrieval_result is not None:
+            if retrieval_result.status in ("stale_discarded", "timed_out", "low_confidence", "none_found") or retrieval_result.state_version != snapshot.state_version:
+                facts = []
+            elif not facts and retrieval_result.facts:
+                facts = list(retrieval_result.facts)
+
+        verified_facts = [
+            f for f in facts
+            if getattr(f, "verification_status", "") in ("verified", "company_approved", "system_validated", "self_attested")
+        ]
+
+        if decision.primary_action == StrategicAction.SOCIAL_PROOF and not verified_facts:
+            working_decision = decision.model_copy(deep=True)
+            working_decision.primary_action = StrategicAction.VALIDATE
+            working_decision.reason_codes.append("UNVERIFIED_SOCIAL_PROOF_REROUTED_TO_VALIDATE")
+            working_decision.do_not_do.extend(["fabricate_client_results", "claim_prior_customer_outcomes"])
+            working_decision.strategic_objective = "Validate prospect situation directly without unverified external claims"
+
+        if working_decision.secondary_action == StrategicAction.SOCIAL_PROOF and not verified_facts:
+            if working_decision is decision:
+                working_decision = decision.model_copy(deep=True)
+            working_decision.secondary_action = None
+
+        brevity_mode_val = None
+        target_wpm_val = None
+        if calibration:
+            if isinstance(calibration, dict):
+                brevity_mode_val = calibration.get("brevity_mode")
+                target_wpm_val = calibration.get("target_wpm")
+            else:
+                brevity_mode_val = getattr(calibration, "brevity_mode", None)
+                target_wpm_val = getattr(calibration, "target_wpm", None)
+
+            if brevity_mode_val == "concise":
+                if working_decision is decision:
+                    working_decision = decision.model_copy(deep=True)
+                working_decision.max_prompt_words = min(working_decision.max_prompt_words, 16)
+            elif brevity_mode_val == "detailed":
+                if working_decision is decision:
+                    working_decision = decision.model_copy(deep=True)
+                working_decision.max_prompt_words = min(working_decision.max_prompt_words + 8, 36)
+
+        if not brevity_mode_val and working_decision.calibration_influence:
+            brevity_mode_val = working_decision.calibration_influence.get("brevity_mode")
+        if not target_wpm_val and working_decision.calibration_influence:
+            target_wpm_val = working_decision.calibration_influence.get("target_wpm")
+
+        playbook_id_val = None
+        if playbook:
+            playbook_id_val = playbook.get("id") or playbook.get("playbook_id") if isinstance(playbook, dict) else getattr(playbook, "id", None)
+        elif working_decision.playbook_influence:
+            playbook_id_val = working_decision.playbook_influence.get("playbook_id")
+
+        immediate_directive = self.build_immediate_directive(working_decision, snapshot)
+
+        lineage = {
+            "call_id": getattr(snapshot, "call_sid", getattr(working_decision, "call_id", None)),
+            "state_version": snapshot.state_version,
+            "source_state_version": working_decision.source_state_version,
+            "decision_id": working_decision.decision_id,
+            "source_event_id": getattr(working_decision, "source_event_id", None),
+            "source_turn_id": getattr(working_decision, "source_turn_id", None),
+            "retrieval_id": getattr(retrieval_result, "request_id", None) if retrieval_result else None,
+        }
+
+        # Track 1: Emit instant strategic directive card (< 15ms)
+        yield {
+            "type": "track1_directive",
+            "prompt_id": prompt_id,
+            "decision_id": working_decision.decision_id,
+            "source_state_version": working_decision.source_state_version,
+            "immediate_directive": immediate_directive,
+            "strategic_action": working_decision.primary_action.value,
+            "strategic_posture": getattr(working_decision, "strategic_posture", "explore"),
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+        }
+
+        # Point 8: If WAIT / HOLD / no prompt at all
+        if not working_decision.should_prompt or working_decision.primary_action in (StrategicAction.WAIT_SILENCE, StrategicAction.HOLD):
+            yield {
+                "type": "prompt_suppressed",
+                "prompt_id": prompt_id,
+                "status": "skipped",
+                "reason": "WAIT_OR_HOLD_ACTION",
+                "prompt": Prompt(
+                    prompt_id=prompt_id,
+                    decision_id=working_decision.decision_id,
+                    source_state_version=working_decision.source_state_version,
+                    text="",
+                    immediate_directive=immediate_directive,
+                    strategic_action=working_decision.primary_action,
+                    strategic_objective=working_decision.strategic_objective,
+                    strategic_posture=getattr(working_decision, "strategic_posture", "explore"),
+                    push_strength=str(working_decision.push_strength),
+                    target_wpm=target_wpm_val,
+                    brevity_mode=brevity_mode_val,
+                    playbook_id=playbook_id_val,
+                    lineage=lineage,
+                    latency_metrics={"total_ms": 1, "source": "skipped"},
+                    max_prompt_words=working_decision.max_prompt_words,
+                    confidence=working_decision.confidence,
+                    status="skipped",
+                    generation_source="skipped",
+                ),
+            }
+            return
+
+        # Pre-generation cancellation check
+        if is_cancelled_callback and is_cancelled_callback():
+            yield {
+                "type": "cancelled",
+                "prompt_id": prompt_id,
+                "status": "stale_discarded",
+                "cancellation_reason": "PRE_GENERATION_CANCELLED",
+            }
+            return
+
+        if state_version_checker and state_version_checker() != working_decision.source_state_version:
+            yield {
+                "type": "cancelled",
+                "prompt_id": prompt_id,
+                "status": "stale_discarded",
+                "cancellation_reason": "STATE_VERSION_ADVANCED_BEFORE_GENERATION",
+            }
+            return
+
+        context = self.assemble_context(
+            decision=working_decision,
+            snapshot=snapshot,
+            facts=facts,
+            recent_turns=recent_turns,
+            retrieval_result=retrieval_result,
+            playbook=playbook,
+            calibration=calibration,
+        )
+
+        accumulated_tokens: List[str] = []
+        gen_source = "deterministic"
+        fallback_reason = None
+        cancelled = False
+        cancel_reason = None
+
+        if use_llm and (self.generator_func or (self.llm_client and hasattr(self.llm_client, "chat"))):
+            if self.generator_func:
+                raw_text = self.generator_func(context, working_decision.max_prompt_words)
+                words = raw_text.split()
+                for w in words:
+                    if is_cancelled_callback and is_cancelled_callback():
+                        cancelled = True
+                        cancel_reason = "INTERRUPTED_DURING_STREAM"
+                        break
+                    if state_version_checker and state_version_checker() != working_decision.source_state_version:
+                        cancelled = True
+                        cancel_reason = "STATE_VERSION_ADVANCED_DURING_STREAM"
+                        break
+                    token = w + " "
+                    accumulated_tokens.append(token)
+                    yield {
+                        "type": "track2_token",
+                        "prompt_id": prompt_id,
+                        "token": token,
+                    }
+                gen_source = "generator_func"
+                raw_text = "".join(accumulated_tokens).strip()
+            else:
+                try:
+                    model = self.model_name
+                    if model in ("llama-3.1-8b-instant", "openai/gpt-oss-20b"):
+                        model = "qwen/qwen3.8-27b"
+
+                    stream = self.llm_client.chat.completions.create(
+                        model=model,
+                        messages=[
+                            {
+                                "role": "system",
+                                "content": (
+                                    "You are PitchProX Spoken Teleprompter Assistant. "
+                                    "Formulate a single, direct, natural spoken sentence for the salesperson to say right now.\n"
+                                    "CRITICAL ARCHITECTURAL CONSTRAINTS:\n"
+                                    "1. Strict Grounding: Use ONLY verified facts from Block 3 for quantitative metrics, transaction history, fees, and operational policies.\n"
+                                    "2. Conversation Truth Integrity: Align strictly with conversation state and recent dialogue in Block 2. Never invent appointments, meetings, or commitments not explicitly confirmed by the prospect.\n"
+                                    "3. Role & Context Respect: Align strictly with the prospect's transaction role (seller vs. buyer) and declared property details.\n"
+                                    "4. Zero Fabricated Assurances: Never fabricate unwritten company policies or promises.\n"
+                                    "5. Boundary & Compliance Priority: Respect all prospect boundaries and compliance rules.\n"
+                                    "6. Spoken Format: Output ONLY the single spoken sentence without quotes, preambles, or coaching labels."
+                                ),
+                            },
+                            {"role": "user", "content": context},
+                        ],
+                        temperature=0.2,
+                        max_tokens=80,
+                        stream=True,
+                    )
+                    for chunk in stream:
+                        if is_cancelled_callback and is_cancelled_callback():
+                            cancelled = True
+                            cancel_reason = "INTERRUPTED_DURING_STREAM"
+                            break
+                        if state_version_checker and state_version_checker() != working_decision.source_state_version:
+                            cancelled = True
+                            cancel_reason = "STATE_VERSION_ADVANCED_DURING_STREAM"
+                            break
+                        c = getattr(chunk.choices[0].delta, "content", None)
+                        if c:
+                            accumulated_tokens.append(c)
+                            yield {
+                                "type": "track2_token",
+                                "prompt_id": prompt_id,
+                                "token": c,
+                            }
+                    gen_source = "llm_streamed"
+                    raw_text = "".join(accumulated_tokens).strip()
+                except Exception as exc:
+                    LOGGER.warning("LLM streaming failed, falling back to deterministic formulation: %s", exc)
+                    raw_text = self._deterministic_fallback(working_decision, snapshot=snapshot, facts=facts)
+                    gen_source = "deterministic"
+                    fallback_reason = f"LLM stream error: {exc}"
+        else:
+            raw_text = self._deterministic_fallback(working_decision, snapshot=snapshot, facts=facts)
+            words = raw_text.split()
+            for w in words:
+                if is_cancelled_callback and is_cancelled_callback():
+                    cancelled = True
+                    cancel_reason = "INTERRUPTED_DURING_STREAM"
+                    break
+                if state_version_checker and state_version_checker() != working_decision.source_state_version:
+                    cancelled = True
+                    cancel_reason = "STATE_VERSION_ADVANCED_DURING_STREAM"
+                    break
+                token = w + " "
+                accumulated_tokens.append(token)
+                yield {
+                    "type": "track2_token",
+                    "prompt_id": prompt_id,
+                    "token": token,
+                }
+            gen_source = "deterministic"
+            fallback_reason = "Deterministic mode requested (use_llm=False)"
+
+        if cancelled:
+            yield {
+                "type": "cancelled",
+                "prompt_id": prompt_id,
+                "status": "stale_discarded",
+                "cancellation_reason": cancel_reason,
+            }
+            return
+
+        cleaned_text = self._clean_and_truncate(raw_text, working_decision.max_prompt_words)
+
+        has_inj, inj_pattern = detect_prompt_injection(cleaned_text)
+        if has_inj:
+            fallback_reason = f"Prompt injection detected: {inj_pattern}"
+            cleaned_text = self._deterministic_fallback(working_decision, snapshot=snapshot, facts=facts)
+            cleaned_text = self._clean_and_truncate(cleaned_text, working_decision.max_prompt_words)
+            gen_source = "neutralized_fallback"
+
+        prospect_ctx = recent_turns or (snapshot.conversation_evidence if hasattr(snapshot, "conversation_evidence") else None)
+        is_grounded, violations = validate_prompt_hallucinations(cleaned_text, facts, prospect_context=prospect_ctx)
+        if not is_grounded:
+            fallback_reason = f"Hallucination guardrail rejected: {'; '.join(violations)}"
+            cleaned_text = self._deterministic_fallback(working_decision, snapshot=snapshot, facts=facts)
+            cleaned_text = self._clean_and_truncate(cleaned_text, working_decision.max_prompt_words)
+            gen_source = "guardrail_fallback"
+
+        latency_metrics = {
+            "total_ms": int((time.monotonic() - gen_start_time) * 1000),
+            "source": gen_source,
+        }
+
+        final_prompt = Prompt(
+            prompt_id=prompt_id,
+            decision_id=working_decision.decision_id,
+            source_state_version=working_decision.source_state_version,
+            text=cleaned_text,
+            immediate_directive=immediate_directive,
+            strategic_action=working_decision.primary_action,
+            strategic_objective=working_decision.strategic_objective,
+            strategic_posture=getattr(working_decision, "strategic_posture", "explore"),
+            push_strength=str(working_decision.push_strength),
+            target_wpm=target_wpm_val,
+            brevity_mode=brevity_mode_val,
+            playbook_id=playbook_id_val,
+            lineage=lineage,
+            latency_metrics=latency_metrics,
+            max_prompt_words=working_decision.max_prompt_words,
+            confidence=working_decision.confidence,
+            generation_source=gen_source,
+            raw_llm_output="".join(accumulated_tokens) if accumulated_tokens else None,
+            fallback_reason=fallback_reason,
+        )
+
+        if gen_source in ("neutralized_fallback", "guardrail_fallback"):
+            yield {
+                "type": "guardrail_fallback",
+                "prompt": final_prompt,
+                "fallback_reason": fallback_reason,
+            }
+        else:
+            yield {
+                "type": "prompt_complete",
+                "prompt": final_prompt,
+            }
+
+    async def generate_prompt_stream(
+        self,
+        decision: StrategicDecision,
+        snapshot: ConversationStateSnapshot,
+        facts: Optional[List[Union[RetrievedFact, RetrievedFactResult]]] = None,
+        recent_turns: Optional[List[Dict[str, str]]] = None,
+        retrieval_result: Optional[RetrievalResult] = None,
+        playbook: Optional[Union[Dict[str, Any], Any]] = None,
+        calibration: Optional[Union[Dict[str, Any], Any]] = None,
+        use_llm: bool = False,
+        is_cancelled_callback: Optional[Callable[[], bool]] = None,
+        state_version_checker: Optional[Callable[[], int]] = None,
+    ) -> AsyncIterator[Dict[str, Any]]:
+        """Asynchronously streams Two-Track response construction with in-flight cancellation (Spec 11 §7 & clarification.md)."""
+        for event in self.generate_prompt_stream_sync(
+            decision=decision,
+            snapshot=snapshot,
+            facts=facts,
+            recent_turns=recent_turns,
+            retrieval_result=retrieval_result,
+            playbook=playbook,
+            calibration=calibration,
+            use_llm=use_llm,
+            is_cancelled_callback=is_cancelled_callback,
+            state_version_checker=state_version_checker,
+        ):
+            yield event
 
     def _call_llm(
         self,
