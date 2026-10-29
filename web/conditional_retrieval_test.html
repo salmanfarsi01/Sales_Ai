@@ -995,6 +995,25 @@
             <label>Topic Tags (comma-separated)</label>
             <input type="text" class="form-control" id="topicTags" value="westlake, experience, sales">
           </div>
+
+          <div class="form-row" style="margin-top: 10px;">
+            <div class="form-group" style="margin-bottom: 0;">
+              <label>Playbook Methodology</label>
+              <select class="form-select" id="playbookMethodology">
+                <option value="consultative" selected>Consultative (Collaborative)</option>
+                <option value="challenger">Challenger (Commercial Insight)</option>
+                <option value="sandler">Sandler (Upfront Contract / Reverse)</option>
+              </select>
+            </div>
+            <div class="form-group" style="margin-bottom: 0;">
+              <label>Calibration Brevity</label>
+              <select class="form-select" id="brevityMode">
+                <option value="standard" selected>Standard (≤24 words)</option>
+                <option value="concise">Concise (≤16 words)</option>
+                <option value="detailed">Detailed (≤36 words)</option>
+              </select>
+            </div>
+          </div>
         </div>
 
         <div class="panel">
@@ -1126,15 +1145,58 @@
         <!-- Subtab 3: Teleprompter -->
         <div class="subtab-content" id="subtabTeleprompter">
           <div class="panel">
+            
+            <!-- Track 1: Immediate Tactical Directive Card (< 15 ms) -->
+            <div style="background: #f0fdfa; border: 1px solid var(--accent-border); border-radius: 8px; padding: 14px; margin-bottom: 16px;">
+              <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;">
+                <div style="display: flex; align-items: center; gap: 8px;">
+                  <span class="badge-pill badge-green" style="font-weight: 700; font-size: 11px;">TRACK 1: IMMEDIATE DIRECTIVE</span>
+                  <span style="font-size: 11px; color: var(--text-dim);">&lt; 15ms Tactical Directive Card</span>
+                </div>
+                <div style="display: flex; gap: 6px;">
+                  <span class="badge-pill badge-blue" id="track1PostureBadge">Posture: Explore</span>
+                </div>
+              </div>
+              <div id="track1DirectiveText" style="font-family: 'JetBrains Mono', monospace; font-size: 13px; color: var(--text); font-weight: 600; line-height: 1.5; background: #ffffff; padding: 10px; border-radius: 6px; border: 1px solid var(--border);">
+                Waiting for simulation run...
+              </div>
+            </div>
+
+            <!-- Track 2: Spoken Teleprompter Phrasing -->
             <div class="panel-header">
-              <h3>Spoken Teleprompter Response</h3>
-              <div style="display: flex; gap: 8px;">
+              <div>
+                <h3>Track 2: Spoken Teleprompter Response</h3>
+                <div style="font-size: 11px; color: var(--text-dim); margin-top: 2px;">Word-for-word conversational sentence verbalized from Core strategy</div>
+              </div>
+              <div style="display: flex; gap: 8px; align-items: center;">
+                <span class="badge-pill badge-purple" id="teleprompterBrevityBadge">Brevity: Standard (≤24w)</span>
                 <span class="badge-pill badge-blue" id="teleprompterSourceBadge">Source: Deterministic</span>
                 <span class="badge-pill badge-green" id="teleprompterStatusBadge">Status: Generated</span>
               </div>
             </div>
-            <div style="font-size: 14px; font-style: italic; color: var(--text); padding: 12px; background: #f8fafc; border: 1px solid var(--border); border-radius: 8px; margin-bottom: 16px;" id="teleprompterPromptText">
+
+            <div style="font-size: 15px; font-weight: 500; color: var(--text); padding: 16px; background: #f8fafc; border: 1px solid var(--border); border-radius: 8px; margin-bottom: 16px; line-height: 1.6;" id="teleprompterPromptText">
               Waiting for simulation run...
+            </div>
+
+            <!-- Diagnostics -->
+            <div style="display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px; margin-bottom: 16px; font-size: 12px;">
+              <div style="background: #ffffff; border: 1px solid var(--border); border-radius: 6px; padding: 8px 12px;">
+                <div style="color: var(--text-dim); font-size: 11px;">Word Count</div>
+                <b id="teleprompterWordCount" style="color: var(--accent);">-</b>
+              </div>
+              <div style="background: #ffffff; border: 1px solid var(--border); border-radius: 6px; padding: 8px 12px;">
+                <div style="color: var(--text-dim); font-size: 11px;">Target WPM</div>
+                <b id="teleprompterTargetWpm" style="color: var(--text);">-</b>
+              </div>
+              <div style="background: #ffffff; border: 1px solid var(--border); border-radius: 6px; padding: 8px 12px;">
+                <div style="color: var(--text-dim); font-size: 11px;">State Version</div>
+                <b id="teleprompterStateVer" style="color: var(--text);">-</b>
+              </div>
+              <div style="background: #ffffff; border: 1px solid var(--border); border-radius: 6px; padding: 8px 12px;">
+                <div style="color: var(--text-dim); font-size: 11px;">Generation Latency</div>
+                <b id="teleprompterLatencyMs" style="color: var(--text);">-</b>
+              </div>
             </div>
 
             <div class="panel-header" style="border-top: 1px solid var(--border); padding-top: 12px;">
@@ -1552,6 +1614,8 @@
         simulate_interruption: document.getElementById('toggleInterruption').checked,
         prospect_live_override: document.getElementById('toggleLiveOverride').checked ? document.getElementById('prospectUtterance').value : null,
         use_real_llm: document.getElementById('toggleUseRealLlmSingle')?.checked || false,
+        playbook_methodology: document.getElementById('playbookMethodology')?.value || 'consultative',
+        brevity_mode: document.getElementById('brevityMode')?.value || 'standard',
       };
 
       try {
@@ -1673,18 +1737,64 @@
       }
 
       document.getElementById('rawContextViewer').textContent = data.context_assembled;
-      document.getElementById('teleprompterPromptText').textContent = `"${data.prompt_result.text}"`;
+
+      // Track 1: Immediate Directive
+      const directiveEl = document.getElementById('track1DirectiveText');
+      if (directiveEl) {
+        directiveEl.textContent = data.prompt_result.immediate_directive || 'No directive issued';
+      }
+      const postureBadge = document.getElementById('track1PostureBadge');
+      if (postureBadge) {
+        const posture = data.prompt_result.strategic_posture || 'explore';
+        postureBadge.textContent = 'Posture: ' + posture.toUpperCase();
+        postureBadge.className = 'badge-pill ' + (posture === 'protect' ? 'badge-amber' : (posture === 'advance' ? 'badge-green' : 'badge-blue'));
+      }
+
+      // Track 2: Spoken Teleprompter Phrasing
+      const promptEl = document.getElementById('teleprompterPromptText');
+      if (promptEl) {
+        if (data.prompt_result.status === 'stale_discarded') {
+          promptEl.innerHTML = `<span style="color: var(--red); font-weight: 700;">[STALE DISCARDED]</span> <span style="text-decoration: line-through; color: var(--text-dim);">${data.prompt_result.text || 'In-flight prompt aborted'}</span><br><small style="color: var(--red);">Prospect interruption tripped stale discard. Prompt safely cleared from teleprompter.</small>`;
+        } else if (data.prompt_result.status === 'skipped') {
+          promptEl.innerHTML = `<span style="color: var(--amber); font-weight: 600;">[PROMPT SUPPRESSED: ${data.prompt_result.strategic_action || 'HOLD/SILENCE'}]</span> Core instructed tactical silence; rep maintains composure.`;
+        } else {
+          promptEl.textContent = `"${data.prompt_result.text}"`;
+        }
+      }
+
+      const brevityBadge = document.getElementById('teleprompterBrevityBadge');
+      if (brevityBadge) {
+        brevityBadge.textContent = `Brevity: ${(data.prompt_result.brevity_mode || 'standard').toUpperCase()}`;
+      }
+      const wordCountEl = document.getElementById('teleprompterWordCount');
+      if (wordCountEl) {
+        const words = (data.prompt_result.text || '').trim().split(/\s+/).filter(Boolean).length;
+        wordCountEl.textContent = words + ' words';
+      }
+      const targetWpmEl = document.getElementById('teleprompterTargetWpm');
+      if (targetWpmEl) {
+        targetWpmEl.textContent = (data.prompt_result.target_wpm || 140) + ' WPM';
+      }
+      const stateVerEl = document.getElementById('teleprompterStateVer');
+      if (stateVerEl) {
+        stateVerEl.textContent = 'v' + data.prompt_result.state_version;
+      }
+      const latencyMsEl = document.getElementById('teleprompterLatencyMs');
+      if (latencyMsEl) {
+        const totalMs = data.prompt_result.latency_metrics?.total_ms || data.sim_latency_total_ms;
+        latencyMsEl.textContent = totalMs + ' ms';
+      }
       
       const sourceBadge = document.getElementById('teleprompterSourceBadge');
       if (sourceBadge) {
-        const isLlm = data.prompt_result.generation_source === 'llm';
+        const isLlm = data.prompt_result.generation_source === 'llm' || data.prompt_result.generation_source === 'llm_streamed';
         sourceBadge.textContent = isLlm ? 'Source: Groq Qwen-3.8-27B' : 'Source: Deterministic Verbalizer';
         sourceBadge.className = `badge-pill ${isLlm ? 'badge-purple' : 'badge-blue'}`;
       }
 
       const teleStatus = document.getElementById('teleprompterStatusBadge');
       teleStatus.textContent = 'Status: ' + data.prompt_result.status;
-      teleStatus.className = 'badge-pill ' + (data.prompt_result.status === 'generated' ? 'badge-green' : 'badge-red');
+      teleStatus.className = 'badge-pill ' + (data.prompt_result.status === 'generated' ? 'badge-green' : (data.prompt_result.status === 'stale_discarded' ? 'badge-red' : 'badge-yellow'));
 
       const scannerDetails = document.getElementById('hallucinationScannerDetails');
       const scannerBadge = document.getElementById('scannerBadge');
@@ -1957,6 +2067,11 @@
             <td>${candSummaryHtml}</td>
             <td>${factsSummaryHtml}</td>
             <td>
+              ${t.immediate_directive ? `
+                <div style="font-size: 10.5px; font-family: monospace; background: #f0fdfa; border: 1px solid var(--accent-border); padding: 3px 6px; border-radius: 4px; margin-bottom: 4px; color: var(--accent);">
+                  <b>T1:</b> ${t.immediate_directive}
+                </div>
+              ` : ''}
               <div style="font-size: 12px; color: var(--text); font-style: italic; margin-bottom: 4px;">"${t.teleprompter_line}"</div>
               ${t.raw_llm_output && t.raw_llm_output !== t.teleprompter_line ? `
                 <div style="font-size: 11px; color: var(--text-dim); margin-bottom: 4px; background: #f8fafc; border: 1px dashed var(--border); padding: 4px 6px; border-radius: 4px;">

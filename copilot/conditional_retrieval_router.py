@@ -114,6 +114,11 @@ class SimulationRequest(BaseModel):
     simulate_interruption: bool = False  # If True, increments state_version post-retrieval
     prospect_live_override: Optional[str] = None  # E.g. prospect says afternoon when doc says morning
     use_real_llm: bool = False
+    playbook_methodology: Optional[str] = "consultative"
+    brevity_mode: Optional[str] = "standard"
+    target_wpm: Optional[int] = 140
+    what_to_protect: Optional[List[str]] = None
+    do_not_do: Optional[List[str]] = None
 
 
 class MultiTurnScriptRequest(BaseModel):
@@ -829,9 +834,20 @@ def get_conditional_retrieval_router(
             source_state_version=req.state_version,
             strategic_objective=f"Execute {strat_action_enum.value.upper()} with consultative posture",
             primary_action=strat_action_enum,
+            what_to_protect=req.what_to_protect or [],
+            do_not_do=req.do_not_do or [],
             retrieval_needed=gate_passed,
             required_facts=[RequiredFactScope(topic=t, required_evidence_type="stats") for t in req.topic_tags[:2]],
         )
+
+        playbook_payload = {
+            "methodology": req.playbook_methodology or "consultative",
+            "id": f"pb_{req.playbook_methodology or 'consultative'}",
+        }
+        calibration_payload = {
+            "brevity_mode": req.brevity_mode or "standard",
+            "target_wpm": req.target_wpm or 140,
+        }
 
         recent_turns = [{"speaker": "prospect", "text": req.conversation_evidence}]
         if req.prospect_live_override:
@@ -843,6 +859,8 @@ def get_conditional_retrieval_router(
             snapshot=snapshot,
             retrieval_result=retrieval_result,
             recent_turns=recent_turns,
+            playbook=playbook_payload,
+            calibration=calibration_payload,
         )
 
         blocks_dict = {}
@@ -873,6 +891,8 @@ def get_conditional_retrieval_router(
             retrieval_result=retrieval_result,
             post_generation_state_version=post_gen_version,
             recent_turns=recent_turns,
+            playbook=playbook_payload,
+            calibration=calibration_payload,
             use_llm=req.use_real_llm,
         )
 
@@ -920,6 +940,17 @@ def get_conditional_retrieval_router(
                 "state_version": getattr(prompt, "source_state_version", req.state_version),
                 "is_stale_discarded": (prompt.status == "stale_discarded"),
                 "generation_source": getattr(prompt, "generation_source", "deterministic"),
+                "immediate_directive": getattr(prompt, "immediate_directive", None),
+                "strategic_action": getattr(prompt, "strategic_action", None),
+                "strategic_objective": getattr(prompt, "strategic_objective", None),
+                "strategic_posture": getattr(prompt, "strategic_posture", "explore"),
+                "push_strength": getattr(prompt, "push_strength", "0.5"),
+                "brevity_mode": getattr(prompt, "brevity_mode", None),
+                "target_wpm": getattr(prompt, "target_wpm", None),
+                "lineage": getattr(prompt, "lineage", None),
+                "latency_metrics": getattr(prompt, "latency_metrics", None),
+                "fallback_reason": getattr(prompt, "fallback_reason", None),
+                "raw_llm_output": getattr(prompt, "raw_llm_output", None),
             },
             "hallucination_scanner": {
                 "safe": (len(hallucination_violations) == 0),
@@ -1707,6 +1738,10 @@ def get_conditional_retrieval_router(
                 "withheld": withheld_info,
                 "facts_delivered": facts_info,
                 "teleprompter_line": prompt.text,
+                "immediate_directive": getattr(prompt, "immediate_directive", None),
+                "strategic_posture": getattr(prompt, "strategic_posture", "explore"),
+                "target_wpm": getattr(prompt, "target_wpm", None),
+                "brevity_mode": getattr(prompt, "brevity_mode", None),
                 "prompt_status": prompt.status,
                 "teleprompter_source": getattr(prompt, "generation_source", "deterministic"),
                 "generation_source": getattr(prompt, "generation_source", "deterministic"),
